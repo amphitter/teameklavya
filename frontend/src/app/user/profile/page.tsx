@@ -70,6 +70,8 @@ interface Ticket {
   createdAt: string;
 }
 
+export const dynamic = 'force-dynamic';
+
 export default function UserDashboard() {
   const router = useRouter();
   const searchParams = useSearchParams();

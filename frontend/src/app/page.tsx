@@ -128,7 +128,7 @@ export default function HomePage() {
     
     // If it's a relative path starting with /uploads, construct full URL
     if (imagePath.startsWith('/uploads')) {
-      const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const baseURL = process.env.NEXT_PUBLIC_API_URL || 'https://teameklavya.onrender.com';
       return `${baseURL}${imagePath}`;
     }
     

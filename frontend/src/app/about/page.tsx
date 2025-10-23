@@ -107,8 +107,26 @@ const teamMembers: TeamMember[] = [
       passion: "100%"
     }
   },
-  {
+   {
     id: 4,
+    name: "Ayush Kumar",
+    role: "UI/UX Designer",
+    image: "https://hackcraft20.vercel.app/ayush1.jpeg",
+    description: "Creating intuitive and beautiful user experiences that make technology accessible to everyone.",
+    socialLinks: {
+      instagram: "https://instagram.com/divyajangra",
+      linkedin: "https://linkedin.com/in/divyajangra"
+    },
+    skills: ["UI/UX", "Figma", "Prototyping", "Research"],
+    stats: {
+      projects: "25+",
+      experience: "2+ Years",
+      passion: "100%"
+    }
+  },
+ 
+  {
+    id: 5,
     name: "Divya Jangra",
     role: "UI/UX Designer",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Divya-Jangra.png`,
@@ -125,7 +143,7 @@ const teamMembers: TeamMember[] = [
     }
   },
   {
-    id: 5,
+    id: 6,
     name: "Hritik Kumar Singh",
     role: "Mobile Developer",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Hritik-Kumar-Singh.png`,
@@ -142,7 +160,7 @@ const teamMembers: TeamMember[] = [
     }
   },
   {
-    id: 6,
+    id: 7,
     name: "Kunal Biserwal",
     role: "DevOps Engineer",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Kunal-Biserwal.png`,
@@ -159,7 +177,7 @@ const teamMembers: TeamMember[] = [
     }
   },
   {
-    id: 7,
+    id: 8,
     name: "Luv Jangra",
     role: "Full Stack Developer",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Luv-Jangra.png`,
@@ -176,7 +194,7 @@ const teamMembers: TeamMember[] = [
     }
   },
   {
-    id: 8,
+    id: 9,
     name: "Manya Kanojia",
     role: "Product Manager",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Manya-Kanojia.png`,
@@ -192,7 +210,7 @@ const teamMembers: TeamMember[] = [
     }
   },
   {
-    id: 9,
+    id: 10,
     name: "Mohit",
     role: "Backend Developer",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Mohit.png`,
@@ -209,7 +227,7 @@ const teamMembers: TeamMember[] = [
     }
   },
   {
-    id: 10,
+    id: 11,
     name: "Vishnu Kumar",
     role: "Frontend Developer",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Vishnu-Kumar.png`,
@@ -224,6 +242,20 @@ const teamMembers: TeamMember[] = [
       experience: "2+ Years",
       passion: "100%"
     }
+  },
+  {
+    id: 12,
+    name: "Sahil",
+    role: "AI/ML Developer",
+    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Sahil.png`,
+    description: "Developing intelligent systems and machine learning models to solve complex problems.",
+    socialLinks: {
+      github: "https://github.com/sahilsh9220git"},
+    skills: ["Python", "TensorFlow", "Data Science", "AI"],
+    stats: {
+      projects: "22+",
+      experience: "2+ Years",
+      passion: "100%"}
   }
 ];
 

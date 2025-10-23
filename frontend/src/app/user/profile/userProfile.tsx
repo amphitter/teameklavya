@@ -580,15 +580,17 @@ function EventCard({ event, formatDate, delay = 0 }: any) {
   };
 
 const getImageUrl = (imagePath: string | undefined) => {
-  const BASE_URL = "http://localhost:5000"; // backend base URL
+  const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || ""; // backend base URL
 
   if (!imagePath) return '/api/placeholder/400/200';
 
   // if already a full URL, return as is
   if (imagePath.startsWith('http')) return imagePath;
 
-  // otherwise, append the path to backend URL
-  return `${BASE_URL}${imagePath}`;
+  // otherwise, append the path to backend URL safely (avoid double slashes)
+  const normalizedBase = BASE_URL === "" ? "" : (BASE_URL.endsWith('/') ? BASE_URL : `${BASE_URL}/`);
+  const normalizedPath = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+  return `${normalizedBase}${normalizedPath}`;
 };
 
 

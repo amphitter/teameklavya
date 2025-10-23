@@ -350,24 +350,6 @@ export default function EventsPage() {
         )}
 
         {/* Empty State when no events at all */}
-        {events.length === 0 && !loading && (
-          <div className="text-center py-16 animate-fade-in-up">
-            <div className="bg-white rounded-2xl p-12 border border-gray-200 shadow-sm max-w-md mx-auto">
-              <Calendar className="h-24 w-24 text-gray-400 mx-auto mb-6" />
-              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
-                No Events Available
-              </h3>
-              <p className="text-gray-600 mb-6">
-                We're working on some amazing events for you. Check back soon!
-              </p>
-              <Button asChild className="bg-blue-600 hover:bg-blue-700 text-white">
-                <Link href="/">
-                  Return Home
-                </Link>
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

@@ -402,15 +402,6 @@ function TeamSlider() {
                         {/* Gradient Overlay */}
                         <div className="absolute inset-0 bg-gradient-to-t from-blue-600/10 to-purple-600/10 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                         
-                        {/* Floating Elements */}
-                        <motion.div
-                          className="absolute -top-4 -right-4 bg-blue-600 text-white px-4 py-2 rounded-full text-sm font-semibold shadow-lg"
-                          initial={{ opacity: 0, scale: 0 }}
-                          whileInView={{ opacity: 1, scale: 1 }}
-                          transition={{ delay: 0.5, type: "spring" }}
-                        >
-                          {currentMember.id}/10
-                        </motion.div>
                       </div>
                     </div>
 
@@ -541,13 +532,6 @@ function TeamSlider() {
                 }`}
               />
             ))}
-          </div>
-
-          {/* Team Counter */}
-          <div className="text-center mt-6">
-            <span className="text-gray-600">
-              Showing {currentIndex + 1} of {teamMembers.length} team members
-            </span>
           </div>
         </div>
       </div>

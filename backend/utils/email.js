@@ -4,19 +4,12 @@ const path = require("path");
 
 // --- SMTP Transporter Configuration ---
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // Use STARTTLS
+  service: 'Gmail',
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS, // Use App Password if 2FA is enabled
-  },
-  tls: {
-    rejectUnauthorized: false, // Optional: may help with certain SSL/TLS issues
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
-
-
 
 // --- Verify Connection on Startup ---
 transporter.verify((error, success) => {

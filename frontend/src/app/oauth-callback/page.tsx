@@ -42,7 +42,7 @@ export default function OAuthCallback() {
       if (userRole === "admin") {
         router.push("/admin/dashboard");
       } else {
-        router.push("/user/dashboard");
+        router.push("/user/profile");
       }
 
     } catch (err) {

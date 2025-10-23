@@ -6,15 +6,16 @@ const path = require("path");
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT) || 465,
-  secure: Number(process.env.SMTP_PORT) === 465, // true for 465, false for others
+  secure: process.env.SMTP_SECURE === "true", // convert string from .env to boolean
   auth: {
-    user: process.env.SMTP_USER, // keep this consistent with 'from' address
+    user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
   tls: {
-    rejectUnauthorized: process.env.NODE_ENV === "production", // ignore certs in dev
+    rejectUnauthorized: false, // Gmail works fine even if this is false
   },
 });
+
 
 // --- Verify Connection on Startup ---
 transporter.verify((error, success) => {

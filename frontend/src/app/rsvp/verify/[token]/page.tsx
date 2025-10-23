@@ -28,6 +28,9 @@ interface VerificationResult {
   ticketGenerated?: boolean;
 }
 
+export const dynamic = 'force-dynamic';
+
+
 export default function RSVPVerificationPage() {
   const { token } = useParams();
   const router = useRouter();

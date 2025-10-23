@@ -833,67 +833,6 @@ export default function AboutPage() {
       {/* Team Slider Section */}
       <TeamSlider />
 
-      {/* Contact Info */}
-      <section className="py-20 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16 animate-fade-in-up">
-            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-              Get In <span className="text-blue-600">Touch</span>
-            </h2>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              Have questions or want to collaborate? We'd love to hear from you.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8 max-w-4xl mx-auto">
-            {[
-              {
-                icon: Mail,
-                title: "Email Us",
-                description: "iteameklavya@gmail.com",
-                link: "mailto:iteameklavya@gmail.com"
-              },
-              {
-                icon: MapPin,
-                title: "Location",
-                description: "India",
-                link: "#"
-              },
-              {
-                icon: Globe,
-                title: "Connect",
-                description: "Join our communities",
-                link: "/events"
-              }
-            ].map((contact, index) => (
-              <Card 
-                key={contact.title}
-                className="border-0 shadow-lg hover:shadow-xl transition-all duration-500 animate-fade-in-up bg-white text-center group"
-                style={{ animationDelay: `${index * 150}ms` }}
-              >
-                <CardHeader>
-                  <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4 group-hover:scale-110 transition-transform duration-300 mx-auto">
-                    <contact.icon className="h-8 w-8 text-blue-600" />
-                  </div>
-                  <CardTitle className="text-lg font-bold text-gray-900">
-                    {contact.title}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-gray-600 mb-4">
-                    {contact.description}
-                  </p>
-                  <Button variant="outline" asChild className="border-blue-600 text-blue-600 hover:bg-blue-50">
-                    <Link href={contact.link}>
-                      Contact Us
-                    </Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
 
       {/* CTA Section */}
       <section className="py-20 bg-gradient-to-r from-blue-600 to-purple-600 text-white">

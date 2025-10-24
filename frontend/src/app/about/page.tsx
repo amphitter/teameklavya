@@ -1,11 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "@/utils/api";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Users, 
@@ -17,19 +12,14 @@ import {
   BookOpen,
   Award,
   ArrowRight,
-  MapPin,
-  Mail,
-  Globe,
   Instagram, 
   Twitter, 
   Github, 
   Linkedin,
+  Sparkles,
+  Zap,
   ChevronLeft,
-  ChevronRight,
-  Play,
-  Pause,
-  Cpu,
-  Sparkles
+  ChevronRight
 } from "lucide-react";
 
 // Team Member Interface and Data
@@ -46,19 +36,26 @@ interface TeamMember {
     linkedin?: string;
   };
   skills: string[];
-  stats: {
-    projects: string;
-    experience: string;
-    passion: string;
-  };
 }
 
 const teamMembers: TeamMember[] = [
   {
+    id: 4,
+    name: "Ayush Kumar Jha",
+    role: "Founder",
+    image: "https://hackcraft20.vercel.app/ayush1.jpeg",
+    description: "Founder and core visionary, driving the team's mission, growth, and innovation roadmap.",
+    socialLinks: {
+      linkedin: "https://www.linkedin.com/in/ayush-kumar-chahar-a76175329/",
+      instagram: "https://www.instagram.com/lifepaletteadventures/"
+    },
+    skills: ["Leadership", "Vision", "Innovation", "Team Building"],
+  },
+  {
     id: 1,
     name: "Devansh Singh",
     role: "System Strategist & Outreach Lead",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Devansh.png`,
+    image: "/api/placeholder/400/500?text=Devansh&bg=3B82F6&color=ffffff",
     description: "Leads the team vision, technical roadmap, and overall execution strategy. Builds external relationships, represents the team, and manages collaborations.",
     socialLinks: {
       instagram: "https://www.instagram.com/amp.hitter/",
@@ -67,85 +64,12 @@ const teamMembers: TeamMember[] = [
       linkedin: "https://www.linkedin.com/in/devansh-singh-amphitter/"
     },
     skills: ["Leadership", "Strategy", "Full Stack", "AI/ML"],
-    stats: {
-      projects: "50+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
-  },
-  {
-    id: 2,
-    name: "Ansh Kumar",
-    role: "Communication & Participant Manager",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Ansh-Kumar.png`,
-    description: "Handles participant queries, manages internal and external communication during events.",
-    socialLinks: {
-      instagram: "https://www.instagram.com/extrovert_anshuu/",
-      linkedin: "https://www.linkedin.com/in/ansh-kumar-95a84a28a/"
-    },
-    skills: ["Communication", "Coordination", "Public Relations", "Event Management"],
-    stats: {
-      projects: "30+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
-  },
-  {
-    id: 3,
-    name: "Ayush",
-    role: "Media & Campaign Strategist",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Ayush.png`,
-    description: "Crafts digital strategies, runs campaigns, and coordinates with content teams.",
-    socialLinks: {
-      linkedin: "https://www.linkedin.com/in/ayush7989/",
-      instagram: "https://www.instagram.com/jat_.537/"
-    },
-    skills: ["Digital Strategy", "Social Media", "Marketing", "Content Coordination"],
-    stats: {
-      projects: "40+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
-  },
-  {
-    id: 4,
-    name: "Ayush Kumar Jha",
-    role: "Founder",
-    image: "https://hackcraft20.vercel.app/ayush1.jpeg",
-    description: "Founder and core visionary, driving the team’s mission, growth, and innovation roadmap.",
-    socialLinks: {
-      linkedin: "https://www.linkedin.com/in/ayush-kumar-chahar-a76175329/",
-      instagram: "https://www.instagram.com/lifepaletteadventures/"
-    },
-    skills: ["Leadership", "Vision", "Innovation", "Team Building"],
-    stats: {
-      projects: "25+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
-  },
-  {
-    id: 5,
-    name: "Divya Jangra",
-    role: "Program Coordinator & Registration Lead",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Divya-Jangra.png`,
-    description: "Oversees event structure, registration processes, data handling, and backend entry.",
-    socialLinks: {
-      instagram: "https://www.instagram.com/divyajangra12/",
-      linkedin: "https://www.linkedin.com/in/divya-801387297/"
-    },
-    skills: ["Coordination", "Registration", "Management", "Backend Support"],
-    stats: {
-      projects: "25+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
   },
   {
     id: 6,
     name: "Hritik Kumar Singh",
     role: "Technical Lead",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Hritik-Kumar-Singh.png`,
+    image: "/api/placeholder/400/500?text=Hritik&bg=10B981&color=ffffff",
     description: "Heads development, ensures smooth backend/frontend integration, and handles tech stack decisions.",
     socialLinks: {
       instagram: "https://www.instagram.com/lavish_khatkarya/",
@@ -153,102 +77,60 @@ const teamMembers: TeamMember[] = [
       linkedin: "https://linkedin.com/in/hritik"
     },
     skills: ["Full Stack", "Integration", "Architecture", "Leadership"],
-    stats: {
-      projects: "35+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
   },
   {
     id: 7,
     name: "Kunal Biserwal",
     role: "Operations & Discipline Lead",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Kunal-Biserwal.png`,
+    image: "/api/placeholder/400/500?text=Kunal&bg=EF4444&color=ffffff",
     description: "Manages live event coordination, internal protocols, and team logistics.",
     socialLinks: {
       instagram: "https://www.instagram.com/kunal_biserwal/",
       linkedin: "https://www.linkedin.com/in/kunal-biserwal-b2a70528a/"
     },
     skills: ["Operations", "Logistics", "Discipline", "Team Management"],
-    stats: {
-      projects: "20+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
-  },
-  {
-    id: 8,
-    name: "Luv Jangra",
-    role: "Tech Developer",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Luv-Jangra.png`,
-    description: "Leads development and integration, experimentation, and deployment of tech-related solutions.",
-    socialLinks: {
-      linkedin: "https://linkedin.com/in/luvjangra",
-      github: "https://github.com/luvjangra"
-    },
-    skills: ["MERN", "Python", "Development", "Deployment"],
-    stats: {
-      projects: "45+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
   },
   {
     id: 9,
     name: "Manya Kanojia",
     role: "Website Design & Content Producer",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Manya-Kanojia.png`,
+    image: "/api/placeholder/400/500?text=Manya&bg=8B5CF6&color=ffffff",
     description: "Captures event moments, creates digital content, and manages visual branding on social media.",
     socialLinks: {
       instagram: "https://www.instagram.com/_heymanya/",
       linkedin: "https://www.linkedin.com/in/manya-kanojia-7a0334290/"
     },
     skills: ["Design", "Content", "Branding", "Photography"],
-    stats: {
-      projects: "15+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
   },
   {
-    id: 10,
-    name: "Mohit",
-    role: "Tech Lead",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Mohit.png`,
-    description: "Leads backend and technical development, ensuring scalability and reliability.",
+    id: 8,
+    name: "Luv Jangra",
+    role: "Tech Developer",
+    image: "/api/placeholder/400/500?text=Luv&bg=F59E0B&color=ffffff",
+    description: "Leads development and integration, experimentation, and deployment of tech-related solutions.",
     socialLinks: {
-      linkedin: "https://linkedin.com/in/mohit",
-      github: "https://github.com/mohit"
+      linkedin: "https://linkedin.com/in/luvjangra",
+      github: "https://github.com/luvjangra"
     },
-    skills: ["Node.js", "Python", "Backend", "Scalability"],
-    stats: {
-      projects: "28+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
+    skills: ["MERN", "Python", "Development", "Deployment"],
   },
   {
     id: 11,
     name: "Vishnu Kumar",
     role: "Community Mentor & Strategic Advisor",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Vishnu-Kumar.png`,
+    image: "/api/placeholder/400/500?text=Vishnu&bg=EC4899&color=ffffff",
     description: "Guides the team, maintains key community ties, and plays a senior consultative role.",
     socialLinks: {
       linkedin: "https://linkedin.com/in/vishnu",
       github: "https://github.com/vishnu"
     },
     skills: ["Mentorship", "Strategy", "Community", "Leadership"],
-    stats: {
-      projects: "32+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
   },
   {
     id: 12,
     name: "Sahil",
     role: "AI/ML Developer",
-    image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Sahil.png`,
+    image: "/api/placeholder/400/500?text=Sahil&bg=06B6D4&color=ffffff",
     description: "Developing intelligent systems and machine learning models to solve complex problems.",
     socialLinks: {
       instagram: "https://www.instagram.com/_sahil__sh/",
@@ -256,11 +138,54 @@ const teamMembers: TeamMember[] = [
       github: "https://github.com/sahilsh9220git"
     },
     skills: ["Python", "TensorFlow", "Data Science", "AI"],
-    stats: {
-      projects: "22+",
-      experience: "2+ Years",
-      passion: "100%"
-    }
+  },
+  {
+    id: 2,
+    name: "Ansh Kumar",
+    role: "Communication & Participant Manager",
+    image: "/api/placeholder/400/500?text=Ansh&bg=84CC16&color=ffffff",
+    description: "Handles participant queries, manages internal and external communication during events.",
+    socialLinks: {
+      instagram: "https://www.instagram.com/extrovert_anshuu/",
+      linkedin: "https://www.linkedin.com/in/ansh-kumar-95a84a28a/"
+    },
+    skills: ["Communication", "Coordination", "Public Relations", "Event Management"],
+  },
+  {
+    id: 3,
+    name: "Ayush",
+    role: "Media & Campaign Strategist",
+    image: "/api/placeholder/400/500?text=Ayush&bg=6366F1&color=ffffff",
+    description: "Crafts digital strategies, runs campaigns, and coordinates with content teams.",
+    socialLinks: {
+      linkedin: "https://www.linkedin.com/in/ayush7989/",
+      instagram: "https://www.instagram.com/jat_.537/"
+    },
+    skills: ["Digital Strategy", "Social Media", "Marketing", "Content Coordination"],
+  },
+  {
+    id: 5,
+    name: "Divya Jangra",
+    role: "Program Coordinator & Registration Lead",
+    image: "/api/placeholder/400/500?text=Divya&bg=F97316&color=ffffff",
+    description: "Oversees event structure, registration processes, data handling, and backend entry.",
+    socialLinks: {
+      instagram: "https://www.instagram.com/divyajangra12/",
+      linkedin: "https://www.linkedin.com/in/divya-801387297/"
+    },
+    skills: ["Coordination", "Registration", "Management", "Backend Support"],
+  },
+  {
+    id: 10,
+    name: "Mohit",
+    role: "Tech Lead",
+    image: "/api/placeholder/400/500?text=Mohit&bg=14B8A6&color=ffffff",
+    description: "Leads backend and technical development, ensuring scalability and reliability.",
+    socialLinks: {
+      linkedin: "https://linkedin.com/in/mohit",
+      github: "https://github.com/mohit"
+    },
+    skills: ["Node.js", "Python", "Backend", "Scalability"],
   },
   {
     id: 13,
@@ -273,14 +198,8 @@ const teamMembers: TeamMember[] = [
       linkedin: "https://www.linkedin.com/in/pritika-49748b31a/"
     },
     skills: ["UI/UX", "Creative Direction", "Design", "Branding"],
-    stats: {
-      projects: "27+",
-      experience: "3+ Years",
-      passion: "100%"
-    }
   }
 ];
-
 
 const socialIcons = {
   instagram: Instagram,
@@ -289,564 +208,739 @@ const socialIcons = {
   linkedin: Linkedin
 };
 
-const socialColors = {
-  instagram: "hover:bg-pink-500 hover:border-pink-500",
-  twitter: "hover:bg-black hover:border-black",
-  github: "hover:bg-gray-900 hover:border-gray-900",
-  linkedin: "hover:bg-blue-600 hover:border-blue-600"
+// Enhanced Image component with better error handling
+const TeamImage = ({ src, alt, className }: { src: string; alt: string; className: string }) => {
+  const [imageError, setImageError] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
+
+  // Generate initials for placeholder
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  // Generate a consistent color based on name
+  const getColorFromName = (name: string) => {
+    const colors = [
+      'from-blue-500 to-blue-600', 
+      'from-green-500 to-green-600', 
+      'from-purple-500 to-purple-600', 
+      'from-red-500 to-red-600',
+      'from-yellow-500 to-yellow-600', 
+      'from-pink-500 to-pink-600', 
+      'from-indigo-500 to-indigo-600', 
+      'from-teal-500 to-teal-600'
+    ];
+    const index = name.length % colors.length;
+    return colors[index];
+  };
+
+  return (
+    <div className="relative">
+      {imageLoading && (
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-300 animate-pulse rounded-lg flex items-center justify-center">
+          <div className={`w-full h-full bg-gradient-to-br ${getColorFromName(alt)} rounded-lg flex items-center justify-center`}>
+            <span className="text-white font-bold text-2xl">
+              {getInitials(alt)}
+            </span>
+          </div>
+        </div>
+      )}
+      <img
+        src={src}
+        alt={alt}
+        className={`${className} ${imageLoading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-300`}
+        onError={() => {
+          setImageError(true);
+          setImageLoading(false);
+        }}
+        onLoad={() => setImageLoading(false)}
+        loading="lazy"
+        decoding="async"
+      />
+      {imageError && (
+        <div className={`absolute inset-0 bg-gradient-to-br ${getColorFromName(alt)} rounded-lg flex items-center justify-center`}>
+          <span className="text-white font-bold text-2xl">
+            {getInitials(alt)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Team Card Component for Slider
+const TeamCard = ({ 
+  member, 
+  isActive = false 
+}: { 
+  member: TeamMember;
+  isActive?: boolean;
+}) => {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: isActive ? 1 : 0.7, scale: isActive ? 1 : 0.95 }}
+      transition={{ duration: 0.3 }}
+      className={`relative bg-white rounded-2xl overflow-hidden shadow-lg transition-all duration-500 border border-gray-100 h-full flex flex-col ${
+        isActive ? 'shadow-2xl transform scale-100' : 'shadow-md transform scale-95'
+      }`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* Image Container */}
+      <div className="relative h-72 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-50 flex-shrink-0">
+        <TeamImage
+          src={member.image}
+          alt={member.name}
+          className="w-full h-full object-cover object-center transition-transform duration-700 hover:scale-110"
+        />
+        
+        {/* Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-500" />
+        
+        {/* Social Links Overlay */}
+        <div className={`absolute bottom-4 left-0 right-0 flex justify-center gap-3 transition-all duration-500 ${
+          hovered ? 'translate-y-0 opacity-100' : 'translate-y-12 opacity-0'
+        }`}>
+          {Object.entries(member.socialLinks).map(([platform, url]) => {
+            const IconComponent = socialIcons[platform as keyof typeof socialIcons];
+            return (
+              <a
+                key={platform}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-10 h-10 bg-white/95 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-blue-600 hover:scale-110 transition-all duration-300 shadow-lg"
+                aria-label={`Visit ${member.name}'s ${platform}`}
+              >
+                <IconComponent className="h-4 w-4 text-gray-700 hover:text-white transition-colors" />
+              </a>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="p-6 flex-grow flex flex-col">
+        <h3 className="text-xl font-bold text-gray-900 mb-1 hover:text-blue-600 transition-colors duration-300 line-clamp-1">
+          {member.name}
+        </h3>
+        <p className="text-sm font-medium text-blue-600 mb-3 line-clamp-1">
+          {member.role}
+        </p>
+        <p className="text-sm text-gray-600 leading-relaxed mb-4 line-clamp-3 flex-grow">
+          {member.description}
+        </p>
+        
+        {/* Skills Tags */}
+        <div className="flex flex-wrap gap-2">
+          {member.skills.slice(0, 3).map((skill) => (
+            <span
+              key={skill}
+              className="px-3 py-1 bg-gray-50 text-gray-700 text-xs font-medium rounded-full border border-gray-200 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 transition-colors duration-300"
+            >
+              {skill}
+            </span>
+          ))}
+          {member.skills.length > 3 && (
+            <span className="px-3 py-1 bg-gray-50 text-gray-500 text-xs font-medium rounded-full border border-gray-200">
+              +{member.skills.length - 3}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Active State Border */}
+      {isActive && (
+        <div className="absolute inset-0 rounded-2xl border-2 border-blue-600 pointer-events-none" />
+      )}
+    </motion.div>
+  );
 };
 
 // Team Slider Component
-function TeamSlider() {
+const TeamSlider = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isAutoPlaying, setIsAutoPlaying] = useState(true);
-  const [direction, setDirection] = useState(0);
+  const [autoPlay, setAutoPlay] = useState(true);
+  const [cardsToShow, setCardsToShow] = useState(4);
 
-  // Auto-slide functionality
+  // Calculate cards to show based on screen size
+  const getCardsToShow = () => {
+    if (typeof window === 'undefined') return 4;
+    const width = window.innerWidth;
+    if (width < 640) return 1;
+    if (width < 768) return 2;
+    if (width < 1024) return 3;
+    return 4;
+  };
+
   useEffect(() => {
-    if (!isAutoPlaying) return;
+    const handleResize = () => {
+      setCardsToShow(getCardsToShow());
+      // Reset to first slide on resize to avoid empty slides
+      setCurrentIndex(0);
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Auto-play functionality
+  useEffect(() => {
+    if (!autoPlay) return;
 
     const interval = setInterval(() => {
-      setDirection(1);
-      setCurrentIndex((prev) => (prev + 1) % teamMembers.length);
-    }, 5000); // Change every 5 seconds
+      setCurrentIndex((prev) => 
+        (prev + 1) % Math.ceil(teamMembers.length / cardsToShow)
+      );
+    }, 4000);
 
     return () => clearInterval(interval);
-  }, [isAutoPlaying]);
+  }, [autoPlay, cardsToShow]);
 
-  const nextSlide = () => {
-    setDirection(1);
-    setCurrentIndex((prev) => (prev + 1) % teamMembers.length);
-  };
+  const nextSlide = useCallback(() => {
+    setCurrentIndex((prev) => 
+      (prev + 1) % Math.ceil(teamMembers.length / cardsToShow)
+    );
+    setAutoPlay(false);
+    setTimeout(() => setAutoPlay(true), 10000);
+  }, [cardsToShow]);
 
-  const prevSlide = () => {
-    setDirection(-1);
-    setCurrentIndex((prev) => (prev - 1 + teamMembers.length) % teamMembers.length);
-  };
+  const prevSlide = useCallback(() => {
+    setCurrentIndex((prev) => 
+      (prev - 1 + Math.ceil(teamMembers.length / cardsToShow)) % Math.ceil(teamMembers.length / cardsToShow)
+    );
+    setAutoPlay(false);
+    setTimeout(() => setAutoPlay(true), 10000);
+  }, [cardsToShow]);
 
   const goToSlide = (index: number) => {
-    setDirection(index > currentIndex ? 1 : -1);
     setCurrentIndex(index);
+    setAutoPlay(false);
+    setTimeout(() => setAutoPlay(true), 10000);
   };
 
-  const toggleAutoPlay = () => {
-    setIsAutoPlaying(!isAutoPlaying);
+  // Get current slide members
+  const getCurrentSlideMembers = () => {
+    const start = currentIndex * cardsToShow;
+    return teamMembers.slice(start, start + cardsToShow);
   };
 
-  const currentMember = teamMembers[currentIndex];
+  const totalSlides = Math.ceil(teamMembers.length / cardsToShow);
+  const currentMembers = getCurrentSlideMembers();
 
   return (
-    <section className="py-20 bg-gradient-to-br from-blue-50 to-indigo-100">
-      <div className="max-w-7xl mx-auto px-6">
+    <section className="py-24 bg-white relative overflow-hidden">
+      {/* Background Decoration */}
+      <div className="absolute inset-0 bg-gradient-to-b from-gray-50/50 to-white pointer-events-none" />
+      
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
           transition={{ duration: 0.6 }}
           className="text-center mb-16"
         >
-          <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-            Meet Our <span className="text-blue-600">Team</span>
+          <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-full mb-6 font-medium">
+            <Sparkles className="h-4 w-4" />
+            <span>Our Team</span>
+          </div>
+          <h2 className="text-4xl sm:text-5xl md:text-6xl font-bold text-gray-900 mb-6">
+            Meet the <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Innovators</span>
           </h2>
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Passionate developers, designers, and innovators building the future with cutting-edge technology
+          <p className="text-lg sm:text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
+            Passionate minds working together to build the future of technology
           </p>
         </motion.div>
 
         {/* Slider Container */}
         <div className="relative">
-          {/* Auto-play Toggle */}
+          {/* Navigation Buttons */}
           <button
-            onClick={toggleAutoPlay}
-            className="absolute top-4 right-4 z-20 bg-white/80 backdrop-blur-sm rounded-full p-3 shadow-2xl border border-gray-200 hover:bg-white transition-all duration-300"
+            onClick={prevSlide}
+            className="absolute left-4 top-1/2 -translate-y-1/2 z-20 w-12 h-12 bg-white/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center hover:bg-white hover:scale-110 transition-all duration-300 border border-gray-200"
+            aria-label="Previous slide"
           >
-            {isAutoPlaying ? (
-              <Pause className="h-5 w-5 text-gray-700" />
-            ) : (
-              <Play className="h-5 w-5 text-gray-700" />
-            )}
+            <ChevronLeft className="h-6 w-6 text-gray-700" />
           </button>
 
-          {/* Main Card */}
-          <div className="relative h-[600px]">
-            <AnimatePresence mode="wait" custom={direction}>
-              <motion.div
-                key={currentMember.id}
-                custom={direction}
-                initial={{ 
-                  opacity: 0,
-                  x: direction > 0 ? 300 : -300 
-                }}
-                animate={{ 
-                  opacity: 1,
-                  x: 0 
-                }}
-                exit={{ 
-                  opacity: 0,
-                  x: direction > 0 ? -300 : 300 
-                }}
-                transition={{ 
-                  type: "spring", 
-                  stiffness: 300, 
-                  damping: 30 
-                }}
-                className="absolute inset-0"
-              >
-                <Card className="border-0 shadow-2xl overflow-hidden bg-white/80 backdrop-blur-sm h-full">
-                  <div className="flex flex-col lg:flex-row items-center justify-between p-8 md:p-12 h-full">
-                    {/* Image Section */}
-                    <div className="flex-shrink-0 mb-8 lg:mb-0 lg:mr-12 relative group">
-                      <div className="relative">
-                        <motion.img
-                          src={currentMember.image}
-                          alt={currentMember.name}
-                          className="w-72 h-72 object-cover rounded-2xl shadow-2xl group-hover:shadow-3xl transition-all duration-500 border-8 border-white"
-                          whileHover={{ scale: 1.05 }}
-                          transition={{ type: "spring", stiffness: 300 }}
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = '/api/placeholder/300/300';
-                          }}
-                        />
-                        {/* Gradient Overlay */}
-                        <div className="absolute inset-0 bg-gradient-to-t from-blue-600/10 to-purple-600/10 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                        
-                      </div>
-                    </div>
+          <button
+            onClick={nextSlide}
+            className="absolute right-4 top-1/2 -translate-y-1/2 z-20 w-12 h-12 bg-white/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center hover:bg-white hover:scale-110 transition-all duration-300 border border-gray-200"
+            aria-label="Next slide"
+          >
+            <ChevronRight className="h-6 w-6 text-gray-700" />
+          </button>
 
-                    {/* Content Section */}
-                    <div className="flex-1 text-center lg:text-left max-w-2xl">
-                      {/* Name and Role */}
-                      <div className="mb-6">
-                        <motion.h3 
-                          className="text-4xl md:text-5xl font-bold mb-4 text-gray-900"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.2 }}
-                        >
-                          {currentMember.name.split(' ')[0]}{" "}
-                          <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                            {currentMember.name.split(' ').slice(1).join(' ')}
-                          </span>
-                        </motion.h3>
-                        
-                        <motion.p 
-                          className="text-lg text-blue-600 font-semibold mb-4"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.3 }}
-                        >
-                          {currentMember.role}
-                        </motion.p>
-                        
-                        <motion.p 
-                          className="text-lg text-gray-600 mb-6 leading-relaxed"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.4 }}
-                        >
-                          {currentMember.description}
-                        </motion.p>
-                      </div>
-
-                      {/* Skills Grid */}
-                      <motion.div 
-                        className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8"
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.5 }}
-                      >
-                        {currentMember.skills.map((skill, index) => (
-                          <motion.div
-                            key={skill}
-                            className="flex items-center justify-center lg:justify-start p-3 bg-white rounded-xl shadow-md border border-gray-100"
-                            whileHover={{ scale: 1.05, y: -2 }}
-                            transition={{ type: "spring", stiffness: 300 }}
-                          >
-                            <span className="text-sm font-medium text-gray-700 text-center">{skill}</span>
-                          </motion.div>
-                        ))}
-                      </motion.div>
-
-                      {/* Social Links */}
-                      <motion.div 
-                        className="flex flex-col sm:flex-row items-center justify-between gap-6"
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.6 }}
-                      >
-                        <div className="flex justify-center lg:justify-start space-x-3">
-                          {Object.entries(currentMember.socialLinks).map(([platform, url]) => {
-                            const IconComponent = socialIcons[platform as keyof typeof socialIcons];
-                            const colorClass = socialColors[platform as keyof typeof socialColors];
-                            return (
-                              <motion.a
-                                key={platform}
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={`group p-3 bg-white border-2 border-gray-200 rounded-xl shadow-md transition-all duration-300 hover:shadow-lg ${colorClass}`}
-                                whileHover={{ scale: 1.1, y: -2 }}
-                                whileTap={{ scale: 0.95 }}
-                              >
-                                <IconComponent className="h-5 w-5 text-gray-600 transition-colors duration-300 group-hover:text-white" />
-                              </motion.a>
-                            );
-                          })}
-                        </div>
-
-                        {/* CTA Button */}
-                        <Button 
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg transition-all duration-300 hover:scale-105 group"
-                          asChild
-                        >
-                          <a href={currentMember.socialLinks.github || "#"} target="_blank" rel="noopener noreferrer">
-                            View Profile
-                            <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform duration-300" />
-                          </a>
-                        </Button>
-                      </motion.div>
-
-                      {/* Stats */}
-                      <motion.div 
-                        className="grid grid-cols-3 gap-6 mt-8 pt-8 border-t border-gray-200"
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.7 }}
-                      >
-                        {Object.entries(currentMember.stats).map(([key, value]) => (
-                          <div key={key} className="text-center lg:text-left">
-                            <div className="text-2xl font-bold text-gray-900 mb-1">{value}</div>
-                            <div className="text-sm text-gray-600 capitalize">{key}</div>
-                          </div>
-                        ))}
-                      </motion.div>
-                    </div>
-                  </div>
-                </Card>
-              </motion.div>
-            </AnimatePresence>
+          {/* Slides */}
+          <div className="overflow-hidden px-4">
+            <motion.div
+              key={currentIndex}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5 }}
+              className={`grid gap-6 ${
+                cardsToShow === 1 ? 'grid-cols-1 max-w-sm mx-auto' :
+                cardsToShow === 2 ? 'grid-cols-2 max-w-4xl mx-auto' :
+                cardsToShow === 3 ? 'grid-cols-3' : 'grid-cols-4'
+              }`}
+            >
+              {currentMembers.map((member) => (
+                <TeamCard
+                  key={`${member.id}-${currentIndex}`}
+                  member={member}
+                  isActive={true}
+                />
+              ))}
+            </motion.div>
           </div>
 
-          {/* Navigation Dots */}
-          
+          {/* Dots Indicator */}
+          {totalSlides > 1 && (
+            <div className="flex justify-center mt-12 gap-3">
+              {Array.from({ length: totalSlides }).map((_, index) => (
+                <button
+                  key={index}
+                  onClick={() => goToSlide(index)}
+                  className={`w-3 h-3 rounded-full transition-all duration-300 ${
+                    index === currentIndex 
+                      ? 'bg-blue-600 w-8' 
+                      : 'bg-gray-300 hover:bg-gray-400'
+                  }`}
+                  aria-label={`Go to slide ${index + 1}`}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </section>
   );
-}
+};
+
+// Stats Component
+const StatsSection = ({ stats }: { stats: { members: number; events: number; Groups: number; communities: number } }) => {
+  const statItems = useMemo(() => [
+    { icon: Users, label: "Members", value: stats.members, suffix: "+" },
+    { icon: Calendar, label: "Events", value: stats.events, suffix: "+" },
+    { icon: Code, label: "Projects", value: stats.Groups, suffix: "+" },
+    { icon: Award, label: "Communities", value: stats.communities, suffix: "" }
+  ], [stats]);
+
+  return (
+    <section className="py-20 bg-white relative">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
+          {statItems.map((stat, index) => (
+            <motion.div
+              key={stat.label}
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: index * 0.1 }}
+              className="text-center group"
+            >
+              <div className="relative inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 mb-4 sm:mb-6">
+                <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-purple-500 rounded-2xl opacity-10 group-hover:opacity-20 transition-opacity duration-300" />
+                <stat.icon className="relative h-8 w-8 sm:h-10 sm:w-10 text-blue-600 group-hover:scale-110 transition-transform duration-300" />
+              </div>
+              <div className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 mb-2">
+                {stat.value}{stat.suffix}
+              </div>
+              <p className="text-gray-600 font-medium text-sm sm:text-lg">{stat.label}</p>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+};
 
 // Main About Page Component
 export default function AboutPage() {
-  const [stats, setStats] = useState({
+  const [stats] = useState({
     members: 900,
-    events: 0,
+    events: 15,
     Groups: 4,
     communities: 3
   });
-  const [loading, setLoading] = useState(true);
 
-  const values = [
+  const values = useMemo(() => [
     {
       icon: Users,
       title: "Community First",
-      description: "We believe in the power of community to drive innovation and learning through collaboration."
+      description: "We believe in the power of community to drive innovation and learning through collaboration.",
+      gradient: "from-blue-500 to-cyan-500"
     },
     {
       icon: Target,
       title: "Excellence",
-      description: "Striving for excellence in everything we do, from workshops to hackathons and beyond."
+      description: "Striving for excellence in everything we do, from workshops to hackathons and beyond.",
+      gradient: "from-purple-500 to-pink-500"
     },
     {
       icon: Heart,
       title: "Passion",
-      description: "Driven by our passion for technology and making a positive impact in the world."
+      description: "Driven by our passion for technology and making a positive impact in the world.",
+      gradient: "from-red-500 to-orange-500"
     },
     {
       icon: Rocket,
       title: "Innovation",
-      description: "Constantly pushing boundaries and exploring new technologies and methodologies."
+      description: "Constantly pushing boundaries and exploring new technologies and methodologies.",
+      gradient: "from-green-500 to-teal-500"
     }
-  ];
+  ], []);
 
-  const activities = [
+  const activities = useMemo(() => [
     {
       icon: Code,
       title: "Hackathons",
       description: "Regular coding competitions to solve real-world problems and build innovative solutions.",
-      color: "text-blue-600"
+      gradient: "from-blue-500 to-cyan-500"
     },
     {
       icon: BookOpen,
       title: "Workshops",
       description: "Hands-on learning sessions on cutting-edge technologies and development practices.",
-      color: "text-green-600"
+      gradient: "from-green-500 to-emerald-500"
     },
     {
       icon: Users,
       title: "Seminars",
       description: "Expert talks and knowledge-sharing sessions with industry professionals and alumni.",
-      color: "text-purple-600"
+      gradient: "from-purple-500 to-violet-500"
     },
     {
       icon: Calendar,
       title: "Meetups",
       description: "Community gatherings to network, collaborate, and share ideas with like-minded peers.",
-      color: "text-orange-600"
+      gradient: "from-orange-500 to-red-500"
     }
-  ];
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        
-        // Fetch events count
-        const eventsRes = await api.get("/events");
-        const eventsData = eventsRes.data.events || [];
-        
-        setStats(prev => ({
-          ...prev,
-          events: eventsData.length
-        }));
-        
-      } catch (err) {
-        console.error("Failed to fetch data:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
+  ], []);
 
   return (
     <div className="min-h-screen bg-white">
       {/* Hero Section */}
-      <section className="relative py-20 bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="max-w-7xl mx-auto px-6">
+      <section className="relative py-20 md:py-32 overflow-hidden">
+        {/* Optimized Background Animation */}
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-white to-purple-50" />
+        <div className="absolute inset-0 opacity-30">
+          <div className="absolute top-20 left-10 w-48 h-48 sm:w-72 sm:h-72 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl animate-blob" />
+          <div className="absolute top-40 right-10 w-48 h-48 sm:w-72 sm:h-72 bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000" />
+          <div className="absolute bottom-20 left-1/2 w-48 h-48 sm:w-72 sm:h-72 bg-pink-400 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000" />
+        </div>
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10">
           <div className="text-center max-w-4xl mx-auto">
-            <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight text-gray-900 animate-fade-in-up">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5 }}
+              className="inline-flex items-center gap-2 bg-white/80 backdrop-blur-sm text-blue-600 px-4 py-2 sm:px-6 sm:py-3 rounded-full mb-6 sm:mb-8 font-medium shadow-lg border border-blue-100"
+            >
+              <Zap className="h-4 w-4 sm:h-5 sm:w-5" />
+              <span className="text-sm sm:text-base">Building the Future Together</span>
+            </motion.div>
+
+            <motion.h1
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+              className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold mb-6 sm:mb-8 leading-tight text-gray-900"
+            >
               About{" "}
-              <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
                 Team Eklavya
               </span>
-            </h1>
-            <p className="text-xl md:text-2xl text-gray-700 mb-8 leading-relaxed animate-fade-in-up delay-200">
+            </motion.h1>
+
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              className="text-lg sm:text-xl md:text-2xl text-gray-600 mb-8 sm:mb-12 leading-relaxed"
+            >
               A vibrant community of students, coders, and tech enthusiasts passionate about 
               learning, collaborating, and building innovative projects that shape the future.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center animate-fade-in-up delay-300">
-              <Button 
-                size="lg" 
-                className="bg-blue-600 text-white hover:bg-blue-700 px-8 py-3 text-lg font-semibold rounded-full shadow-xl transition-all duration-300 hover:scale-105 border-0"
-                asChild
-              >
-                <Link href="/events">
+            </motion.p>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+              className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center"
+            >
+              <button className="group relative px-6 py-3 sm:px-8 sm:py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-full overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105 text-sm sm:text-base">
+                <span className="relative z-10 flex items-center justify-center gap-2">
                   Join Our Events
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Link>
-              </Button>
-              <Button 
-                variant="outline" 
-                size="lg"
-                className="border-blue-600 text-blue-600 hover:bg-blue-50 px-8 py-3 text-lg font-semibold rounded-full transition-all duration-300 hover:scale-105"
-                asChild
-              >
-                <Link href="/contact">
-                  Get In Touch
-                </Link>
-              </Button>
-            </div>
+                  <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 group-hover:translate-x-1 transition-transform" />
+                </span>
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-pink-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              </button>
+
+              <button className="px-6 py-3 sm:px-8 sm:py-4 bg-white text-gray-900 font-semibold rounded-full border-2 border-gray-200 hover:border-blue-600 hover:text-blue-600 transition-all duration-300 hover:scale-105 shadow-lg text-sm sm:text-base">
+                Get In Touch
+              </button>
+            </motion.div>
           </div>
         </div>
       </section>
 
       {/* Stats Section */}
-      <section className="py-16 bg-white">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {[
-              { icon: Users, label: "Members", value: stats.members },
-              { icon: Calendar, label: "Events", value: stats.events },
-              { icon: Code, label: "Projects", value: stats.Groups },
-              { icon: Award, label: "Communities", value: stats.communities }
-            ].map((stat, index) => (
-              <div 
-                key={stat.label}
-                className="text-center group animate-fade-in-up"
-                style={{ animationDelay: `${index * 100}ms` }}
-              >
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4 group-hover:scale-110 transition-transform duration-300">
-                  <stat.icon className="h-8 w-8 text-blue-600" />
-                </div>
-                <div className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
-                  {loading ? (
-                    <Skeleton className="h-8 w-16 mx-auto" />
-                  ) : (
-                    <>
-                      {stat.value}
-                      {stat.label === "Members" && "+"}
-                    </>
-                  )}
-                </div>
-                <p className="text-gray-600 font-medium">{stat.label}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <StatsSection stats={stats} />
 
       {/* Mission & Vision */}
-      <section className="py-20 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div className="animate-fade-in-up">
-              <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
-                Our <span className="text-blue-600">Mission</span>
+      <section className="py-16 md:py-24 bg-gradient-to-b from-white to-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="grid lg:grid-cols-2 gap-12 md:gap-16 items-center">
+            <motion.div
+              initial={{ opacity: 0, x: -30 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6 }}
+            >
+              <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-full mb-6 font-medium">
+                <Target className="h-4 w-4" />
+                <span>Our Mission</span>
+              </div>
+              <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 mb-6">
+                Empowering the <span className="text-blue-600">Next Generation</span>
               </h2>
-              <p className="text-lg text-gray-700 mb-6 leading-relaxed">
+              <p className="text-base sm:text-lg text-gray-600 mb-6 leading-relaxed">
                 To create a thriving ecosystem where students can learn, innovate, and grow together. 
                 We empower the next generation of tech leaders through hands-on experiences, mentorship, 
                 and collaborative projects.
               </p>
-              <p className="text-lg text-gray-700 mb-8 leading-relaxed">
+              <p className="text-base sm:text-lg text-gray-600 mb-8 leading-relaxed">
                 Team Eklavya is more than just a community - it's a movement dedicated to fostering 
                 innovation, creativity, and technical excellence among students and tech enthusiasts.
               </p>
-              <Button asChild className="bg-blue-600 hover:bg-blue-700">
-                <Link href="/events">
-                  Explore Our Work
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
-              </Button>
-            </div>
-            <div className="animate-fade-in-up delay-200">
-              <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-8 text-white shadow-2xl">
-                <h3 className="text-2xl md:text-3xl font-bold mb-4">Our Vision</h3>
-                <p className="text-lg text-blue-100 leading-relaxed">
-                  To be the premier student-led community that bridges the gap between academic learning 
-                  and real-world technological innovation, creating opportunities for every member to 
-                  excel and make meaningful contributions to the tech industry.
-                </p>
+              <button className="group inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-full hover:bg-blue-700 transition-all duration-300 hover:scale-105 shadow-lg text-sm sm:text-base">
+                Explore Our Work
+                <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+              </button>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, x: 30 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6 }}
+              className="relative"
+            >
+              <div className="relative bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 rounded-3xl p-8 md:p-12 text-white shadow-2xl overflow-hidden">
+                <div className="absolute top-0 right-0 w-48 h-48 md:w-64 md:h-64 bg-white/10 rounded-full blur-3xl" />
+                <div className="absolute bottom-0 left-0 w-48 h-48 md:w-64 md:h-64 bg-white/10 rounded-full blur-3xl" />
+                
+                <div className="relative z-10">
+                  <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full mb-6 font-medium">
+                    <Rocket className="h-4 w-4" />
+                    <span>Our Vision</span>
+                  </div>
+                  <h3 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-6">
+                    Leading Innovation in Education
+                  </h3>
+                  <p className="text-base md:text-lg text-white/90 leading-relaxed">
+                    To be the premier student-led community that bridges the gap between academic learning 
+                    and real-world technological innovation, creating opportunities for every member to 
+                    excel and make meaningful contributions to the tech industry.
+                  </p>
+                </div>
               </div>
-            </div>
+            </motion.div>
           </div>
         </div>
       </section>
 
       {/* Values Section */}
-      <section className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16 animate-fade-in-up">
-            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-              Our <span className="text-blue-600">Values</span>
+      <section className="py-16 md:py-24 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+            className="text-center mb-12 md:mb-16"
+          >
+            <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-full mb-6 font-medium">
+              <Heart className="h-4 w-4" />
+              <span>Our Values</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 mb-6">
+              What We <span className="text-blue-600">Stand For</span>
             </h2>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            <p className="text-lg sm:text-xl text-gray-600 max-w-2xl mx-auto">
               The principles that guide everything we do and every community we build.
             </p>
-          </div>
+          </motion.div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
             {values.map((value, index) => (
-              <Card 
+              <motion.div
                 key={value.title}
-                className="border-0 shadow-lg hover:shadow-2xl transition-all duration-500 animate-fade-in-up bg-white group"
-                style={{ animationDelay: `${index * 150}ms` }}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: index * 0.1 }}
+                className="group relative"
               >
-                <CardHeader className="text-center pb-4">
-                  <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4 group-hover:scale-110 transition-transform duration-300 mx-auto">
-                    <value.icon className="h-8 w-8 text-blue-600" />
+                <div className="relative bg-white rounded-2xl p-6 md:p-8 shadow-lg hover:shadow-2xl transition-all duration-500 border border-gray-100 overflow-hidden h-full">
+                  <div className={`absolute inset-0 bg-gradient-to-br ${value.gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-500`} />
+                  
+                  <div className="relative z-10">
+                    <div className={`inline-flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br ${value.gradient} mb-6 group-hover:scale-110 transition-transform duration-300 shadow-lg`}>
+                      <value.icon className="h-6 w-6 md:h-8 md:w-8 text-white" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-4 group-hover:text-blue-600 transition-colors duration-300">
+                      {value.title}
+                    </h3>
+                    <p className="text-gray-600 leading-relaxed text-sm md:text-base">
+                      {value.description}
+                    </p>
                   </div>
-                  <CardTitle className="text-xl font-bold text-gray-900 group-hover:text-blue-600 transition-colors duration-300">
-                    {value.title}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-gray-600 text-center leading-relaxed">
-                    {value.description}
-                  </p>
-                </CardContent>
-              </Card>
+                </div>
+              </motion.div>
             ))}
           </div>
         </div>
       </section>
 
       {/* Activities Section */}
-      <section className="py-20 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16 animate-fade-in-up">
-            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-              What We <span className="text-blue-600">Do</span>
+      <section className="py-16 md:py-24 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+            className="text-center mb-12 md:mb-16"
+          >
+            <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-full mb-6 font-medium">
+              <Sparkles className="h-4 w-4" />
+              <span>What We Do</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 mb-6">
+              Our <span className="text-blue-600">Activities</span>
             </h2>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            <p className="text-lg sm:text-xl text-gray-600 max-w-2xl mx-auto">
               We organize various activities and events to help members grow their skills and network with industry experts.
             </p>
-          </div>
+          </motion.div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
             {activities.map((activity, index) => (
-              <Card 
+              <motion.div
                 key={activity.title}
-                className="border-0 shadow-lg hover:shadow-xl transition-all duration-500 animate-fade-in-up bg-white group overflow-hidden"
-                style={{ animationDelay: `${index * 150}ms` }}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: index * 0.1 }}
+                className="group relative"
               >
-                <CardHeader className="pb-4">
-                  <div className={`inline-flex items-center justify-center w-12 h-12 rounded-lg mb-4 ${activity.color} bg-opacity-10 group-hover:scale-110 transition-transform duration-300`}>
-                    <activity.icon className={`h-6 w-6 ${activity.color}`} />
+                <div className="relative bg-white rounded-2xl p-6 md:p-8 shadow-lg hover:shadow-2xl transition-all duration-500 border border-gray-100 overflow-hidden h-full">
+                  <div className={`absolute inset-0 bg-gradient-to-br ${activity.gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-500`} />
+                  
+                  <div className="relative z-10">
+                    <div className={`inline-flex items-center justify-center w-12 h-12 md:w-14 md:h-14 rounded-xl bg-gradient-to-br ${activity.gradient} mb-6 group-hover:scale-110 transition-transform duration-300 shadow-lg`}>
+                      <activity.icon className="h-6 w-6 md:h-7 md:w-7 text-white" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-4 group-hover:text-blue-600 transition-colors duration-300">
+                      {activity.title}
+                    </h3>
+                    <p className="text-gray-600 leading-relaxed text-sm md:text-base">
+                      {activity.description}
+                    </p>
                   </div>
-                  <CardTitle className="text-lg font-bold text-gray-900 group-hover:text-blue-600 transition-colors duration-300">
-                    {activity.title}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-gray-600 leading-relaxed">
-                    {activity.description}
-                  </p>
-                </CardContent>
-              </Card>
+                </div>
+              </motion.div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Team Slider Section */}
+      {/* Team Section */}
       <TeamSlider />
 
-
       {/* CTA Section */}
-      <section className="py-20 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
-        <div className="max-w-4xl mx-auto text-center px-6">
-          <h2 className="text-4xl md:text-5xl font-bold mb-6 animate-fade-in-up">
-            Ready to Join Our Community?
-          </h2>
-          <p className="text-xl mb-8 text-blue-100 animate-fade-in-up delay-200">
-            Become part of Team Eklavya and start your journey of learning, innovation, and growth.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center animate-fade-in-up delay-300">
-            <Button 
-              size="lg" 
-              variant="secondary"
-              className="bg-white text-blue-600 hover:bg-gray-100 px-8 py-3 text-lg font-semibold border-0"
-              asChild
-            >
-              <Link href="/signup">
-                Join Now
-              </Link>
-            </Button>
-            <Button 
-              size="lg"
-              variant="outline" 
-              className="border-white text-white hover:bg-white/10 px-8 py-3 text-lg font-semibold"
-              asChild
-            >
-              <Link href="/events">
+      <section className="relative py-20 md:py-32 overflow-hidden">
+        {/* Optimized Background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600" />
+        <div className="absolute inset-0">
+          <div className="absolute top-0 left-0 w-64 h-64 md:w-96 md:h-96 bg-white/10 rounded-full blur-3xl animate-blob" />
+          <div className="absolute bottom-0 right-0 w-64 h-64 md:w-96 md:h-96 bg-white/10 rounded-full blur-3xl animate-blob animation-delay-2000" />
+        </div>
+
+        <div className="max-w-4xl mx-auto text-center px-4 sm:px-6 relative z-10">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+          >
+            <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm text-white px-4 py-2 rounded-full mb-6 md:mb-8 font-medium">
+              <Rocket className="h-4 w-4" />
+              <span>Join Us Today</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-6 text-white">
+              Ready to Join Our Community?
+            </h2>
+            <p className="text-lg md:text-xl mb-8 md:mb-12 text-white/90 leading-relaxed">
+              Become part of Team Eklavya and start your journey of learning, innovation, and growth.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 md:gap-6 justify-center">
+              <button className="group px-6 py-3 md:px-8 md:py-4 bg-white text-blue-600 font-semibold rounded-full hover:bg-gray-100 transition-all duration-300 hover:scale-105 shadow-2xl text-sm md:text-base">
+                <span className="flex items-center justify-center gap-2">
+                  Join Now
+                  <ArrowRight className="h-4 w-4 md:h-5 md:w-5 group-hover:translate-x-1 transition-transform" />
+                </span>
+              </button>
+              <button className="px-6 py-3 md:px-8 md:py-4 bg-white/10 backdrop-blur-sm text-white font-semibold rounded-full border-2 border-white/30 hover:bg-white/20 transition-all duration-300 hover:scale-105 text-sm md:text-base">
                 Explore Events
-              </Link>
-            </Button>
-          </div>
+              </button>
+            </div>
+          </motion.div>
         </div>
       </section>
+
+      <style jsx>{`
+        @keyframes blob {
+          0%, 100% {
+            transform: translate(0, 0) scale(1);
+          }
+          25% {
+            transform: translate(20px, -50px) scale(1.1);
+          }
+          50% {
+            transform: translate(-20px, 20px) scale(0.9);
+          }
+          75% {
+            transform: translate(50px, 50px) scale(1.05);
+          }
+        }
+
+        .animate-blob {
+          animation: blob 7s infinite;
+        }
+
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+
+        .animation-delay-4000 {
+          animation-delay: 4s;
+        }
+      `}</style>
     </div>
   );
 }

@@ -399,66 +399,81 @@ export default function EditEventPage() {
 
   const onCropComplete = (_: any, croppedAreaPx: any) => setCroppedAreaPixels(croppedAreaPx);
 
-  const uploadCroppedPoster = async (): Promise<string | null> => {
-    if (!posterFile) return form.bannerUrl || null;
+ const uploadCroppedPoster = async (): Promise<string | null> => {
+  if (!posterFile) return form.bannerUrl || null;
 
-    try {
-      let imageBlob: Blob;
+  try {
+    let imageBlob: Blob;
 
-      if (!croppedAreaPixels) {
-        imageBlob = posterFile;
-      } else {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        const image = new Image();
+    if (!croppedAreaPixels) {
+      imageBlob = posterFile;
+    } else {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      const image = new Image();
 
-        await new Promise((resolve, reject) => {
-          image.onload = resolve;
-          image.onerror = reject;
-          image.src = URL.createObjectURL(posterFile);
-        });
-
-        canvas.width = croppedAreaPixels.width;
-        canvas.height = croppedAreaPixels.height;
-
-        ctx?.drawImage(
-          image,
-          croppedAreaPixels.x,
-          croppedAreaPixels.y,
-          croppedAreaPixels.width,
-          croppedAreaPixels.height,
-          0,
-          0,
-          croppedAreaPixels.width,
-          croppedAreaPixels.height
-        );
-
-        imageBlob = await new Promise((resolve) =>
-          canvas.toBlob((blob) => resolve(blob!), "image/jpeg", 0.9)
-        );
-      }
-
-      const formData = new FormData();
-      formData.append("file", imageBlob, "poster.jpg");
-
-      const res = await api.post("/upload/local?folder=posters", formData, {
-        headers: { 
-          "Content-Type": "multipart/form-data",
-        },
+      const objectUrl = URL.createObjectURL(posterFile);
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("Failed to load image for cropping"));
+        image.src = objectUrl;
       });
 
-      if (res.data.success) {
-        console.log("Upload successful:", res.data.filePath);
-        return res.data.filePath;
-      } else {
-        throw new Error(res.data.message || "Upload failed");
-      }
-    } catch (error) {
-      console.error("Upload error:", error);
-      setErrors(prev => ({ ...prev, poster: "Failed to upload image" }));
-      return form.bannerUrl || null;
+      // ensure valid context
+      if (!ctx) throw new Error("Canvas 2D context not available");
+
+      canvas.width = Math.max(1, Math.floor(croppedAreaPixels.width));
+      canvas.height = Math.max(1, Math.floor(croppedAreaPixels.height));
+
+      ctx.drawImage(
+        image,
+        Math.floor(croppedAreaPixels.x),
+        Math.floor(croppedAreaPixels.y),
+        Math.floor(croppedAreaPixels.width),
+        Math.floor(croppedAreaPixels.height),
+        0,
+        0,
+        Math.floor(croppedAreaPixels.width),
+        Math.floor(croppedAreaPixels.height)
+      );
+
+      // free the object URL
+      URL.revokeObjectURL(objectUrl);
+
+      imageBlob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((blob) => resolve(blob! as Blob), "image/jpeg", 0.9)
+      );
     }
-  };
+
+    const formData = new FormData();
+    // filename helps some servers / middlewares
+    formData.append("file", imageBlob as Blob, "poster.jpg");
+
+    // use `id` from useParams() — you already defined `const { id } = useParams();`
+    const res = await api.post(`/upload/${id}`, formData); // <-- no manual Content-Type header
+
+    // robust extraction of URL from different possible backend shapes
+    const uploadedUrl =
+      res?.data?.imageUrl ||
+      res?.data?.filePath ||
+      res?.data?.url ||
+      res?.data?.data?.url ||
+      null;
+
+    if (!uploadedUrl) {
+      console.error("Unexpected upload response:", res?.data);
+      throw new Error("Upload succeeded but no URL returned");
+    }
+
+    console.log("Upload successful:", uploadedUrl);
+    return uploadedUrl;
+  } catch (error: any) {
+    console.error("Upload error:", error?.response?.data || error.message || error);
+    setErrors(prev => ({ ...prev, poster: "Failed to upload image" }));
+    return form.bannerUrl || null;
+  }
+};
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

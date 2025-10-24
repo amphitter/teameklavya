@@ -6,9 +6,9 @@ const FormData = require("form-data");
 
 const router = express.Router();
 const upload = multer({ dest: "temp/" });
-
-// ✅ Upload event-specific image to ImgBB
-router.post("/:eventId", upload.single("file"), async (req, res) => {
+const Event = require("../models/event.model");
+const { requireAuth, requireAdmin } = require("../middleware/auth.middleware");
+router.post("/:eventId", requireAuth, requireAdmin, upload.single("file"), async (req, res) => {
   const { eventId } = req.params;
 
   try {
@@ -16,12 +16,16 @@ router.post("/:eventId", upload.single("file"), async (req, res) => {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
 
-    const filePath = req.file.path;
-    const formData = new FormData();
-    formData.append("image", fs.createReadStream(filePath));
+    // Convert image buffer to base64 for ImgBB
+    const base64Image = req.file.buffer.toString("base64");
 
-    // 🔐 Use key from .env
     const apiKey = process.env.IMGBB_API_KEY;
+    if (!apiKey) {
+      throw new Error("IMGBB_API_KEY missing in environment");
+    }
+
+    const formData = new FormData();
+    formData.append("image", base64Image);
 
     const response = await axios.post(
       `https://api.imgbb.com/1/upload?key=${apiKey}`,
@@ -29,26 +33,24 @@ router.post("/:eventId", upload.single("file"), async (req, res) => {
       { headers: formData.getHeaders() }
     );
 
-    // Delete temp file
-    fs.unlinkSync(filePath);
-
     const uploadedUrl = response.data.data.url;
+    const deleteUrl = response.data.data.delete_url;
 
-    // ✅ You can now save this URL in your event model (if you want)
-    // Example (pseudo-code):
-    // await Event.findByIdAndUpdate(eventId, { imageUrl: uploadedUrl });
+    // ✅ Optionally update your Event document
+    await Event.findByIdAndUpdate(eventId, { bannerUrl: uploadedUrl });
 
-    res.json({
+    res.status(200).json({
       success: true,
       eventId,
       imageUrl: uploadedUrl,
-      deleteUrl: response.data.data.delete_url,
+      deleteUrl,
     });
   } catch (error) {
     console.error("ImgBB upload error:", error.response?.data || error.message);
     res.status(500).json({
       success: false,
       message: "Failed to upload image",
+      error: error.response?.data || error.message,
     });
   }
 });

@@ -480,8 +480,6 @@ const uploadCroppedPoster = async (): Promise<string | null> => {
   }
 };
 
-
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     

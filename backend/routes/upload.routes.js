@@ -5,12 +5,23 @@ const axios = require("axios");
 const FormData = require("form-data");
 
 const router = express.Router();
-const upload = multer({ dest: "temp/" });
+
+// Use memory storage to get file buffer
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  }
+});
+
 const Event = require("../models/event.model");
 const { requireAuth, requireAdmin } = require("../middleware/auth.middleware");
+
 router.post("/:eventId", requireAuth, requireAdmin, upload.single("file"), async (req, res) => {
   const { eventId } = req.params;
-    console.log("req.file:", req.file);
+  
+  console.log("req.file:", req.file);
   console.log("req.body:", req.body);
 
   try {
@@ -18,8 +29,20 @@ router.post("/:eventId", requireAuth, requireAdmin, upload.single("file"), async
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
 
+    // ✅ FIX: Check if buffer exists, if not read from disk
+    let imageBuffer;
+    if (req.file.buffer) {
+      // Memory storage - buffer is available
+      imageBuffer = req.file.buffer;
+    } else {
+      // Disk storage - read file from disk
+      imageBuffer = fs.readFileSync(req.file.path);
+      // Clean up temp file
+      fs.unlinkSync(req.file.path);
+    }
+
     // Convert image buffer to base64 for ImgBB
-    const base64Image = req.file.buffer.toString("base64");
+    const base64Image = imageBuffer.toString("base64");
 
     const apiKey = process.env.IMGBB_API_KEY;
     if (!apiKey) {
@@ -38,7 +61,7 @@ router.post("/:eventId", requireAuth, requireAdmin, upload.single("file"), async
     const uploadedUrl = response.data.data.url;
     const deleteUrl = response.data.data.delete_url;
 
-    // ✅ Optionally update your Event document
+    // ✅ Update Event document
     await Event.findByIdAndUpdate(eventId, { bannerUrl: uploadedUrl });
 
     res.status(200).json({

@@ -470,9 +470,6 @@ const uploadCroppedPoster = async (): Promise<string | null> => {
       },
       timeout: 30000, // 30 second timeout
     });
-
-    console.log("Upload response:", res.data);
-
     const uploadedUrl =
       res?.data?.imageUrl ||
       res?.data?.filePath ||

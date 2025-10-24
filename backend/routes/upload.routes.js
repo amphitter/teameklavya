@@ -20,10 +20,6 @@ const { requireAuth, requireAdmin } = require("../middleware/auth.middleware");
 
 router.post("/:eventId", requireAuth, requireAdmin, upload.single("file"), async (req, res) => {
   const { eventId } = req.params;
-  
-  console.log("req.file:", req.file);
-  console.log("req.body:", req.body);
-
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });

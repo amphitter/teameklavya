@@ -4,21 +4,37 @@ const path = require("path");
 
 // --- SMTP Transporter Configuration ---
 const transporter = nodemailer.createTransport({
-  service: 'Gmail',
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: process.env.SMTP_SECURE === 'true',
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
 });
 
-// --- Verify Connection on Startup ---
-transporter.verify((error, success) => {
-  if (error) {
-    console.error("❌ SMTP connection failed:", error);
-  } else {
-    console.log("✅ SMTP server is ready to send emails");
+// --- Verify Connection with Retries ---
+async function verifyConnection(retries = 3, delay = 5000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await transporter.verify();
+      console.log("✅ SMTP server is ready to send emails");
+      return true;
+    } catch (error) {
+      console.error(`❌ SMTP connection attempt ${i + 1} failed:`, error.message);
+      if (i < retries - 1) {
+        console.log(`Retrying in ${delay / 1000} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
-});
+  return false;
+}
+
+verifyConnection()
 
 // --- Helper: Convert HTML → plain text fallback ---
 function htmlToTextFallback(html) {

@@ -399,11 +399,11 @@ export default function EditEventPage() {
 
   const onCropComplete = (_: any, croppedAreaPx: any) => setCroppedAreaPixels(croppedAreaPx);
 
- const uploadCroppedPoster = async (): Promise<string | null> => {
+const uploadCroppedPoster = async (): Promise<string | null> => {
   if (!posterFile) return form.bannerUrl || null;
 
   try {
-    let imageBlob: Blob;
+    let imageBlob: Blob | null = null;
 
     if (!croppedAreaPixels) {
       imageBlob = posterFile;
@@ -419,7 +419,6 @@ export default function EditEventPage() {
         image.src = objectUrl;
       });
 
-      // ensure valid context
       if (!ctx) throw new Error("Canvas 2D context not available");
 
       canvas.width = Math.max(1, Math.floor(croppedAreaPixels.width));
@@ -437,22 +436,29 @@ export default function EditEventPage() {
         Math.floor(croppedAreaPixels.height)
       );
 
-      // free the object URL
       URL.revokeObjectURL(objectUrl);
 
-      imageBlob = await new Promise<Blob>((resolve) =>
-        canvas.toBlob((blob) => resolve(blob! as Blob), "image/jpeg", 0.9)
-      );
+      // Convert canvas to Blob safely
+      imageBlob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            console.error("canvas.toBlob returned null");
+            resolve(null);
+          } else {
+            resolve(blob);
+          }
+        }, "image/jpeg", 0.9);
+      });
+
+      if (!imageBlob) throw new Error("Failed to generate blob from canvas");
     }
 
     const formData = new FormData();
-    // filename helps some servers / middlewares
     formData.append("file", imageBlob as Blob, "poster.jpg");
 
-    // use `id` from useParams() — you already defined `const { id } = useParams();`
-    const res = await api.post(`/upload/${id}`, formData); // <-- no manual Content-Type header
+    // Send file to backend
+    const res = await api.post(`/upload/${id}`, formData); // <-- no Content-Type header manually
 
-    // robust extraction of URL from different possible backend shapes
     const uploadedUrl =
       res?.data?.imageUrl ||
       res?.data?.filePath ||
@@ -473,6 +479,7 @@ export default function EditEventPage() {
     return form.bannerUrl || null;
   }
 };
+
 
 
   const handleSubmit = async (e: React.FormEvent) => {

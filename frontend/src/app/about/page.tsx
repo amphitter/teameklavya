@@ -543,19 +543,7 @@ function TeamSlider() {
           </div>
 
           {/* Navigation Dots */}
-          <div className="flex justify-center mt-8 space-x-3">
-            {teamMembers.map((_, index) => (
-              <button
-                key={index}
-                onClick={() => goToSlide(index)}
-                className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                  index === currentIndex 
-                    ? 'bg-blue-600 scale-125' 
-                    : 'bg-gray-300 hover:bg-gray-400'
-                }`}
-              />
-            ))}
-          </div>
+          
         </div>
       </div>
     </section>

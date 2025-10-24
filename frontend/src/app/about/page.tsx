@@ -55,7 +55,7 @@ const teamMembers: TeamMember[] = [
     id: 1,
     name: "Devansh Singh",
     role: "System Strategist & Outreach Lead",
-    image: "/api/placeholder/400/500?text=Devansh&bg=3B82F6&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Devansh.png",
     description: "Leads the team vision, technical roadmap, and overall execution strategy. Builds external relationships, represents the team, and manages collaborations.",
     socialLinks: {
       instagram: "https://www.instagram.com/amp.hitter/",
@@ -69,7 +69,7 @@ const teamMembers: TeamMember[] = [
     id: 6,
     name: "Hritik Kumar Singh",
     role: "Technical Lead",
-    image: "/api/placeholder/400/500?text=Hritik&bg=10B981&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Hritik-Kumar-Singh.png",
     description: "Heads development, ensures smooth backend/frontend integration, and handles tech stack decisions.",
     socialLinks: {
       instagram: "https://www.instagram.com/lavish_khatkarya/",
@@ -82,7 +82,7 @@ const teamMembers: TeamMember[] = [
     id: 7,
     name: "Kunal Biserwal",
     role: "Operations & Discipline Lead",
-    image: "/api/placeholder/400/500?text=Kunal&bg=EF4444&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Kunal-Biserwal.png",
     description: "Manages live event coordination, internal protocols, and team logistics.",
     socialLinks: {
       instagram: "https://www.instagram.com/kunal_biserwal/",
@@ -94,7 +94,7 @@ const teamMembers: TeamMember[] = [
     id: 9,
     name: "Manya Kanojia",
     role: "Website Design & Content Producer",
-    image: "/api/placeholder/400/500?text=Manya&bg=8B5CF6&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Manya-Kanojia.png",
     description: "Captures event moments, creates digital content, and manages visual branding on social media.",
     socialLinks: {
       instagram: "https://www.instagram.com/_heymanya/",
@@ -106,7 +106,7 @@ const teamMembers: TeamMember[] = [
     id: 8,
     name: "Luv Jangra",
     role: "Tech Developer",
-    image: "/api/placeholder/400/500?text=Luv&bg=F59E0B&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Luv-Jangra.png",
     description: "Leads development and integration, experimentation, and deployment of tech-related solutions.",
     socialLinks: {
       linkedin: "https://linkedin.com/in/luvjangra",
@@ -118,7 +118,7 @@ const teamMembers: TeamMember[] = [
     id: 11,
     name: "Vishnu Kumar",
     role: "Community Mentor & Strategic Advisor",
-    image: "/api/placeholder/400/500?text=Vishnu&bg=EC4899&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Vishnu-Kumar.png",
     description: "Guides the team, maintains key community ties, and plays a senior consultative role.",
     socialLinks: {
       linkedin: "https://linkedin.com/in/vishnu",
@@ -130,7 +130,7 @@ const teamMembers: TeamMember[] = [
     id: 12,
     name: "Sahil",
     role: "AI/ML Developer",
-    image: "/api/placeholder/400/500?text=Sahil&bg=06B6D4&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Sahil.png",
     description: "Developing intelligent systems and machine learning models to solve complex problems.",
     socialLinks: {
       instagram: "https://www.instagram.com/_sahil__sh/",
@@ -143,7 +143,7 @@ const teamMembers: TeamMember[] = [
     id: 2,
     name: "Ansh Kumar",
     role: "Communication & Participant Manager",
-    image: "/api/placeholder/400/500?text=Ansh&bg=84CC16&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Ansh-Kumar.png",
     description: "Handles participant queries, manages internal and external communication during events.",
     socialLinks: {
       instagram: "https://www.instagram.com/extrovert_anshuu/",
@@ -155,7 +155,7 @@ const teamMembers: TeamMember[] = [
     id: 3,
     name: "Ayush",
     role: "Media & Campaign Strategist",
-    image: "/api/placeholder/400/500?text=Ayush&bg=6366F1&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Ayush.png",
     description: "Crafts digital strategies, runs campaigns, and coordinates with content teams.",
     socialLinks: {
       linkedin: "https://www.linkedin.com/in/ayush7989/",
@@ -167,7 +167,7 @@ const teamMembers: TeamMember[] = [
     id: 5,
     name: "Divya Jangra",
     role: "Program Coordinator & Registration Lead",
-    image: "/api/placeholder/400/500?text=Divya&bg=F97316&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Divya-Jangra.png",
     description: "Oversees event structure, registration processes, data handling, and backend entry.",
     socialLinks: {
       instagram: "https://www.instagram.com/divyajangra12/",
@@ -179,7 +179,7 @@ const teamMembers: TeamMember[] = [
     id: 10,
     name: "Mohit",
     role: "Tech Lead",
-    image: "/api/placeholder/400/500?text=Mohit&bg=14B8A6&color=ffffff",
+    image: "https://teameklavya.onrender.com/uploads/team/Mohit.png",
     description: "Leads backend and technical development, ensuring scalability and reliability.",
     socialLinks: {
       linkedin: "https://linkedin.com/in/mohit",

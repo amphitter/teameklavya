@@ -14,7 +14,8 @@ export default function VerifyEmailPage() {
   useEffect(() => {
     if (token && email) {
       // ✅ Instead of Axios, just redirect the user to backend verify route
-      const backendUrl = `http://localhost:5000/api/auth/verify-email?token=${token}&email=${email}`;
+      const baseUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? window.location.origin;
+      const backendUrl = `${baseUrl}/api/auth/verify-email?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
       window.location.href = backendUrl;
     } else {
       setStatus("error");

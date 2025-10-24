@@ -1,5 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+
+import { useEffect, useState, useMemo } from "react";
+import { motion } from "framer-motion";
 import { api } from "@/utils/api";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,10 @@ import {
   Pause,
   Volume2,
   VolumeX,
-  MapPin
+  MapPin,
+  Zap,
+  Sparkles,
+  Rocket
 } from "lucide-react";
 
 export default function HomePage() {
@@ -59,6 +64,13 @@ export default function HomePage() {
       color: "hover:text-green-500"
     }
   ];
+
+  const statItems = useMemo(() => [
+    { icon: Users, label: "Members", value: stats.members, suffix: "+" },
+    { icon: Calendar, label: "Events", value: stats.events, suffix: "+" },
+    { icon: MessageCircle, label: "Projects", value: stats.projects, suffix: "+" },
+    { icon: Users, label: "Communities", value: stats.communities, suffix: "" }
+  ], [stats]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -137,8 +149,16 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Hero Section with Video Background */}
-      <section className="relative h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-blue-50 to-indigo-100">
+      {/* Hero Section with New Design */}
+      <section className="relative py-20 md:py-32 overflow-hidden">
+        {/* Background Animation */}
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-white to-purple-50" />
+        <div className="absolute inset-0 opacity-30">
+          <div className="absolute top-20 left-10 w-48 h-48 sm:w-72 sm:h-72 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl animate-blob" />
+          <div className="absolute top-40 right-10 w-48 h-48 sm:w-72 sm:h-72 bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000" />
+          <div className="absolute bottom-20 left-1/2 w-48 h-48 sm:w-72 sm:h-72 bg-pink-400 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000" />
+        </div>
+
         {/* Video Background */}
         <div className="absolute inset-0 w-full h-full">
           <video
@@ -147,19 +167,13 @@ export default function HomePage() {
             loop
             playsInline
             className={`w-full h-full object-cover transition-opacity duration-500 ${
-              videoPlaying ? 'opacity-20' : 'opacity-0'
+              videoPlaying ? 'opacity-10' : 'opacity-0'
             }`}
             poster="/hero-poster.jpg"
           >
             <source src="/hero-video.mp4" type="video/mp4" />
             <source src="/hero-video.webm" type="video/webm" />
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-purple-700 flex items-center justify-center">
-              <p className="text-white text-lg">Video not supported</p>
-            </div>
           </video>
-          
-          {/* Light overlay */}
-          <div className="absolute inset-0 bg-white/30 backdrop-blur-[1px]" />
         </div>
 
         {/* Video Controls */}
@@ -182,71 +196,105 @@ export default function HomePage() {
           </Button>
         </div>
 
-        {/* Hero Content */}
-        <div className="relative z-10 text-center px-4 max-w-4xl mx-auto">
-          {/* Logo */}
-          <div className="mb-8 animate-fade-in-up">
-            <img 
-              src="/logo1.png" 
-              alt="Team Eklavya" 
-              className="mx-auto h-32 w-auto mb-6 drop-shadow-2xl animate-float"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = '/api/placeholder/200/200';
-              }}
-            />
-          </div>
-
-          {/* Main Heading */}
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight animate-fade-in-up text-gray-900">
-            Welcome to{" "}
-            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              Team Eklavya
-            </span>
-          </h1>
-
-          {/* Subtitle */}
-          <p className="text-xl md:text-2xl mb-8 text-gray-700 max-w-2xl mx-auto leading-relaxed animate-fade-in-up delay-200">
-            Building a thriving community of innovators, learners, and creators shaping the future together.
-          </p>
-
-          {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12 animate-fade-in-up delay-300">
-            <Button 
-              size="lg" 
-              className="bg-blue-600 text-white hover:bg-blue-700 px-8 py-3 text-lg font-semibold rounded-full shadow-2xl transition-all duration-300 hover:scale-105 border-0"
-              asChild
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10">
+          <div className="text-center max-w-4xl mx-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5 }}
+              className="inline-flex items-center gap-2 bg-white/80 backdrop-blur-sm text-blue-600 px-4 py-2 sm:px-6 sm:py-3 rounded-full mb-6 sm:mb-8 font-medium shadow-lg border border-blue-100"
             >
-              <Link href="/signup">
-                Sign Up
-                <ArrowRight className="ml-2 h-5 w-5" />
-              </Link>
-            </Button>
-            <Button 
-              variant="outline" 
-              size="lg"
-              className="border-blue-600 text-blue-600 hover:bg-blue-50 px-8 py-3 text-lg font-semibold rounded-full transition-all duration-300 hover:scale-105"
-              asChild
-            >
-              <Link href="/events">
-                Explore Events
-              </Link>
-            </Button>
-          </div>
+              <Zap className="h-4 w-4 sm:h-5 sm:w-5" />
+              <span className="text-sm sm:text-base">Building the Future Together</span>
+            </motion.div>
 
-          {/* Social Media Links */}
-          <div className="flex justify-center space-x-6 animate-fade-in-up delay-400">
-            {socialLinks.map((social) => (
-              <a
-                key={social.name}
-                href={social.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`p-3 bg-white/80 rounded-full backdrop-blur-sm transition-all duration-300 hover:scale-110 shadow-lg ${social.color} text-gray-700`}
-                aria-label={social.name}
+            {/* Logo */}
+            <div className="mb-8">
+              <motion.img 
+                src="/logo1.png" 
+                alt="Team Eklavya" 
+                className="mx-auto h-32 w-auto mb-6 drop-shadow-2xl"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.1 }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = '/api/placeholder/200/200';
+                }}
+              />
+            </div>
+
+            <motion.h1
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+              className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold mb-6 sm:mb-8 leading-tight text-gray-900"
+            >
+              Welcome to{" "}
+              <span className="bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+                Team Eklavya
+              </span>
+            </motion.h1>
+
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              className="text-lg sm:text-xl md:text-2xl text-gray-600 mb-8 sm:mb-12 leading-relaxed"
+            >
+              Building a thriving community of innovators, learners, and creators shaping the future together.
+            </motion.p>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+              className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center mb-8"
+            >
+              <Button 
+                size="lg" 
+                className="group relative bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:bg-gradient-to-r hover:from-purple-600 hover:to-pink-600 px-8 py-3 text-lg font-semibold rounded-full overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105 border-0"
+                asChild
               >
-                <social.icon className="h-6 w-6" />
-              </a>
-            ))}
+                <Link href="/signup">
+                  <span className="relative z-10 flex items-center justify-center gap-2">
+                    Sign Up
+                    <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
+                  </span>
+                </Link>
+              </Button>
+
+              <Button 
+                variant="outline" 
+                size="lg"
+                className="border-2 border-gray-300 text-gray-700 hover:border-blue-600 hover:text-blue-600 px-8 py-3 text-lg font-semibold rounded-full transition-all duration-300 hover:scale-105 bg-white/80 backdrop-blur-sm"
+                asChild
+              >
+                <Link href="/events">
+                  Explore Events
+                </Link>
+              </Button>
+            </motion.div>
+
+            {/* Social Media Links */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.4 }}
+              className="flex justify-center space-x-6"
+            >
+              {socialLinks.map((social) => (
+                <a
+                  key={social.name}
+                  href={social.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`p-3 bg-white/80 rounded-full backdrop-blur-sm transition-all duration-300 hover:scale-110 shadow-lg ${social.color} text-gray-700`}
+                  aria-label={social.name}
+                >
+                  <social.icon className="h-6 w-6" />
+                </a>
+              ))}
+            </motion.div>
           </div>
         </div>
 
@@ -258,53 +306,61 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Stats Section */}
-      <section className="py-16 bg-white">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {[
-              { icon: Users, label: "Members", value: stats.members },
-              { icon: Calendar, label: "Events", value: stats.events },
-              { icon: Users, label: "Communities", value: stats.communities },
-              { icon: MessageCircle, label: "Projects", value: stats.projects }
-            ].map((stat, index) => (
-              <div 
+      {/* Stats Section with New Design */}
+      <section className="py-20 bg-white relative">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
+            {statItems.map((stat, index) => (
+              <motion.div
                 key={stat.label}
-                className="text-center group animate-fade-in-up"
-                style={{ animationDelay: `${index * 100}ms` }}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: index * 0.1 }}
+                className="text-center group"
               >
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4 group-hover:scale-110 transition-transform duration-300">
-                  <stat.icon className="h-8 w-8 text-blue-600" />
+                <div className="relative inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 mb-4 sm:mb-6">
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-purple-500 rounded-2xl opacity-10 group-hover:opacity-20 transition-opacity duration-300" />
+                  <stat.icon className="relative h-8 w-8 sm:h-10 sm:w-10 text-blue-600 group-hover:scale-110 transition-transform duration-300" />
                 </div>
-                <div className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
+                <div className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 mb-2">
                   {loading ? (
                     <Skeleton className="h-8 w-16 mx-auto" />
                   ) : (
                     <>
-                      {stat.value}
-                      {stat.label === "Members" && "+"}
+                      {stat.value}{stat.suffix}
                     </>
                   )}
                 </div>
-                <p className="text-gray-600 font-medium">{stat.label}</p>
-              </div>
+                <p className="text-gray-600 font-medium text-sm sm:text-lg">{stat.label}</p>
+              </motion.div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Events Preview */}
+      {/* Events Preview with New Design */}
       <section className="py-20 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
           {/* Section Header */}
-          <div className="text-center mb-16 animate-fade-in-up">
-            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+            className="text-center mb-16"
+          >
+            <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-full mb-6 font-medium">
+              <Calendar className="h-4 w-4" />
+              <span>Upcoming Events</span>
+            </div>
+            <h2 className="text-4xl sm:text-5xl md:text-6xl font-bold text-gray-900 mb-6">
               Upcoming <span className="text-blue-600">Events</span>
             </h2>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            <p className="text-lg sm:text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
               Join our exciting events and connect with like-minded innovators and creators.
             </p>
-          </div>
+          </motion.div>
 
           {/* Events Grid */}
           {loading ? (
@@ -324,7 +380,13 @@ export default function HomePage() {
               ))}
             </div>
           ) : events.length === 0 ? (
-            <div className="text-center py-12 animate-fade-in-up">
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6 }}
+              className="text-center py-12"
+            >
               <Calendar className="h-24 w-24 text-gray-400 mx-auto mb-4" />
               <h3 className="text-2xl font-semibold text-gray-600 mb-2">
                 No Upcoming Events
@@ -337,110 +399,140 @@ export default function HomePage() {
                   Browse All Events
                 </Link>
               </Button>
-            </div>
+            </motion.div>
           ) : (
             <div className="grid md:grid-cols-3 gap-8">
               {events.map((event, index) => (
-                <Card 
-                  key={event._id} 
-                  className="group overflow-hidden border-0 shadow-lg hover:shadow-2xl transition-all duration-500 animate-fade-in-up bg-white"
-                  style={{ animationDelay: `${index * 150}ms` }}
+                <motion.div
+                  key={event._id}
+                  initial={{ opacity: 0, y: 30 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5, delay: index * 0.1 }}
                 >
-                  <div className="relative overflow-hidden">
-                    <img 
-                      src={getImageUrl(event.bannerUrl)} 
-                      alt={event.title}
-                      className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-500"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = '/api/placeholder/400/200';
-                      }}
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  </div>
-                  
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-xl font-bold line-clamp-2 group-hover:text-blue-600 transition-colors duration-300 text-gray-900">
-                      {event.title}
-                    </CardTitle>
-                    <CardDescription className="line-clamp-2 text-gray-600">
-                      {event.description?.substring(0, 100) || "No description available"}...
-                    </CardDescription>
-                  </CardHeader>
-                  
-                  <CardContent className="pb-4">
-                    <div className="flex items-center text-sm text-gray-600 mb-2">
-                      <Calendar className="h-4 w-4 mr-2 flex-shrink-0" />
-                      <span>
-                        {formatDate(event.startDate)}
-                        {event.endDate && event.endDate !== event.startDate && ` - ${formatDate(event.endDate)}`}
-                      </span>
+                  <Card className="group overflow-hidden border-0 shadow-lg hover:shadow-2xl transition-all duration-500 bg-white h-full">
+                    <div className="relative overflow-hidden">
+                      <img 
+                        src={getImageUrl(event.bannerUrl)} 
+                        alt={event.title}
+                        className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-500"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = '/api/placeholder/400/200';
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                     </div>
-                    {event.venue && (
-                      <div className="flex items-center text-sm text-gray-600">
-                        <MapPin className="h-4 w-4 mr-2 flex-shrink-0" />
-                        <span className="truncate">{event.venue}</span>
+                    
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-xl font-bold line-clamp-2 group-hover:text-blue-600 transition-colors duration-300 text-gray-900">
+                        {event.title}
+                      </CardTitle>
+                      <CardDescription className="line-clamp-2 text-gray-600">
+                        {event.description?.substring(0, 100) || "No description available"}...
+                      </CardDescription>
+                    </CardHeader>
+                    
+                    <CardContent className="pb-4">
+                      <div className="flex items-center text-sm text-gray-600 mb-2">
+                        <Calendar className="h-4 w-4 mr-2 flex-shrink-0" />
+                        <span>
+                          {formatDate(event.startDate)}
+                          {event.endDate && event.endDate !== event.startDate && ` - ${formatDate(event.endDate)}`}
+                        </span>
                       </div>
-                    )}
-                  </CardContent>
-                  
-                  <CardFooter>
-                    <Button className="w-full group/btn bg-blue-600 hover:bg-blue-700" asChild>
-                      <Link href={`/events/${event.slug || event._id}`}>
-                        View Details
-                        <ArrowRight className="ml-2 h-4 w-4 group-hover/btn:translate-x-1 transition-transform duration-300" />
-                      </Link>
-                    </Button>
-                  </CardFooter>
-                </Card>
+                      {event.venue && (
+                        <div className="flex items-center text-sm text-gray-600">
+                          <MapPin className="h-4 w-4 mr-2 flex-shrink-0" />
+                          <span className="truncate">{event.venue}</span>
+                        </div>
+                      )}
+                    </CardContent>
+                    
+                    <CardFooter>
+                      <Button className="w-full group/btn bg-blue-600 hover:bg-blue-700" asChild>
+                        <Link href={`/events/${event.slug || event._id}`}>
+                          View Details
+                          <ArrowRight className="ml-2 h-4 w-4 group-hover/btn:translate-x-1 transition-transform duration-300" />
+                        </Link>
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                </motion.div>
               ))}
             </div>
           )}
 
           {/* View All Events Button */}
           {events.length > 0 && (
-            <div className="text-center mt-12 animate-fade-in-up">
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6 }}
+              className="text-center mt-12"
+            >
               <Button variant="outline" size="lg" asChild className="border-blue-600 text-blue-600 hover:bg-blue-50">
                 <Link href="/events" className="group">
                   View All Events
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform duration-300" />
                 </Link>
               </Button>
-            </div>
+            </motion.div>
           )}
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-20 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
-        <div className="max-w-4xl mx-auto text-center px-6">
-          <h2 className="text-4xl md:text-5xl font-bold mb-6 animate-fade-in-up">
-            Ready to Join Our Community?
-          </h2>
-          <p className="text-xl mb-8 text-blue-100 animate-fade-in-up delay-200">
-            Connect with innovators, attend amazing events, and be part of something extraordinary.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center animate-fade-in-up delay-300">
-            <Button 
-              size="lg" 
-              variant="secondary"
-              className="bg-white text-blue-600 hover:bg-gray-100 px-8 py-3 text-lg font-semibold border-0"
-              asChild
-            >
-              <Link href="/signup">
-                Get Started Today
-              </Link>
-            </Button>
-            <Button 
-              size="lg"
-              variant="outline" 
-              className="border-white text-white hover:bg-white/10 px-8 py-3 text-lg font-semibold"
-              asChild
-            >
-              <Link href="/about">
-                Learn More
-              </Link>
-            </Button>
-          </div>
+      {/* CTA Section with New Design */}
+      <section className="relative py-20 md:py-32 overflow-hidden">
+        {/* Optimized Background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600" />
+        <div className="absolute inset-0">
+          <div className="absolute top-0 left-0 w-64 h-64 md:w-96 md:h-96 bg-white/10 rounded-full blur-3xl animate-blob" />
+          <div className="absolute bottom-0 right-0 w-64 h-64 md:w-96 md:h-96 bg-white/10 rounded-full blur-3xl animate-blob animation-delay-2000" />
+        </div>
+
+        <div className="max-w-4xl mx-auto text-center px-4 sm:px-6 relative z-10">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+          >
+            <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm text-white px-4 py-2 rounded-full mb-6 md:mb-8 font-medium">
+              <Rocket className="h-4 w-4" />
+              <span>Join Us Today</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-6 text-white">
+              Ready to Join Our Community?
+            </h2>
+            <p className="text-lg md:text-xl mb-8 md:mb-12 text-white/90 leading-relaxed">
+              Connect with innovators, attend amazing events, and be part of something extraordinary.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 md:gap-6 justify-center">
+              <Button 
+                size="lg"
+                className="group px-6 py-3 md:px-8 md:py-4 bg-white text-blue-600 font-semibold rounded-full hover:bg-gray-100 transition-all duration-300 hover:scale-105 shadow-2xl text-sm md:text-base"
+                asChild
+              >
+                <Link href="/signup">
+                  <span className="flex items-center justify-center gap-2">
+                    Get Started Today
+                    <ArrowRight className="h-4 w-4 md:h-5 md:w-5 group-hover:translate-x-1 transition-transform" />
+                  </span>
+                </Link>
+              </Button>
+              <Button 
+                size="lg"
+                variant="outline" 
+                className="px-6 py-3 md:px-8 md:py-4 bg-white/10 backdrop-blur-sm text-white font-semibold rounded-full border-2 border-white/30 hover:bg-white/20 transition-all duration-300 hover:scale-105 text-sm md:text-base"
+                asChild
+              >
+                <Link href="/about">
+                  Learn More
+                </Link>
+              </Button>
+            </div>
+          </motion.div>
         </div>
       </section>
 
@@ -506,6 +598,35 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
+
+      <style jsx>{`
+        @keyframes blob {
+          0%, 100% {
+            transform: translate(0, 0) scale(1);
+          }
+          25% {
+            transform: translate(20px, -50px) scale(1.1);
+          }
+          50% {
+            transform: translate(-20px, 20px) scale(0.9);
+          }
+          75% {
+            transform: translate(50px, 50px) scale(1.05);
+          }
+        }
+
+        .animate-blob {
+          animation: blob 7s infinite;
+        }
+
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+
+        .animation-delay-4000 {
+          animation-delay: 4s;
+        }
+      `}</style>
     </div>
   );
 }

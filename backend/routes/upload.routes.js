@@ -1,68 +1,55 @@
 const express = require("express");
 const multer = require("multer");
-const path = require("path");
 const fs = require("fs");
+const axios = require("axios");
+const FormData = require("form-data");
 
 const router = express.Router();
+const upload = multer({ dest: "temp/" });
 
-// Ensure required directories exist
-const baseUploadPath = path.join(__dirname, "..", "uploads");
-const uploadDirs = ["posters", "speakers", "general"];
-uploadDirs.forEach((dir) => {
-  const dirPath = path.join(baseUploadPath, dir);
-  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
-});
+// ✅ Upload event-specific image to ImgBB
+router.post("/:eventId", upload.single("file"), async (req, res) => {
+  const { eventId } = req.params;
 
-// Multer config - FIXED: Use query parameter instead of body for folder
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // Use query parameter instead of body since multer doesn't parse body yet
-    const folder = req.query.folder || "general";
-    const folderPath = path.join(baseUploadPath, folder);
-    if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
-    cb(null, folderPath);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + "-" + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
-    cb(null, uniqueName);
-  },
-});
-
-const upload = multer({ 
-  storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed!'), false);
-    }
-  }
-});
-
-// ✅ POST /api/upload/local - FIXED: Use query parameter for folder
-router.post("/local", upload.single("file"), (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
 
-    const folder = req.query.folder || "general";
-    // Use relative path that matches your static serving
-    const fileUrl = `/uploads/${folder}/${req.file.filename}`;
+    const filePath = req.file.path;
+    const formData = new FormData();
+    formData.append("image", fs.createReadStream(filePath));
 
-    console.log(`File uploaded to: ${fileUrl}`); // Debug log
+    // 🔐 Use key from .env
+    const apiKey = process.env.IMGBB_API_KEY;
 
-    return res.json({ 
-      success: true, 
-      filePath: fileUrl,
-      message: "File uploaded successfully"
+    const response = await axios.post(
+      `https://api.imgbb.com/1/upload?key=${apiKey}`,
+      formData,
+      { headers: formData.getHeaders() }
+    );
+
+    // Delete temp file
+    fs.unlinkSync(filePath);
+
+    const uploadedUrl = response.data.data.url;
+
+    // ✅ You can now save this URL in your event model (if you want)
+    // Example (pseudo-code):
+    // await Event.findByIdAndUpdate(eventId, { imageUrl: uploadedUrl });
+
+    res.json({
+      success: true,
+      eventId,
+      imageUrl: uploadedUrl,
+      deleteUrl: response.data.data.delete_url,
     });
   } catch (error) {
-    console.error("Upload error:", error);
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("ImgBB upload error:", error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to upload image",
+    });
   }
 });
 

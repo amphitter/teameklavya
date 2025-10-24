@@ -355,21 +355,6 @@ function TeamSlider() {
 
         {/* Slider Container */}
         <div className="relative">
-          {/* Navigation Arrows */}
-          <button
-            onClick={prevSlide}
-            className="absolute left-4 top-1/2 transform -translate-y-1/2 z-20 bg-white/80 backdrop-blur-sm rounded-full p-3 shadow-2xl border border-gray-200 hover:bg-white transition-all duration-300 hover:scale-110"
-          >
-            <ChevronLeft className="h-6 w-6 text-gray-700" />
-          </button>
-
-          <button
-            onClick={nextSlide}
-            className="absolute right-4 top-1/2 transform -translate-y-1/2 z-20 bg-white/80 backdrop-blur-sm rounded-full p-3 shadow-2xl border border-gray-200 hover:bg-white transition-all duration-300 hover:scale-110"
-          >
-            <ChevronRight className="h-6 w-6 text-gray-700" />
-          </button>
-
           {/* Auto-play Toggle */}
           <button
             onClick={toggleAutoPlay}

@@ -1,50 +1,76 @@
-// utils/email.js
-const nodemailer = require("nodemailer");
-const path = require("path");
+const { google } = require('googleapis');
+const nodemailer = require('nodemailer');
+const path = require('path');
 
-// --- SMTP Transporter Configuration ---
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT) || 587,
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  connectionTimeout: 30000,
-  greetingTimeout: 30000,
-  socketTimeout: 30000,
+// Configure OAuth2 client
+const oAuth2Client = new google.auth.OAuth2(
+  process.env.GMAIL_CLIENT_ID,
+  process.env.GMAIL_CLIENT_SECRET,
+  process.env.GMAIL_REDIRECT_URI
+);
+
+oAuth2Client.setCredentials({
+  refresh_token: process.env.GMAIL_REFRESH_TOKEN
 });
 
-// --- Verify Connection with Retries ---
-async function verifyConnection(retries = 3, delay = 5000) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      await transporter.verify();
-      console.log("✅ SMTP server is ready to send emails");
-      return true;
-    } catch (error) {
-      console.error(`❌ SMTP connection attempt ${i + 1} failed:`, error.message);
-      if (i < retries - 1) {
-        console.log(`Retrying in ${delay / 1000} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
+// --- Gmail API Transporter ---
+async function createTransporter() {
+  try {
+    const accessToken = await oAuth2Client.getAccessToken();
+    
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        type: 'OAuth2',
+        user: process.env.EMAIL_USER,
+        clientId: process.env.GMAIL_CLIENT_ID,
+        clientSecret: process.env.GMAIL_CLIENT_SECRET,
+        refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+        accessToken: accessToken.token,
+      },
+      // Gmail API settings
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100,
+      rateDelta: 1000,
+      rateLimit: 5
+    });
+  } catch (error) {
+    console.error('❌ Failed to create Gmail transporter:', error);
+    throw error;
   }
-  return false;
 }
 
-verifyConnection()
+// --- Verify Connection ---
+let transporter;
+async function initializeEmail() {
+  try {
+    transporter = await createTransporter();
+    await transporter.verify();
+    console.log("✅ Gmail API transporter is ready");
+    return true;
+  } catch (error) {
+    console.error("❌ Gmail API initialization failed:", error);
+    return false;
+  }
+}
+
+// Initialize on startup
+initializeEmail();
 
 // --- Helper: Convert HTML → plain text fallback ---
 function htmlToTextFallback(html) {
   if (!html) return "";
-  const stripped = html.replace(/<\/?[^>]+(>|$)/g, ""); // remove tags
+  const stripped = html.replace(/<\/?[^>]+(>|$)/g, "");
   return stripped.replace(/\s{2,}/g, " ").trim();
 }
 
-// --- Helper: Retry wrapper for transient SMTP errors ---
+// --- Helper: Retry wrapper ---
 async function sendMailWithRetry(mailOptions, retries = 3, delayMs = 20000) {
+  if (!transporter) {
+    await initializeEmail();
+  }
+  
   try {
     const info = await transporter.sendMail(mailOptions);
     return info;
@@ -52,16 +78,13 @@ async function sendMailWithRetry(mailOptions, retries = 3, delayMs = 20000) {
     const transientCodes = [421, 450, 451, 452];
     const respCode = err?.responseCode || null;
 
-    // Retry on temporary Gmail rate-limit errors (450)
     if (retries > 0 && transientCodes.includes(respCode)) {
-      console.warn(
-        `⚠️ SMTP rate limit (${respCode}). Retrying in ${delayMs / 1000}s...`
-      );
+      console.warn(`⚠️ Gmail rate limit (${respCode}). Retrying in ${delayMs / 1000}s...`);
       await new Promise((r) => setTimeout(r, delayMs));
       return sendMailWithRetry(mailOptions, retries - 1, delayMs * 2);
     }
 
-    throw err; // rethrow after final retry
+    throw err;
   }
 }
 
@@ -77,7 +100,7 @@ exports.sendEmail = async ({
     const finalText = text || htmlToTextFallback(html);
 
     const mailOptions = {
-      from: `"Team Eklavya" <${process.env.SMTP_USER}>`,
+      from: `"Team Eklavya" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       text: finalText,
@@ -99,7 +122,4 @@ exports.sendEmail = async ({
   }
 };
 
-// --- Backward Compatible Alias ---
-exports.sendEmailWithAttachment = async (options) => {
-  return exports.sendEmail(options);
-};
+exports.sendEmailWithAttachment = exports.sendEmail;

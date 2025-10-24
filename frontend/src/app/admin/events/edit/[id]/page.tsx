@@ -403,16 +403,19 @@ const uploadCroppedPoster = async (): Promise<string | null> => {
   if (!posterFile) return form.bannerUrl || null;
 
   try {
-    let imageBlob: Blob | null = null;
+    let imageBlob: Blob;
 
     if (!croppedAreaPixels) {
+      // Use original file if no cropping
       imageBlob = posterFile;
     } else {
+      // Crop the image
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
       const image = new Image();
 
       const objectUrl = URL.createObjectURL(posterFile);
+      
       await new Promise<void>((resolve, reject) => {
         image.onload = () => resolve();
         image.onerror = () => reject(new Error("Failed to load image for cropping"));
@@ -438,26 +441,37 @@ const uploadCroppedPoster = async (): Promise<string | null> => {
 
       URL.revokeObjectURL(objectUrl);
 
-      // Convert canvas to Blob safely
-      imageBlob = await new Promise<Blob | null>((resolve) => {
+      // Convert canvas to blob safely
+      imageBlob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((blob) => {
-          if (!blob) {
-            console.error("canvas.toBlob returned null");
-            resolve(null);
-          } else {
+          if (blob) {
             resolve(blob);
+          } else {
+            reject(new Error("Canvas to Blob conversion failed"));
           }
         }, "image/jpeg", 0.9);
       });
-
-      if (!imageBlob) throw new Error("Failed to generate blob from canvas");
     }
 
+    // Create FormData and debug it
     const formData = new FormData();
-    formData.append("file", imageBlob as Blob, "poster.jpg");
+    formData.append("file", imageBlob, "poster.jpg");
 
-    // Send file to backend
-    const res = await api.post(`/upload/${id}`, formData); // <-- no Content-Type header manually
+    // Debug: Check FormData contents
+    console.log("FormData entries:");
+    for (let pair of (formData as any).entries()) {
+      console.log(pair[0], pair[1]);
+    }
+
+    // Upload with proper error handling
+    const res = await api.post(`/upload/${id}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 30000, // 30 second timeout
+    });
+
+    console.log("Upload response:", res.data);
 
     const uploadedUrl =
       res?.data?.imageUrl ||
@@ -474,8 +488,13 @@ const uploadCroppedPoster = async (): Promise<string | null> => {
     console.log("Upload successful:", uploadedUrl);
     return uploadedUrl;
   } catch (error: any) {
-    console.error("Upload error:", error?.response?.data || error.message || error);
-    setErrors(prev => ({ ...prev, poster: "Failed to upload image" }));
+    console.error("Upload error details:", {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status
+    });
+    
+    setErrors(prev => ({ ...prev, poster: "Failed to upload image. Please try again." }));
     return form.bannerUrl || null;
   }
 };

@@ -57,16 +57,16 @@ const teamMembers: TeamMember[] = [
   {
     id: 1,
     name: "Devansh Singh",
-    role: "Full Stack & AI Developer",
+    role: "System Strategist & Outreach Lead",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Devansh.png`,
-    description: "Passionate about building intelligent, scalable web applications that solve real-world problems with cutting-edge technology.",
+    description: "Leads the team vision, technical roadmap, and overall execution strategy. Builds external relationships, represents the team, and manages collaborations.",
     socialLinks: {
       instagram: "https://www.instagram.com/amp.hitter/",
       twitter: "https://x.com/amphitter",
       github: "https://github.com/amphitter",
       linkedin: "https://www.linkedin.com/in/devansh-singh-amphitter/"
     },
-    skills: ["Full Stack", "AI/ML", "Web Development", "Innovation"],
+    skills: ["Leadership", "Strategy", "Full Stack", "AI/ML"],
     stats: {
       projects: "50+",
       experience: "3+ Years",
@@ -76,83 +76,83 @@ const teamMembers: TeamMember[] = [
   {
     id: 2,
     name: "Ansh Kumar",
-    role: "Full Stack Developer",
+    role: "Communication & Participant Manager",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Ansh-Kumar.png`,
-    description: "Creative developer focused on building beautiful user interfaces and seamless user experiences.",
+    description: "Handles participant queries, manages internal and external communication during events.",
     socialLinks: {
-      github: "https://github.com/anshkumar",
-      linkedin: "https://linkedin.com/in/anshkumar"
+      instagram: "https://www.instagram.com/extrovert_anshuu/",
+      linkedin: "https://www.linkedin.com/in/ansh-kumar-95a84a28a/"
     },
-    skills: ["Frontend", "UI/UX", "React", "Design"],
+    skills: ["Communication", "Coordination", "Public Relations", "Event Management"],
     stats: {
       projects: "30+",
-      experience: "2+ Years",
+      experience: "3+ Years",
       passion: "100%"
     }
   },
   {
     id: 3,
     name: "Ayush",
-    role: "Backend Developer",
+    role: "Media & Campaign Strategist",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Ayush.png`,
-    description: "Backend specialist building robust and scalable server architectures for modern applications.",
+    description: "Crafts digital strategies, runs campaigns, and coordinates with content teams.",
     socialLinks: {
-      github: "https://github.com/ayush",
-      linkedin: "https://linkedin.com/in/ayush"
+      linkedin: "https://www.linkedin.com/in/ayush7989/",
+      instagram: "https://www.instagram.com/jat_.537/"
     },
-    skills: ["Backend", "APIs", "Database", "Cloud"],
+    skills: ["Digital Strategy", "Social Media", "Marketing", "Content Coordination"],
     stats: {
       projects: "40+",
       experience: "3+ Years",
       passion: "100%"
     }
   },
-   {
+  {
     id: 4,
-    name: "Ayush Kumar",
-    role: "UI/UX Designer",
+    name: "Ayush Kumar Jha",
+    role: "Founder",
     image: "https://hackcraft20.vercel.app/ayush1.jpeg",
-    description: "Creating intuitive and beautiful user experiences that make technology accessible to everyone.",
+    description: "Founder and core visionary, driving the team’s mission, growth, and innovation roadmap.",
     socialLinks: {
-      instagram: "https://instagram.com/divyajangra",
-      linkedin: "https://linkedin.com/in/divyajangra"
+      linkedin: "https://www.linkedin.com/in/ayush-kumar-chahar-a76175329/",
+      instagram: "https://www.instagram.com/lifepaletteadventures/"
     },
-    skills: ["UI/UX", "Figma", "Prototyping", "Research"],
+    skills: ["Leadership", "Vision", "Innovation", "Team Building"],
     stats: {
       projects: "25+",
-      experience: "2+ Years",
+      experience: "3+ Years",
       passion: "100%"
     }
   },
- 
   {
     id: 5,
     name: "Divya Jangra",
-    role: "UI/UX Designer",
+    role: "Program Coordinator & Registration Lead",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Divya-Jangra.png`,
-    description: "Creating intuitive and beautiful user experiences that make technology accessible to everyone.",
+    description: "Oversees event structure, registration processes, data handling, and backend entry.",
     socialLinks: {
-      instagram: "https://instagram.com/divyajangra",
-      linkedin: "https://linkedin.com/in/divyajangra"
+      instagram: "https://www.instagram.com/divyajangra12/",
+      linkedin: "https://www.linkedin.com/in/divya-801387297/"
     },
-    skills: ["UI/UX", "Figma", "Prototyping", "Research"],
+    skills: ["Coordination", "Registration", "Management", "Backend Support"],
     stats: {
       projects: "25+",
-      experience: "2+ Years",
+      experience: "3+ Years",
       passion: "100%"
     }
   },
   {
     id: 6,
     name: "Hritik Kumar Singh",
-    role: "Mobile Developer",
+    role: "Technical Lead",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Hritik-Kumar-Singh.png`,
-    description: "Building cross-platform mobile applications that deliver exceptional performance and user experience.",
+    description: "Heads development, ensures smooth backend/frontend integration, and handles tech stack decisions.",
     socialLinks: {
+      instagram: "https://www.instagram.com/lavish_khatkarya/",
       github: "https://github.com/hritik",
       linkedin: "https://linkedin.com/in/hritik"
     },
-    skills: ["React Native", "Flutter", "iOS", "Android"],
+    skills: ["Full Stack", "Integration", "Architecture", "Leadership"],
     stats: {
       projects: "35+",
       experience: "3+ Years",
@@ -162,47 +162,48 @@ const teamMembers: TeamMember[] = [
   {
     id: 7,
     name: "Kunal Biserwal",
-    role: "DevOps Engineer",
+    role: "Operations & Discipline Lead",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Kunal-Biserwal.png`,
-    description: "Automating deployment pipelines and ensuring scalable infrastructure for high-performance applications.",
+    description: "Manages live event coordination, internal protocols, and team logistics.",
     socialLinks: {
-      github: "https://github.com/kunal",
-      linkedin: "https://linkedin.com/in/kunal"
+      instagram: "https://www.instagram.com/kunal_biserwal/",
+      linkedin: "https://www.linkedin.com/in/kunal-biserwal-b2a70528a/"
     },
-    skills: ["DevOps", "AWS", "Docker", "CI/CD"],
+    skills: ["Operations", "Logistics", "Discipline", "Team Management"],
     stats: {
       projects: "20+",
-      experience: "2+ Years",
+      experience: "3+ Years",
       passion: "100%"
     }
   },
   {
     id: 8,
     name: "Luv Jangra",
-    role: "Full Stack Developer",
+    role: "Tech Developer",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Luv-Jangra.png`,
-    description: "Versatile developer passionate about building end-to-end solutions from concept to deployment.",
+    description: "Leads development and integration, experimentation, and deployment of tech-related solutions.",
     socialLinks: {
-      github: "https://github.com/luvjangra",
-      linkedin: "https://linkedin.com/in/luvjangra"
+      linkedin: "https://linkedin.com/in/luvjangra",
+      github: "https://github.com/luvjangra"
     },
-    skills: ["MERN Stack", "Python", "Startups", "Mentoring"],
+    skills: ["MERN", "Python", "Development", "Deployment"],
     stats: {
       projects: "45+",
-      experience: "4+ Years",
+      experience: "3+ Years",
       passion: "100%"
     }
   },
   {
     id: 9,
     name: "Manya Kanojia",
-    role: "Product Manager",
+    role: "Website Design & Content Producer",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Manya-Kanojia.png`,
-    description: "Bridging the gap between technical teams and user needs to create products that people love.",
+    description: "Captures event moments, creates digital content, and manages visual branding on social media.",
     socialLinks: {
-      linkedin: "https://linkedin.com/in/manyakanodia"
+      instagram: "https://www.instagram.com/_heymanya/",
+      linkedin: "https://www.linkedin.com/in/manya-kanojia-7a0334290/"
     },
-    skills: ["Product Strategy", "Agile", "User Research", "Analytics"],
+    skills: ["Design", "Content", "Branding", "Photography"],
     stats: {
       projects: "15+",
       experience: "3+ Years",
@@ -212,34 +213,34 @@ const teamMembers: TeamMember[] = [
   {
     id: 10,
     name: "Mohit",
-    role: "Backend Developer",
+    role: "Tech Lead",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Mohit.png`,
-    description: "Building scalable backend systems and APIs that power modern web and mobile applications.",
+    description: "Leads backend and technical development, ensuring scalability and reliability.",
     socialLinks: {
-      github: "https://github.com/mohit",
-      linkedin: "https://linkedin.com/in/mohit"
+      linkedin: "https://linkedin.com/in/mohit",
+      github: "https://github.com/mohit"
     },
-    skills: ["Node.js", "Python", "MongoDB", "Microservices"],
+    skills: ["Node.js", "Python", "Backend", "Scalability"],
     stats: {
       projects: "28+",
-      experience: "2+ Years",
+      experience: "3+ Years",
       passion: "100%"
     }
   },
   {
     id: 11,
     name: "Vishnu Kumar",
-    role: "Frontend Developer",
+    role: "Community Mentor & Strategic Advisor",
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Vishnu-Kumar.png`,
-    description: "Crafting responsive and interactive web interfaces with modern frameworks and best practices.",
+    description: "Guides the team, maintains key community ties, and plays a senior consultative role.",
     socialLinks: {
-      github: "https://github.com/vishnu",
-      linkedin: "https://linkedin.com/in/vishnu"
+      linkedin: "https://linkedin.com/in/vishnu",
+      github: "https://github.com/vishnu"
     },
-    skills: ["React", "TypeScript", "CSS", "Performance"],
+    skills: ["Mentorship", "Strategy", "Community", "Leadership"],
     stats: {
       projects: "32+",
-      experience: "2+ Years",
+      experience: "3+ Years",
       passion: "100%"
     }
   },
@@ -250,31 +251,36 @@ const teamMembers: TeamMember[] = [
     image: `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/team/Sahil.png`,
     description: "Developing intelligent systems and machine learning models to solve complex problems.",
     socialLinks: {
-      github: "https://github.com/sahilsh9220git"},
+      instagram: "https://www.instagram.com/_sahil__sh/",
+      linkedin: "https://www.linkedin.com/in/sahil-sharma-09b82828a/",
+      github: "https://github.com/sahilsh9220git"
+    },
     skills: ["Python", "TensorFlow", "Data Science", "AI"],
     stats: {
       projects: "22+",
       experience: "2+ Years",
-      passion: "100%"}
+      passion: "100%"
+    }
   },
   {
     id: 13,
     name: "Pritika",
-    role: "Frontend Developer",
+    role: "Creative Head & Design Architect",
     image: "https://hackcraft20.vercel.app/pritika.jpeg",
-    description: "Creating engaging and user-friendly web applications with a focus on performance and accessibility.",
+    description: "Leads artistic direction, creates event themes, UI/UX prototypes, and promotional graphics.",
     socialLinks: {
-      github: "",
-      linkedin: "https://linkedin.com/in/pritika",
+      instagram: "https://www.instagram.com/pritikagosain/",
+      linkedin: "https://www.linkedin.com/in/pritika-49748b31a/"
     },
-    skills: ["React", "JavaScript", "HTML/CSS", "Accessibility"],
+    skills: ["UI/UX", "Creative Direction", "Design", "Branding"],
     stats: {
       projects: "27+",
-      experience: "2+ Years",
+      experience: "3+ Years",
       passion: "100%"
     }
   }
 ];
+
 
 const socialIcons = {
   instagram: Instagram,

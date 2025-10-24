@@ -256,6 +256,23 @@ const teamMembers: TeamMember[] = [
       projects: "22+",
       experience: "2+ Years",
       passion: "100%"}
+  },
+  {
+    id: 13,
+    name: "Pritika",
+    role: "Frontend Developer",
+    image: "https://hackcraft20.vercel.app/pritika.jpeg",
+    description: "Creating engaging and user-friendly web applications with a focus on performance and accessibility.",
+    socialLinks: {
+      github: "",
+      linkedin: "https://linkedin.com/in/pritika",
+    },
+    skills: ["React", "JavaScript", "HTML/CSS", "Accessibility"],
+    stats: {
+      projects: "27+",
+      experience: "2+ Years",
+      passion: "100%"
+    }
   }
 ];
 
@@ -544,8 +561,8 @@ export default function AboutPage() {
   const [stats, setStats] = useState({
     members: 900,
     events: 0,
-    projects: 45,
-    communities: 12
+    Groups: 4,
+    communities: 3
   });
   const [loading, setLoading] = useState(true);
 
@@ -672,7 +689,7 @@ export default function AboutPage() {
             {[
               { icon: Users, label: "Members", value: stats.members },
               { icon: Calendar, label: "Events", value: stats.events },
-              { icon: Code, label: "Projects", value: stats.projects },
+              { icon: Code, label: "Projects", value: stats.Groups },
               { icon: Award, label: "Communities", value: stats.communities }
             ].map((stat, index) => (
               <div 

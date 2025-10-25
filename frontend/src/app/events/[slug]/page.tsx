@@ -1140,37 +1140,6 @@ const handleRegisterClick = () => {
                 )}
               </div>
             </div>
-
-            {/* Quick Info Card */}
-            <div className="bg-white/70 backdrop-blur-sm rounded-2xl border border-gray-200/60 shadow-lg p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <Info className="h-5 w-5 text-blue-600 mr-2" />
-                Quick Info
-              </h3>
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Category:</span>
-                  <span className="font-medium text-gray-900">{event.category || 'General'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Date:</span>
-                  <span className="font-medium text-gray-900">{formatShortDate(event.startDate)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Time:</span>
-                  <span className="font-medium text-gray-900">
-                    {event.startTime && formatTime(event.startTime)}
-                    {event.endTime && ` - ${formatTime(event.endTime)}`}
-                  </span>
-                </div>
-                {event.theme && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Theme:</span>
-                    <span className="font-medium text-gray-900">{event.theme}</span>
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         </div>
       </div>

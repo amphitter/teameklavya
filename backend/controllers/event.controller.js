@@ -429,80 +429,220 @@ exports.sendEventNotificationToAllUsers = async (req, res) => {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>New Event Alert - Team Eklavya</title>
+  <title>New Event Announcement - ${event.title}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  </style>
 </head>
-<body style="margin:0;padding:0;background-color:#f5f7fa;font-family:'Inter',Helvetica,Arial,sans-serif;">
+<body style="margin:0;padding:0;background-color:#f8fafc;font-family:'Inter',Helvetica,Arial,sans-serif;">
 
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-    New event alert: ${event.title} by Team Eklavya.
+    Team Eklavya is pleased to announce our new event: ${event.title}. Join us for an incredible experience.
   </div>
 
-  <div style="width:100%;padding:0;background-color:#f5f7fa;">
-    <div style="max-width:600px;margin:0 auto;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,0.05);overflow:hidden;">
+  <!-- Preheader Text -->
+  <div style="display:none;font-size:1px;color:#f8fafc;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+    You're invited to ${event.title} - ${event.description ? event.description.substring(0, 100) + '...' : 'Join us for an amazing experience'}
+  </div>
+
+  <div style="width:100%;padding:0;background-color:#f8fafc;">
+    <div style="max-width:600px;margin:0 auto;background:#ffffff;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -1px rgba(0,0,0,0.06);overflow:hidden;border-radius:8px;">
       
-      <div style="background:#10b981;padding:20px 30px;text-align:center;">
-        <img src="https://i.ibb.co/ZzYmZNxQ/24.png" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
-        <h1 style="color:#fff;margin:0;font-size:22px;font-weight:600;">🎉 New Event Alert!</h1>
-        <p style="color:#fff;margin:10px 0 0;font-size:16px;opacity:0.9;">${event.title}</p>
+      <!-- Header Section -->
+      <div style="background:linear-gradient(135deg,#004aad 0%,#0066cc 100%);padding:25px 30px;text-align:center;">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0">
+          <tr>
+            <td align="center">
+              <img src="https://i.ibb.co/ZzYmZNxQ/24.png" alt="Team Eklavya Logo" style="max-height:50px;width:auto;margin-bottom:15px;" />
+            </td>
+          </tr>
+          <tr>
+            <td align="center">
+              <h1 style="color:#ffffff;margin:0;font-size:24px;font-weight:700;letter-spacing:-0.5px;">New Event Announcement</h1>
+              <p style="color:#e6f0ff;margin:8px 0 0;font-size:16px;font-weight:400;opacity:0.95;">${event.title}</p>
+            </td>
+          </tr>
+        </table>
       </div>
 
-      <div style="padding:30px;">
-        <h2 style="color:#10b981;margin-bottom:10px;">Hey ${user.firstName},</h2>
-        <p style="color:#333;font-size:15px;line-height:1.6;margin-bottom:25px;">
-          We're excited to announce a new event that might interest you!
-        </p>
+      <!-- Event Banner Image -->
+      ${event.bannerUrl ? `
+      <div style="width:100%;overflow:hidden;">
+        <img src="${event.bannerUrl}" alt="${event.title}" style="width:100%;height:auto;max-height:300px;object-fit:cover;display:block;" />
+      </div>
+      ` : ''}
 
-        <div style="background:#f0fdf4;padding:20px;border-radius:8px;margin:20px 0;border:2px solid #bbf7d0;">
-          <h3 style="margin-top:0;color:#059669;">Event Highlights:</h3>
-          <p><strong>📅 Date:</strong> ${new Date(event.startDate).toLocaleDateString()}</p>
-          <p><strong>📍 Venue:</strong> ${event.venue}</p>
-          <p><strong>👨‍💼 Organizer:</strong> ${event.organizer}</p>
-          <p><strong>💰 Price:</strong> ${event.price ? `$${event.price}` : "Free"}</p>
-          ${event.description ? `<p><strong>📝 Description:</strong> ${event.description.substring(0, 200)}${event.description.length > 200 ? '...' : ''}</p>` : ''}
+      <!-- Main Content -->
+      <div style="padding:35px 30px;">
+        <!-- Greeting -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0">
+          <tr>
+            <td>
+              <h2 style="color:#1e293b;margin:0 0 15px 0;font-size:20px;font-weight:600;">Dear ${user.firstName},</h2>
+              <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 25px 0;">
+                We are delighted to announce our upcoming event and extend a special invitation to you. 
+                This promises to be an exceptional opportunity for learning, networking, and growth.
+              </p>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Event Details Card -->
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:25px;margin:25px 0;">
+          <table width="100%" border="0" cellspacing="0" cellpadding="0">
+            <tr>
+              <td>
+                <h3 style="color:#004aad;margin:0 0 20px 0;font-size:18px;font-weight:600;">📋 Event Overview</h3>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
+                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Event:</td>
+                    <td style="padding:8px 0;color:#1e293b;font-size:14px;font-weight:600;">${event.title}</td>
+                  </tr>
+                  ${event.organizer ? `
+                  <tr>
+                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
+                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Organizer:</td>
+                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${event.organizer}</td>
+                  </tr>
+                  ` : ''}
+                  <tr>
+                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
+                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Date:</td>
+                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${new Date(event.startDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</td>
+                  </tr>
+                  ${event.startTime ? `
+                  <tr>
+                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
+                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Time:</td>
+                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${event.startTime}</td>
+                  </tr>
+                  ` : ''}
+                  <tr>
+                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
+                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Venue:</td>
+                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${event.venue}</td>
+                  </tr>
+                  <tr>
+                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
+                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Participation:</td>
+                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${event.price ? `$${event.price}` : "Complimentary"}</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
         </div>
 
-        <div style="text-align:center;margin:30px 0;">
-          <a href="${eventLink}" 
-             style="background:#10b981;color:#fff;padding:12px 28px;text-decoration:none;border-radius:6px;font-weight:600;display:inline-block;">
-            🎫 View Event Details
-          </a>
-        </div>
-
-        <div style="background:#e8f4fd;padding:15px;border-radius:6px;border-left:4px solid #2E86C1;">
-          <p style="margin:0;color:#2E86C1;font-size:14px;">
-            <strong>Don't miss out!</strong> Limited seats available. Register now to secure your spot.
+        <!-- Event Description -->
+        ${event.description ? `
+        <div style="margin:25px 0;">
+          <h3 style="color:#004aad;margin:0 0 15px 0;font-size:16px;font-weight:600;">About This Event</h3>
+          <p style="color:#475569;font-size:14px;line-height:1.6;margin:0;">
+            ${event.description}
           </p>
         </div>
+        ` : ''}
+
+        <!-- CTA Button -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin:30px 0;">
+          <tr>
+            <td align="center">
+              <a href="${eventLink}" 
+                 style="background:linear-gradient(135deg,#004aad 0%,#0066cc 100%);color:#ffffff;padding:14px 35px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;display:inline-block;text-align:center;box-shadow:0 4px 6px -1px rgba(0,74,173,0.3);">
+                🎫 View Event Details & Register
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding-top:12px;">
+              <p style="color:#64748b;font-size:13px;margin:0;">
+                Limited seats available • Early registration recommended
+              </p>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Important Note -->
+        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:18px;margin:20px 0;">
+          <table width="100%" border="0" cellspacing="0" cellpadding="0">
+            <tr>
+              <td width="24" style="vertical-align:top;padding-right:12px;">
+                <span style="color:#ea580c;font-size:16px;"></span>
+              </td>
+              <td>
+                <p style="color:#9a3412;font-size:14px;line-height:1.5;margin:0;font-weight:500;">
+                  <strong>Pro Tip:</strong> Register early to secure your spot and receive event updates directly in your inbox.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </div>
       </div>
 
-      <div style="background:#f8f9fb;text-align:center;padding:20px;">
-        <p style="color:#888;font-size:13px;margin-bottom:10px;">Follow us for updates</p>
-        <table role="presentation" align="center" style="margin:0 auto 15px auto;">
+      <!-- Footer -->
+      <div style="background:#1e293b;padding:30px;text-align:center;">
+        <!-- Logo -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom:20px;">
           <tr>
-            <td style="padding:0 6px;">
-              <a href="https://www.instagram.com/iteameklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/2111/2111463.png" alt="Instagram" width="24" height="24" />
+            <td align="center">
+              <img src="https://i.ibb.co/ZzYmZNxQ/24.png" alt="Team Eklavya Logo" style="max-height:40px;width:auto;opacity:0.9;" />
+            </td>
+          </tr>
+        </table>
+
+        <!-- Organization Info -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom:20px;">
+          <tr>
+            <td align="center">
+              <p style="color:#cbd5e1;font-size:14px;line-height:1.5;margin:0 0 10px 0;">
+                Empowering students through innovative events and learning opportunities
+              </p>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Social Links -->
+        <table border="0" cellspacing="0" cellpadding="0" align="center" style="margin:0 auto 20px auto;">
+          <tr>
+            <td style="padding:0 8px;">
+              <a href="https://www.instagram.com/iteameklavya" target="_blank" style="display:block;">
+                <img src="https://cdn-icons-png.flaticon.com/512/2111/2111463.png" alt="Instagram" width="20" height="20" style="display:block;opacity:0.8;" />
               </a>
             </td>
-            <td style="padding:0 6px;">
-              <a href="https://x.com/iteameklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/5968/5968830.png" alt="X" width="24" height="24" />
+            <td style="padding:0 8px;">
+              <a href="https://x.com/iteameklavya" target="_blank" style="display:block;">
+                <img src="https://cdn-icons-png.flaticon.com/512/5968/5968830.png" alt="X" width="20" height="20" style="display:block;opacity:0.8;" />
               </a>
             </td>
-            <td style="padding:0 6px;">
-              <a href="https://www.linkedin.com/company/i-team-eklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" alt="LinkedIn" width="24" height="24" />
+            <td style="padding:0 8px;">
+              <a href="https://www.linkedin.com/company/i-team-eklavya" target="_blank" style="display:block;">
+                <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" alt="LinkedIn" width="20" height="20" style="display:block;opacity:0.8;" />
               </a>
             </td>
-            <td style="padding:0 6px;">
-              <a href="https://chat.whatsapp.com/L7HvHNOatFbHIWM7EGBaaA" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/733/733585.png" alt="WhatsApp" width="24" height="24" />
+            <td style="padding:0 8px;">
+              <a href="https://chat.whatsapp.com/L7HvHNOatFbHIWM7EGBaaA" target="_blank" style="display:block;">
+                <img src="https://cdn-icons-png.flaticon.com/512/733/733585.png" alt="WhatsApp" width="20" height="20" style="display:block;opacity:0.8;" />
               </a>
             </td>
           </tr>
         </table>
-        <p style="color:#888;font-size:13px;margin:0;">Team Eklavya</p>
-        <p style="color:#aaa;font-size:12px;margin-top:5px;">If you have any questions, contact the event organizers.</p>
+
+        <!-- Contact Info -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0">
+          <tr>
+            <td align="center">
+              <p style="color:#94a3b8;font-size:12px;line-height:1.4;margin:0;">
+                For any queries regarding this event, please contact the event organizer.<br />
+                <span style="color:#cbd5e1;">© ${new Date().getFullYear()} Team Eklavya. All rights reserved.</span>
+              </p>
+            </td>
+          </tr>
+        </table>
       </div>
     </div>
   </div>
@@ -511,29 +651,44 @@ exports.sendEventNotificationToAllUsers = async (req, res) => {
           `;
 
           const textContent = `
-New Event Alert: ${event.title}
-
-Hey ${user.firstName},
-
-We're excited to announce a new event that might interest you!
-
-Event Highlights:
-📅 Date: ${new Date(event.startDate).toLocaleDateString()}
-📍 Venue: ${event.venue}
-👨‍💼 Organizer: ${event.organizer}
-💰 Price: ${event.price ? `$${event.price}` : "Free"}
-${event.description ? `📝 Description: ${event.description.substring(0, 200)}${event.description.length > 200 ? '...' : ''}` : ''}
-
-View event details: ${eventLink}
-
-Don't miss out! Limited seats available. Register now to secure your spot.
-
+NEW EVENT ANNOUNCEMENT
 Team Eklavya
+
+Dear ${user.firstName},
+
+We are delighted to announce our upcoming event and extend a special invitation to you. 
+This promises to be an exceptional opportunity for learning, networking, and growth.
+
+EVENT DETAILS:
+──────────────
+  Event: ${event.title}
+${event.organizer ? `  Organizer: ${event.organizer}\n` : ''}  Date: ${new Date(event.startDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+${event.startTime ? `  Time: ${event.startTime}\n` : ''}  Venue: ${event.venue}
+  Participation: ${event.price ? `$${event.price}` : "Complimentary"}
+
+${event.description ? `ABOUT THIS EVENT:\n${event.description}\n\n` : ''}
+VIEW EVENT & REGISTER:
+${eventLink}
+
+Limited seats available • Early registration recommended
+
+ Pro Tip: Register early to secure your spot and receive event updates directly in your inbox.
+
+───
+Follow Team Eklavya:
+• Instagram: https://www.instagram.com/iteameklavya
+• X (Twitter): https://x.com/iteameklavya  
+• LinkedIn: https://www.linkedin.com/company/i-team-eklavya
+• WhatsApp: https://chat.whatsapp.com/L7HvHNOatFbHIWM7EGBaaA
+
+For any queries regarding this event, please contact the event organizer.
+
+© ${new Date().getFullYear()} Team Eklavya. All rights reserved.
           `;
 
           await sendEmail({
             to: user.email,
-            subject: `🎉 New Event: ${event.title}`,
+            subject: `🎉 New Event Announcement: ${event.title} - Team Eklavya`,
             text: textContent,
             html: htmlContent
           });

@@ -398,6 +398,19 @@ export default function EventSlugPage() {
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  // Check if user is authenticated
+  useEffect(() => {
+    const checkAuth = () => {
+      if (typeof window !== 'undefined') {
+        const token = localStorage.getItem('token');
+        setIsAuthenticated(!!token);
+      }
+    };
+
+    checkAuth();
+  }, []);
 
   useEffect(() => {
     if (!slug) return;
@@ -455,6 +468,16 @@ export default function EventSlugPage() {
       checkRegistrationStatus();
     }
   }, [event]);
+
+  // Handle Register Now button click
+  const handleRegisterClick = () => {
+    if (!isAuthenticated) {
+      toast.error("Please login to register for this event");
+      router.push('/login');
+      return;
+    }
+    setShowRegistration(true);
+  };
 
   const formatDate = (dateString: string) => {
     try {
@@ -1029,7 +1052,7 @@ export default function EventSlugPage() {
                     </a>
                   ) : (
                     <Button
-                      onClick={() => setShowRegistration(true)}
+                      onClick={handleRegisterClick}
                       disabled={isEventFull || isEventPast}
                       className="w-full px-6 py-4 text-lg font-semibold rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                     >

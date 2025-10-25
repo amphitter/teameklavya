@@ -207,7 +207,7 @@ export default function EventsPage() {
                 placeholder="Search events by title, description, or venue..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 h-12 border-gray-300 focus:border-blue-500 bg-white rounded-xl shadow-sm"
+                className="pl-10 h-12 border-gray-300 focus:border-blue-500 bg-white rounded-xl text-black shadow-sm"
               />
             </div>
             
@@ -217,7 +217,7 @@ export default function EventsPage() {
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="h-12 pl-10 pr-8 border border-gray-300 rounded-xl focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white shadow-sm appearance-none"
+                  className="h-12 pl-10 pr-8 border border-gray-300 rounded-xl focus:border-blue-500  text-black focus:ring-1 focus:ring-blue-500 bg-white shadow-sm appearance-none"
                 >
                   <option value="all">All Categories</option>
                   {getCategories().map(category => (
@@ -234,7 +234,7 @@ export default function EventsPage() {
                   setSearchTerm("");
                   setSelectedCategory("all");
                 }}
-                className="h-12 border-gray-300 text-gray-700 hover:bg-gray-50 rounded-xl shadow-sm"
+                className="h-12 border-gray-300 text-white hover:bg-gray-700 rounded-xl shadow-sm"
               >
                 <Filter className="h-4 w-4 mr-2" />
                 Reset
@@ -422,12 +422,6 @@ export default function EventsPage() {
             transition={{ duration: 0.6 }}
             className="text-center mt-12"
           >
-            <Button variant="outline" asChild className="border-blue-600 text-blue-600 hover:bg-blue-50 rounded-xl">
-              <Link href="/" className="group">
-                <ArrowRight className="mr-2 h-4 w-4 rotate-180 group-hover:-translate-x-1 transition-transform duration-300" />
-                Back to Home
-              </Link>
-            </Button>
           </motion.div>
         </div>
       </section>

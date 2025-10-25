@@ -318,12 +318,12 @@ export default function EventsPage() {
                       <div className="absolute top-4 left-4">
                         {isEventLive(event.startDate, event.endDate) && (
                           <span className="bg-red-500 text-white px-3 py-1 rounded-full text-xs font-semibold shadow-lg">
-                            🔴 Live Now
+                             Live Now
                           </span>
                         )}
                         {isEventUpcoming(event.startDate) && !isEventLive(event.startDate, event.endDate) && (
                           <span className="bg-green-500 text-white px-3 py-1 rounded-full text-xs font-semibold shadow-lg">
-                            ⏰ Upcoming
+                             Upcoming
                           </span>
                         )}
                       </div>

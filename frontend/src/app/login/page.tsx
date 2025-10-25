@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { jwtDecode } from "jwt-decode";
 import { api } from "@/utils/api";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,20 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // Get the return URL from query parameters or default to profile
+  const returnUrl = searchParams.get('returnUrl') || '/user/profile';
+
+  useEffect(() => {
+    // Check if user is already logged in
+    const token = localStorage.getItem("token");
+    if (token) {
+      router.push(returnUrl);
+    }
+  }, [returnUrl, router]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -45,14 +60,20 @@ export default function Login() {
       localStorage.setItem("token", token);
       localStorage.setItem("role", role);
 
-      // Redirect
-      if (role === "admin") {
-        window.location.href = "/admin/dashboard";
-      } else if (role === "user") {
-        window.location.href = "/user/profile";
-      } else {
-        setMessage("Unknown role. Contact admin.");
+      // Redirect to the return URL or role-based default
+      let redirectUrl = returnUrl;
+      
+      // If no specific return URL was provided, use role-based defaults
+      if (returnUrl === '/user/profile') {
+        if (role === "admin") {
+          redirectUrl = "/admin/dashboard";
+        } else if (role === "user") {
+          redirectUrl = "/user/profile";
+        }
       }
+
+      // Use router.push for client-side navigation (no full page reload)
+      router.push(redirectUrl);
 
     } catch (err: any) {
       console.error("Login error:", err);
@@ -63,7 +84,9 @@ export default function Login() {
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/google`;
+    // Include return URL in Google OAuth redirect
+    const googleAuthUrl = `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/google?returnUrl=${encodeURIComponent(returnUrl)}`;
+    window.location.href = googleAuthUrl;
   };
 
   return (

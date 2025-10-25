@@ -470,14 +470,15 @@ export default function EventSlugPage() {
   }, [event]);
 
   // Handle Register Now button click
-  const handleRegisterClick = () => {
-    if (!isAuthenticated) {
-      toast.error("Please login to register for this event");
-      router.push('/login');
-      return;
-    }
-    setShowRegistration(true);
-  };
+const handleRegisterClick = () => {
+  if (!isAuthenticated) {
+    toast.error("Please login to register for this event");
+    const currentUrl = window.location.pathname + window.location.search;
+    router.push(`/login?returnUrl=${encodeURIComponent(currentUrl)}`);
+    return;
+  }
+  setShowRegistration(true);
+};
 
   const formatDate = (dateString: string) => {
     try {

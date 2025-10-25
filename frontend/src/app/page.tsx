@@ -471,12 +471,6 @@ export default function HomePage() {
               transition={{ duration: 0.6 }}
               className="text-center mt-12"
             >
-              <Button variant="outline" size="lg" asChild className="border-blue-600 text-blue-600 hover:bg-blue-50">
-                <Link href="/events" className="group">
-                  View All Events
-                  <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform duration-300" />
-                </Link>
-              </Button>
             </motion.div>
           )}
         </div>

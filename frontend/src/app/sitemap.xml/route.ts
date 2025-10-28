@@ -1,4 +1,7 @@
-<?xml version="1.0" encoding="UTF-8"?>
+import { NextResponse } from "next/server";
+
+export async function GET() {
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://iteameklavya.vercel.app/</loc>
@@ -16,4 +19,11 @@
     <loc>https://iteameklavya.vercel.app/contact</loc>
     <priority>0.7</priority>
   </url>
-</urlset>
+</urlset>`;
+
+  return new NextResponse(sitemap, {
+    headers: {
+      "Content-Type": "application/xml",
+    },
+  });
+}

@@ -22,6 +22,37 @@ import {
   ChevronRight
 } from "lucide-react";
 
+export const metadata = {
+  title: "About Team Eklavya | Innovators, Leaders & Creators",
+  description:
+    "Discover Team Eklavya — a vibrant community of students, coders, and innovators working together to shape the future through technology, learning, and collaboration.",
+  openGraph: {
+    title: "About Team Eklavya",
+    description:
+      "Meet the passionate team behind Team Eklavya — building innovation, creativity, and leadership in tech communities.",
+    url: "https://iteameklavya.vercel.app/about",
+    siteName: "Team Eklavya",
+    images: [
+      {
+        url: "https://iteameklavya.vercel.app/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Team Eklavya - About Us",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "About Team Eklavya",
+    description:
+      "Meet the passionate innovators behind Team Eklavya — empowering the next generation of tech talent.",
+    images: ["https://iteameklavya.vercel.app/og-image.png"],
+  },
+};
+
+
 // Team Member Interface and Data
 interface TeamMember {
   id: number;

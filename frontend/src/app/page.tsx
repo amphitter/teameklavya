@@ -1,5 +1,6 @@
 "use client";
 
+import Head from "next/head";
 import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { api } from "@/utils/api";
@@ -24,6 +25,86 @@ import {
   Sparkles,
   Rocket
 } from "lucide-react";
+
+<Head>
+  {/* Primary Meta Tags */}
+  <title>Team Eklavya | Empowering Students, Enriching Futures</title>
+  <meta
+    name="description"
+    content="Team Eklavya empowers students through technology, innovation, and collaboration. Join our workshops, hackathons, and real-world learning programs."
+  />
+  <meta
+    name="keywords"
+    content="Team Eklavya, student community, innovation, hackathons, workshops, technology, AR VR, education, student empowerment"
+  />
+  <meta name="author" content="Team Eklavya" />
+  <meta name="robots" content="index, follow" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta httpEquiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta name="language" content="English" />
+  <meta name="theme-color" content="#2563eb" />
+
+  {/* Open Graph / Facebook */}
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://iteameklavya.vercel.app/" />
+  <meta
+    property="og:title"
+    content="Team Eklavya | Empowering Students, Enriching Futures"
+  />
+  <meta
+    property="og:description"
+    content="Join Team Eklavya — a community of learners, innovators, and leaders empowering the next generation through technology and collaboration."
+  />
+  <meta
+    property="og:image"
+    content="https://iteameklavya.vercel.app/og-image.png"
+  />
+  <meta property="og:site_name" content="Team Eklavya" />
+
+  {/* Twitter */}
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:creator" content="@iteameklavya" />
+  <meta
+    name="twitter:title"
+    content="Team Eklavya | Empowering Students, Enriching Futures"
+  />
+  <meta
+    name="twitter:description"
+    content="Team Eklavya connects students and innovators through workshops, hackathons, and mentorship programs."
+  />
+  <meta
+    name="twitter:image"
+    content="https://iteameklavya.vercel.app/og-image.png"
+  />
+
+  {/* Canonical URL */}
+  <link rel="canonical" href="https://iteameklavya.vercel.app/" />
+
+  {/* Favicon */}
+  <link rel="icon" href="/favicon.ico" />
+
+  {/* Structured Data (JSON-LD) */}
+  <script
+    type="application/ld+json"
+    dangerouslySetInnerHTML={{
+      __html: JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        name: "Team Eklavya",
+        url: "https://iteameklavya.vercel.app/",
+        logo: "https://iteameklavya.vercel.app/logo.png",
+        sameAs: [
+          "https://www.instagram.com/iteameklavya",
+          "https://x.com/iteameklavya",
+          "https://www.linkedin.com/company/i-team-eklavya"
+        ],
+        description:
+          "Team Eklavya is a student-driven initiative fostering innovation, collaboration, and technical excellence across India.",
+      }),
+    }}
+  />
+</Head>
+
 
 export default function HomePage() {
   const [memberCount, setMemberCount] = useState(0);

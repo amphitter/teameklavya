@@ -24,7 +24,7 @@ export const metadata = {
   openGraph: {
     title: "Team Eklavya | Empowering Students, Enriching Futures",
     description:
-      "Join Team Eklavya — a community of learners, innovators, and leaders empowering the next generation through technology, creativity, and collaboration.",
+      "Join Team Eklavya - a community of learners, innovators, and leaders empowering the next generation through technology, creativity, and collaboration.",
     url: "https://iteameklavya.vercel.app",
     siteName: "Team Eklavya",
     images: [

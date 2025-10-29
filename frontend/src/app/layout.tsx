@@ -8,7 +8,7 @@ export const metadata = {
     template: "%s | Team Eklavya",
   },
   description:
-    "Team Eklavya is a student-driven initiative fostering innovation, collaboration, and technical excellence through workshops, hackathons, mentorship, and tech-driven education programs across India.",
+    "Team Eklavya empowers students through innovation, hackathons, and mentorship—building a community of future tech leaders across India.",
 
   // ✅ Icon and branding
   icons: {

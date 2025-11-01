@@ -1,0 +1,9 @@
+{
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "destination": "http://teameklavya.xyz/$1",
+      "permanent": true
+    }
+  ]
+}

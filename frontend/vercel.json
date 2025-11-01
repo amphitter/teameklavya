@@ -2,7 +2,7 @@
   "redirects": [
     {
       "source": "/(.*)",
-      "destination": "http://teameklavya.xyz/$1",
+      "destination": "http://teameklavya.xyz/",
       "permanent": true
     }
   ]

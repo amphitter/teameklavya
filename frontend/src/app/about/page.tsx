@@ -6,7 +6,7 @@ export const metadata: Metadata = {
     default: "About | Team Eklavya – Innovators Building the Future",
     template: "%s | Team Eklavya",
   },
-  description: "Meet Team Eklavya - a passionate student-led community driving innovation through hackathons, workshops, and collaborative projects. Learn about our mission, team, and values.",
+  description: "Meet Team Eklavya - a passionate student-led community driving innovation through hackathons, workshops, and collaborative projects.",
 
   // ✅ Icon and branding
   icons: {

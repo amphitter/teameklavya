@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,8 +38,10 @@ export default function Navbar() {
   const [isAtTop, setIsAtTop] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
   const { theme, toggleTheme } = useTheme();
+  const pathname = usePathname();
 
   const navbarRef = useRef<HTMLElement>(null);
+  const isLandingPage = pathname === "/";
 
   useEffect(() => {
     setMounted(true);
@@ -47,6 +50,13 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
+    // Only apply scroll behavior on landing page
+    if (!isLandingPage) {
+      setIsVisible(true);
+      setIsAtTop(true);
+      return;
+    }
+
     const controlNavbar = () => {
       const currentScrollY = window.scrollY;
       
@@ -82,7 +92,7 @@ export default function Navbar() {
     return () => {
       window.removeEventListener('scroll', throttledControlNavbar);
     };
-  }, [lastScrollY]);
+  }, [lastScrollY, isLandingPage]);
 
   const getNavLinks = () => {
     if (role === "admin") {
@@ -158,24 +168,40 @@ export default function Navbar() {
 
   const navLinks = getNavLinks();
 
+  // Navbar classes based on page type
+  const navbarClasses = cn(
+    "w-full transition-all duration-300 z-50",
+    isLandingPage
+      ? cn(
+          "fixed top-0 left-0 right-0 transition-all duration-500 ease-in-out",
+          isVisible ? "translate-y-0" : "-translate-y-full",
+          theme === "light" 
+            ? isAtTop 
+              ? "bg-white/80 border-b border-gray-200/50" 
+              : "bg-white/95 backdrop-blur-md border-b border-gray-200/80 shadow-sm"
+            : isAtTop
+            ? "bg-slate-950/80 border-b border-slate-800/50"
+            : "bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 shadow-lg shadow-black/10"
+        )
+      : cn(
+          "sticky top-0",
+          theme === "light" 
+            ? "bg-white border-b border-gray-200" 
+            : "bg-slate-950 border-b border-slate-800"
+        )
+  );
+
+  // Navbar styles for backdrop filter (landing page only)
+  const navbarStyles = isLandingPage ? {
+    backdropFilter: isAtTop ? 'blur(0px)' : 'blur(12px)',
+    WebkitBackdropFilter: isAtTop ? 'blur(0px)' : 'blur(12px)',
+  } : {};
+
   return (
     <nav
       ref={navbarRef}
-      className={cn(
-        "fixed top-0 left-0 right-0 z-50 w-full transition-all duration-500 ease-in-out",
-        isVisible ? "translate-y-0" : "-translate-y-full",
-        theme === "light" 
-          ? isAtTop 
-            ? "bg-white/80 border-b border-gray-200/50" 
-            : "bg-white/95 backdrop-blur-md border-b border-gray-200/80 shadow-sm"
-          : isAtTop
-          ? "bg-slate-950/80 border-b border-slate-800/50"
-          : "bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 shadow-lg shadow-black/10"
-      )}
-      style={{
-        backdropFilter: isAtTop ? 'blur(0px)' : 'blur(12px)',
-        WebkitBackdropFilter: isAtTop ? 'blur(0px)' : 'blur(12px)',
-      }}
+      className={navbarClasses}
+      style={navbarStyles}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16">
@@ -380,20 +406,29 @@ export default function Navbar() {
               <SheetContent
                 side="right"
                 className={cn(
-                  "w-80 transition-all duration-300 backdrop-blur-lg",
+                  "w-80 transition-all duration-300",
+                  isLandingPage ? "backdrop-blur-lg" : "",
                   theme === "light" 
-                    ? "bg-white/95 border-l border-gray-200/50 text-gray-900" 
-                    : "bg-slate-950/95 border-l border-slate-800/50 text-gray-300"
+                    ? isLandingPage
+                      ? "bg-white/95 border-l border-gray-200/50 text-gray-900"
+                      : "bg-white border-l border-gray-200 text-gray-900"
+                    : isLandingPage
+                    ? "bg-slate-950/95 border-l border-slate-800/50 text-gray-300"
+                    : "bg-slate-950 border-l border-slate-800 text-gray-300"
                 )}
-                style={{
+                style={isLandingPage ? {
                   backdropFilter: 'blur(16px)',
                   WebkitBackdropFilter: 'blur(16px)',
-                }}
+                } : {}}
               >
                 {/* Mobile Header */}
                 <div 
                   className="mb-6 pb-6 border-b" 
-                  style={{ borderColor: theme === "light" ? "rgba(229, 231, 235, 0.5)" : "rgba(30, 41, 59, 0.5)" }}
+                  style={{ 
+                    borderColor: theme === "light" 
+                      ? isLandingPage ? "rgba(229, 231, 235, 0.5)" : "#e5e7eb"
+                      : isLandingPage ? "rgba(30, 41, 59, 0.5)" : "#1e293b"
+                  }}
                 >
                   <div className="flex items-center gap-2 mb-4">
                     <img
@@ -435,8 +470,12 @@ export default function Navbar() {
                         className={cn(
                           "flex items-center gap-3 px-4 py-3 rounded-lg text-base font-medium hover:text-blue-600 transition-all duration-200 group",
                           theme === "light"
-                            ? "text-gray-700 hover:bg-gray-100/80"
-                            : "text-gray-300 hover:bg-slate-800/80 dark:hover:text-blue-400"
+                            ? isLandingPage
+                              ? "text-gray-700 hover:bg-gray-100/80"
+                              : "text-gray-700 hover:bg-gray-100"
+                            : isLandingPage
+                            ? "text-gray-300 hover:bg-slate-800/80 dark:hover:text-blue-400"
+                            : "text-gray-300 hover:bg-slate-800 dark:hover:text-blue-400"
                         )}
                       >
                         <Icon className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
@@ -449,7 +488,11 @@ export default function Navbar() {
                 {/* Mobile Auth */}
                 <div 
                   className="pt-6 border-t" 
-                  style={{ borderColor: theme === "light" ? "rgba(229, 231, 235, 0.5)" : "rgba(30, 41, 59, 0.5)" }}
+                  style={{ 
+                    borderColor: theme === "light" 
+                      ? isLandingPage ? "rgba(229, 231, 235, 0.5)" : "#e5e7eb"
+                      : isLandingPage ? "rgba(30, 41, 59, 0.5)" : "#1e293b"
+                  }}
                 >
                   {!role ? (
                     <div className="space-y-3">
@@ -478,7 +521,13 @@ export default function Navbar() {
                     <div className="space-y-3">
                       <div className={cn(
                         "px-4 py-3 rounded-lg transition-colors duration-300",
-                        theme === "light" ? "bg-gray-50/80 text-gray-900" : "bg-slate-900/80 text-gray-300"
+                        theme === "light" 
+                          ? isLandingPage
+                            ? "bg-gray-50/80 text-gray-900"
+                            : "bg-gray-50 text-gray-900"
+                          : isLandingPage
+                          ? "bg-slate-900/80 text-gray-300"
+                          : "bg-slate-900 text-gray-300"
                       )}>
                         <div className="font-medium text-sm">{getUserName()}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">

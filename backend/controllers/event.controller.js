@@ -62,9 +62,10 @@ exports.createEvent = async (req, res) => {
 };
 
 // Public: Get all events (paginated optional)
+// Public: Get all events (paginated optional)
 exports.getEvents = async (req, res) => {
   try {
-    const { page = 1, limit = 12, category, featured } = req.query;
+    const { page = 1, limit = 12, category, featured, type = 'all' } = req.query;
     
     let query = {};
     
@@ -78,8 +79,14 @@ exports.getEvents = async (req, res) => {
       query.isFeatured = true;
     }
     
-    // Only show upcoming events for public
-    query.endDate = { $gte: new Date() };
+    // Event type filter - FIXED: Include all events by default
+    const now = new Date();
+    if (type === 'upcoming') {
+      query.endDate = { $gte: now };
+    } else if (type === 'past') {
+      query.endDate = { $lt: now };
+    }
+    // If type is 'all' or not provided, don't filter by date
     
     const events = await Event.find(query)
       .select('title slug description category venue startDate endDate bannerUrl organizer price theme isFeatured ticketSettings')
@@ -89,9 +96,16 @@ exports.getEvents = async (req, res) => {
     
     const total = await Event.countDocuments(query);
     
+    // Add event status for frontend
+    const eventsWithStatus = events.map(event => ({
+      ...event.toObject(),
+      status: new Date(event.endDate) < now ? 'past' : 
+             new Date(event.startDate) <= now ? 'ongoing' : 'upcoming'
+    }));
+    
     res.json({ 
       success: true, 
-      events,
+      events: eventsWithStatus,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

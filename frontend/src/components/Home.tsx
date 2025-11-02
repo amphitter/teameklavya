@@ -900,124 +900,169 @@ export default function Home() {
  <NewsletterEvents />
        
 
-        {/* Past Events Carousel */}
-        {pastEvents.length > 0 && (
-          <section className={`py-20 transition-colors duration-300 ${
-            theme === 'dark' ? 'bg-slate-800' : 'bg-gray-50'
-          }`}>
-            <div className="max-w-7xl mx-auto px-4 sm:px-6">
-              <motion.div
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.6 }}
-                className="text-center mb-16"
-              >
-                <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium transition-colors duration-300 ${
-                  theme === 'dark'
-                    ? 'bg-purple-500/20 text-purple-400'
-                    : 'bg-purple-50 text-purple-600'
-                }`}>
-                  <Award className="h-4 w-4" />
-                  <span>Past Events</span>
-                </div>
-                <h2 className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 ${
-                  theme === 'dark' ? 'text-white' : 'text-gray-900'
-                }`}>
-                  Our <span className="text-purple-600">Success Stories</span>
-                </h2>
-                <p className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
-                  theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
-                }`}>
-                  Take a look at some of our amazing past events and the impact we've created together.
-                </p>
-              </motion.div>
+    {/* ✅ Past Events Carousel - Enhanced */}
+{pastEvents.length > 0 && (
+  <section
+    className={`py-20 transition-colors duration-500 relative overflow-hidden ${
+      theme === "dark" ? "bg-slate-900" : "bg-gray-50"
+    }`}
+  >
+    {/* Background Decoration */}
+    <div
+      className={`absolute inset-0 pointer-events-none ${
+        theme === "dark"
+          ? "bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.15),transparent_70%)]"
+          : "bg-[radial-gradient(circle_at_bottom_left,rgba(139,92,246,0.1),transparent_70%)]"
+      }`}
+    />
 
-              <div className="relative max-w-4xl mx-auto">
-                <div className="relative h-80 md:h-96 rounded-2xl overflow-hidden">
-                  {pastEvents.map((event, index) => (
-                    <motion.div
-                      key={event._id}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ 
-                        opacity: index === currentPastEventIndex ? 1 : 0,
-                        scale: index === currentPastEventIndex ? 1 : 0.9
-                      }}
-                      transition={{ duration: 0.5 }}
-                      className={`absolute inset-0 w-full h-full ${
-                        index === currentPastEventIndex ? 'block' : 'hidden'
-                      }`}
-                    >
-                      <img
-                        src={getImageUrl(event.bannerUrl)}
-                        alt={event.title}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = '/api/placeholder/800/400';
-                        }}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                      <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
-                        <h3 className="text-xl md:text-2xl font-bold mb-2">{event.title}</h3>
-                        <p className="text-sm md:text-base opacity-90 line-clamp-2">
-                          {event.description?.substring(0, 120) || "An amazing event by Team Eklavya"}...
-                        </p>
-                        <div className="flex items-center mt-3 text-xs md:text-sm opacity-80">
-                          <Calendar className="h-3 w-3 mr-2" />
-                          {formatDate(event.startDate)}
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-       
+    <div className="relative max-w-7xl mx-auto px-4 sm:px-6">
+      {/* Header Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 30 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.6 }}
+        className="text-center mb-16 relative z-10"
+      >
+        <div
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium shadow-sm transition-all duration-300 ${
+            theme === "dark"
+              ? "bg-purple-500/20 text-purple-400 border border-purple-400/30"
+              : "bg-purple-100 text-purple-700 border border-purple-300/60"
+          }`}
+        >
+          <Award className="h-4 w-4" />
+          <span>Past Events</span>
+        </div>
+        <h2
+          className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 tracking-tight ${
+            theme === "dark" ? "text-white" : "text-gray-900"
+          }`}
+        >
+          Our <span className="text-purple-600">Success Stories</span>
+        </h2>
+        <p
+          className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
+            theme === "dark" ? "text-gray-300" : "text-gray-600"
+          }`}
+        >
+          Take a look at some of our most memorable events that inspired, connected,
+          and created impact within our community.
+        </p>
+      </motion.div>
 
-                {/* Carousel Controls */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={prevPastEvent}
-                  className={`absolute left-4 top-1/2 transform -translate-y-1/2 backdrop-blur-sm ${
-                    theme === 'dark'
-                      ? 'bg-slate-800/80 text-white hover:bg-slate-700'
-                      : 'bg-white/80 text-gray-700 hover:bg-white'
-                  }`}
+      {/* Carousel Wrapper */}
+      <div className="relative max-w-5xl mx-auto">
+        <div className="relative h-80 md:h-[450px] rounded-3xl overflow-hidden shadow-2xl">
+          {pastEvents.map((event, index) => (
+            <motion.div
+              key={event._id}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{
+                opacity: index === currentPastEventIndex ? 1 : 0,
+                scale: index === currentPastEventIndex ? 1 : 0.95,
+              }}
+              transition={{ duration: 0.6, ease: "easeInOut" }}
+              className={`absolute inset-0 w-full h-full ${
+                index === currentPastEventIndex ? "block" : "hidden"
+              }`}
+            >
+              <img
+                src={getImageUrl(event.bannerUrl)}
+                alt={event.title}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "/api/placeholder/800/400";
+                }}
+              />
+              {/* Overlay */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+              {/* Text Overlay */}
+              <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-white">
+                <motion.h3
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.4, delay: 0.1 }}
+                  className="text-2xl md:text-3xl font-semibold mb-2 drop-shadow-lg"
                 >
-                  <ChevronLeft className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={nextPastEvent}
-                  className={`absolute right-4 top-1/2 transform -translate-y-1/2 backdrop-blur-sm ${
-                    theme === 'dark'
-                      ? 'bg-slate-800/80 text-white hover:bg-slate-700'
-                      : 'bg-white/80 text-gray-700 hover:bg-white'
-                  }`}
+                  {event.title}
+                </motion.h3>
+                <motion.p
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.4, delay: 0.2 }}
+                  className="text-sm md:text-base opacity-90 line-clamp-2"
                 >
-                  <ChevronRight className="h-5 w-5" />
-                </Button>
-
-                {/* Indicators */}
-                <div className="flex justify-center mt-6 space-x-2">
-                  {pastEvents.map((_, index) => (
-                    <button
-                      key={index}
-                      onClick={() => setCurrentPastEventIndex(index)}
-                      className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                        index === currentPastEventIndex
-                          ? 'bg-blue-600 w-6'
-                          : theme === 'dark'
-                          ? 'bg-gray-600'
-                          : 'bg-gray-300'
-                      }`}
-                    />
-                  ))}
-                </div>
+                  {event.description?.substring(0, 120) ||
+                    "An inspiring event organized by our amazing team."}
+                  ...
+                </motion.p>
+                <motion.div
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.4, delay: 0.3 }}
+                  className="flex items-center mt-3 text-xs md:text-sm opacity-80"
+                >
+                  <Calendar className="h-4 w-4 mr-2" />
+                  {formatDate(event.startDate)}
+                </motion.div>
               </div>
-            </div>
-          </section>
-        )}
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Carousel Controls */}
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Previous event"
+          onClick={prevPastEvent}
+          className={`absolute left-4 top-1/2 transform -translate-y-1/2 rounded-full backdrop-blur-md transition-all ${
+            theme === "dark"
+              ? "bg-slate-800/70 text-white hover:bg-slate-700"
+              : "bg-white/80 text-gray-700 hover:bg-gray-100"
+          }`}
+        >
+          <ChevronLeft className="h-6 w-6" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Next event"
+          onClick={nextPastEvent}
+          className={`absolute right-4 top-1/2 transform -translate-y-1/2 rounded-full backdrop-blur-md transition-all ${
+            theme === "dark"
+              ? "bg-slate-800/70 text-white hover:bg-slate-700"
+              : "bg-white/80 text-gray-700 hover:bg-gray-100"
+          }`}
+        >
+          <ChevronRight className="h-6 w-6" />
+        </Button>
+
+        {/* Indicators */}
+        <div className="flex justify-center mt-6 space-x-2">
+          {pastEvents.map((_, index) => (
+            <button
+              key={index}
+              onClick={() => setCurrentPastEventIndex(index)}
+              aria-label={`Go to event ${index + 1}`}
+              className={`h-2.5 rounded-full transition-all duration-300 ${
+                index === currentPastEventIndex
+                  ? "bg-purple-600 w-6"
+                  : theme === "dark"
+                  ? "bg-gray-600 w-2"
+                  : "bg-gray-300 w-2"
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  </section>
+)}
+
 
         {/* Enhanced Double Scrolling Logos with Old School Marquee */}
         {/*<DoubleScrollingLogos />*/}

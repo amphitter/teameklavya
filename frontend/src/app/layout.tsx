@@ -1,3 +1,4 @@
+import { ThemeProvider } from "@/context/ThemeContext";
 import Navbar from "../components/Navbar";
 import "./globals.css";
 import Script from "next/script"; // ✅ for structured data
@@ -91,9 +92,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+        <ThemeProvider>
         <Navbar />
         <main>{children}</main>
-
+</ThemeProvider>
         {/* ✅ Add Structured Data (for Google Knowledge Panel & rich results) */}
         <Script
           id="structured-data"

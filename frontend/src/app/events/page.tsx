@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { useTheme } from "@/context/ThemeContext";
 import { 
   Calendar, 
   MapPin, 
@@ -19,7 +20,9 @@ import {
   Users,
   Sparkles,
   Zap,
-  Tag
+  Tag,
+  Sun,
+  Moon
 } from "lucide-react";
 
 interface Event {
@@ -43,6 +46,7 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -120,35 +124,59 @@ export default function EventsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white py-8">
+      <div className={`min-h-screen py-8 transition-colors duration-300 ${
+        theme === 'dark' ? 'bg-slate-900' : 'bg-white'
+      }`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Header Skeleton */}
           <div className="text-center mb-12">
-            <Skeleton className="h-12 w-64 mx-auto mb-4" />
-            <Skeleton className="h-6 w-96 mx-auto" />
+            <Skeleton className={`h-12 w-64 mx-auto mb-4 ${
+              theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+            }`} />
+            <Skeleton className={`h-6 w-96 mx-auto ${
+              theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+            }`} />
           </div>
 
           {/* Filters Skeleton */}
           <div className="flex flex-col sm:flex-row gap-4 mb-8">
-            <Skeleton className="h-12 flex-1" />
-            <Skeleton className="h-12 w-32" />
+            <Skeleton className={`h-12 flex-1 ${
+              theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+            }`} />
+            <Skeleton className={`h-12 w-32 ${
+              theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+            }`} />
           </div>
 
           {/* Events Grid Skeleton */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {Array.from({ length: 6 }).map((_, idx) => (
-              <Card key={idx} className="overflow-hidden border-0 shadow-lg">
-                <Skeleton className="h-48 w-full" />
+              <Card key={idx} className={`overflow-hidden border-0 shadow-lg ${
+                theme === 'dark' ? 'bg-slate-800' : 'bg-white'
+              }`}>
+                <Skeleton className={`h-48 w-full ${
+                  theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+                }`} />
                 <CardHeader className="pb-3">
-                  <Skeleton className="h-6 w-3/4 mb-2" />
-                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className={`h-6 w-3/4 mb-2 ${
+                    theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+                  }`} />
+                  <Skeleton className={`h-4 w-full ${
+                    theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+                  }`} />
                 </CardHeader>
                 <CardContent className="pb-4">
-                  <Skeleton className="h-4 w-full mb-2" />
-                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className={`h-4 w-full mb-2 ${
+                    theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+                  }`} />
+                  <Skeleton className={`h-4 w-2/3 ${
+                    theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+                  }`} />
                 </CardContent>
                 <CardFooter>
-                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className={`h-10 w-full ${
+                    theme === 'dark' ? 'bg-slate-700' : 'bg-gray-200'
+                  }`} />
                 </CardFooter>
               </Card>
             ))}
@@ -159,13 +187,29 @@ export default function EventsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className={`min-h-screen transition-colors duration-300 ${
+      theme === 'dark' 
+        ? 'bg-gradient-to-br from-gray-900 via-slate-900 to-gray-800' 
+        : 'bg-white'
+    }`}>
+      
+
       {/* Header Section */}
-      <section className="relative py-16 md:py-24 bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      <section className={`relative py-16 md:py-24 transition-colors duration-300 ${
+        theme === 'dark' 
+          ? 'bg-gradient-to-br from-slate-800 via-gray-900 to-purple-900/20' 
+          : 'bg-gradient-to-br from-blue-50 via-white to-purple-50'
+      }`}>
         <div className="absolute inset-0 opacity-30">
-          <div className="absolute top-20 left-10 w-48 h-48 sm:w-72 sm:h-72 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl animate-blob" />
-          <div className="absolute top-40 right-10 w-48 h-48 sm:w-72 sm:h-72 bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000" />
-          <div className="absolute bottom-20 left-1/2 w-48 h-48 sm:w-72 sm:h-72 bg-pink-400 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000" />
+          <div className={`absolute top-20 left-10 w-48 h-48 sm:w-72 sm:h-72 rounded-full mix-blend-multiply filter blur-3xl animate-blob ${
+            theme === 'dark' ? 'bg-blue-600/20' : 'bg-blue-400'
+          }`} />
+          <div className={`absolute top-40 right-10 w-48 h-48 sm:w-72 sm:h-72 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000 ${
+            theme === 'dark' ? 'bg-purple-600/20' : 'bg-purple-400'
+          }`} />
+          <div className={`absolute bottom-20 left-1/2 w-48 h-48 sm:w-72 sm:h-72 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000 ${
+            theme === 'dark' ? 'bg-pink-600/20' : 'bg-pink-400'
+          }`} />
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10">
@@ -175,14 +219,22 @@ export default function EventsPage() {
             transition={{ duration: 0.6 }}
             className="text-center"
           >
-            <div className="inline-flex items-center gap-2 bg-white/80 backdrop-blur-sm text-blue-600 px-4 py-2 rounded-full mb-6 font-medium shadow-lg border border-blue-100">
+            <div className={`inline-flex items-center gap-2 backdrop-blur-sm px-4 py-2 rounded-full mb-6 font-medium shadow-lg border transition-colors duration-300 ${
+              theme === 'dark'
+                ? 'bg-slate-800/80 text-blue-400 border-slate-700'
+                : 'bg-white/80 text-blue-600 border-blue-100'
+            }`}>
               <Sparkles className="h-4 w-4" />
               <span>Discover Events</span>
             </div>
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-gray-900 mb-6">
+            <h1 className={`text-4xl sm:text-5xl md:text-6xl font-bold mb-6 ${
+              theme === 'dark' ? 'text-white' : 'text-gray-900'
+            }`}>
               Explore <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Events</span>
             </h1>
-            <p className="text-lg sm:text-xl md:text-2xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
+            <p className={`text-lg sm:text-xl md:text-2xl max-w-2xl mx-auto leading-relaxed ${
+              theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+            }`}>
               Join our exciting lineup of events, workshops, and gatherings. 
               Connect, learn, and grow with our vibrant community.
             </p>
@@ -191,7 +243,9 @@ export default function EventsPage() {
       </section>
 
       {/* Search and Filters Section */}
-      <section className="py-12 bg-white">
+      <section className={`py-12 transition-colors duration-300 ${
+        theme === 'dark' ? 'bg-slate-900' : 'bg-white'
+      }`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -201,23 +255,35 @@ export default function EventsPage() {
             className="flex flex-col sm:flex-row gap-4 mb-8"
           >
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${
+                theme === 'dark' ? 'text-gray-400' : 'text-gray-400'
+              }`} />
               <Input
                 type="text"
                 placeholder="Search events by title, description, or venue..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 h-12 border-gray-300 focus:border-blue-500 bg-white rounded-xl text-black shadow-sm"
+                className={`pl-10 h-12 rounded-xl shadow-sm transition-colors duration-300 ${
+                  theme === 'dark'
+                    ? 'bg-slate-800 border-slate-600 text-white placeholder-gray-400 focus:border-blue-500'
+                    : 'bg-white border-gray-300 text-black focus:border-blue-500'
+                }`}
               />
             </div>
             
             <div className="flex gap-2">
               <div className="relative">
-                <Tag className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <Tag className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${
+                  theme === 'dark' ? 'text-gray-400' : 'text-gray-400'
+                }`} />
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="h-12 pl-10 pr-8 border border-gray-300 rounded-xl focus:border-blue-500  text-black focus:ring-1 focus:ring-blue-500 bg-white shadow-sm appearance-none"
+                  className={`h-12 pl-10 pr-8 border rounded-xl focus:ring-1 focus:ring-blue-500 shadow-sm appearance-none transition-colors duration-300 ${
+                    theme === 'dark'
+                      ? 'bg-slate-800 border-slate-600 text-white focus:border-blue-500'
+                      : 'bg-white border-gray-300 text-black focus:border-blue-500'
+                  }`}
                 >
                   <option value="all">All Categories</option>
                   {getCategories().map(category => (
@@ -234,7 +300,11 @@ export default function EventsPage() {
                   setSearchTerm("");
                   setSelectedCategory("all");
                 }}
-                className="h-12 border-gray-300 text-white hover:bg-gray-700 rounded-xl shadow-sm"
+                className={`h-12 rounded-xl shadow-sm transition-colors duration-300 ${
+                  theme === 'dark'
+                    ? 'border-slate-600 text-gray-300 hover:bg-slate-700 hover:text-white'
+                    : 'border-gray-300 text-gray-700 hover:bg-gray-100'
+                }`}
               >
                 <Filter className="h-4 w-4 mr-2" />
                 Reset
@@ -250,7 +320,9 @@ export default function EventsPage() {
             transition={{ duration: 0.5, delay: 0.1 }}
             className="mb-6"
           >
-            <p className="text-gray-600 font-medium">
+            <p className={`font-medium ${
+              theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+            }`}>
               Showing {filteredEvents.length} of {events.length} events
               {searchTerm && ` for "${searchTerm}"`}
               {selectedCategory !== "all" && ` in ${selectedCategory}`}
@@ -260,7 +332,9 @@ export default function EventsPage() {
       </section>
 
       {/* Events Grid Section */}
-      <section className="py-12 bg-gray-50">
+      <section className={`py-12 transition-colors duration-300 ${
+        theme === 'dark' ? 'bg-slate-800' : 'bg-gray-50'
+      }`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           {filteredEvents.length === 0 ? (
             <motion.div
@@ -270,12 +344,20 @@ export default function EventsPage() {
               transition={{ duration: 0.6 }}
               className="text-center py-16"
             >
-              <div className="bg-white rounded-2xl p-12 border-0 shadow-lg max-w-md mx-auto">
-                <Calendar className="h-24 w-24 text-gray-400 mx-auto mb-6" />
-                <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+              <div className={`rounded-2xl p-12 border-0 shadow-lg max-w-md mx-auto transition-colors duration-300 ${
+                theme === 'dark' ? 'bg-slate-700' : 'bg-white'
+              }`}>
+                <Calendar className={`h-24 w-24 mx-auto mb-6 ${
+                  theme === 'dark' ? 'text-gray-400' : 'text-gray-400'
+                }`} />
+                <h3 className={`text-2xl font-semibold mb-3 ${
+                  theme === 'dark' ? 'text-white' : 'text-gray-900'
+                }`}>
                   No Events Found
                 </h3>
-                <p className="text-gray-600 mb-6">
+                <p className={`mb-6 ${
+                  theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+                }`}>
                   {searchTerm || selectedCategory !== "all" 
                     ? "Try adjusting your search terms or filters to find more events."
                     : "Check back soon for upcoming events!"}
@@ -303,14 +385,19 @@ export default function EventsPage() {
                   viewport={{ once: true }}
                   transition={{ duration: 0.5, delay: index * 0.1 }}
                 >
-                  <Card className="group overflow-hidden border-0 shadow-lg hover:shadow-2xl transition-all duration-500 bg-white h-full">
+                  <Card className={`group overflow-hidden border-0 shadow-lg hover:shadow-2xl transition-all duration-500 h-full ${
+                    theme === 'dark' 
+                      ? 'bg-slate-700 hover:bg-slate-600' 
+                      : 'bg-white hover:bg-gray-50'
+                  }`}>
                     <div className="relative overflow-hidden">
                       <img 
                         src={getImageUrl(event.bannerUrl)} 
                         alt={event.title}
                         className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-500"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).src = '/logo.png';
+                          // Use theme-based logo fallback
+                          (e.target as HTMLImageElement).src = theme === 'dark' ? '/logo.png' : '/logo1.png';
                         }}
                       />
                       
@@ -318,12 +405,12 @@ export default function EventsPage() {
                       <div className="absolute top-4 left-4">
                         {isEventLive(event.startDate, event.endDate) && (
                           <span className="bg-red-500 text-white px-3 py-1 rounded-full text-xs font-semibold shadow-lg">
-                             Live Now
+                            Live Now
                           </span>
                         )}
                         {isEventUpcoming(event.startDate) && !isEventLive(event.startDate, event.endDate) && (
                           <span className="bg-green-500 text-white px-3 py-1 rounded-full text-xs font-semibold shadow-lg">
-                             Upcoming
+                            Upcoming
                           </span>
                         )}
                       </div>
@@ -331,7 +418,11 @@ export default function EventsPage() {
                       {/* Category Badge */}
                       {event.category && (
                         <div className="absolute top-4 right-4">
-                          <span className="bg-gray-800/90 text-white px-3 py-1 rounded-full text-xs font-medium shadow-lg backdrop-blur-sm">
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium shadow-lg backdrop-blur-sm ${
+                            theme === 'dark'
+                              ? 'bg-gray-800/90 text-white'
+                              : 'bg-gray-800/90 text-white'
+                          }`}>
                             {event.category}
                           </span>
                         </div>
@@ -339,17 +430,23 @@ export default function EventsPage() {
                     </div>
                     
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-xl font-bold line-clamp-2 group-hover:text-blue-600 transition-colors duration-300 text-gray-900">
+                      <CardTitle className={`text-xl font-bold line-clamp-2 group-hover:text-blue-600 transition-colors duration-300 ${
+                        theme === 'dark' ? 'text-white' : 'text-gray-900'
+                      }`}>
                         {event.title}
                       </CardTitle>
-                      <CardDescription className="line-clamp-2 text-gray-600">
+                      <CardDescription className={`line-clamp-2 ${
+                        theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+                      }`}>
                         {event.description || "Join us for an amazing event!"}
                       </CardDescription>
                     </CardHeader>
                     
                     <CardContent className="pb-4 space-y-3">
                       {/* Date and Time */}
-                      <div className="flex items-center text-sm text-gray-600">
+                      <div className={`flex items-center text-sm ${
+                        theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                      }`}>
                         <Calendar className="h-4 w-4 mr-2 flex-shrink-0" />
                         <div>
                           <span>{formatDate(event.startDate)}</span>
@@ -360,14 +457,18 @@ export default function EventsPage() {
                       </div>
                       
                       {/* Time */}
-                      <div className="flex items-center text-sm text-gray-600">
+                      <div className={`flex items-center text-sm ${
+                        theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                      }`}>
                         <Clock className="h-4 w-4 mr-2 flex-shrink-0" />
                         <span>{formatTime(event.startDate)}</span>
                       </div>
                       
                       {/* Venue */}
                       {event.venue && (
-                        <div className="flex items-center text-sm text-gray-600">
+                        <div className={`flex items-center text-sm ${
+                          theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                        }`}>
                           <MapPin className="h-4 w-4 mr-2 flex-shrink-0" />
                           <span className="truncate">{event.venue}</span>
                         </div>
@@ -375,7 +476,9 @@ export default function EventsPage() {
                       
                       {/* Capacity */}
                       {(event.capacity || event.registeredCount) && (
-                        <div className="flex items-center text-sm text-gray-600">
+                        <div className={`flex items-center text-sm ${
+                          theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                        }`}>
                           <Users className="h-4 w-4 mr-2 flex-shrink-0" />
                           <span>
                             {event.registeredCount || 0}
@@ -413,16 +516,6 @@ export default function EventsPage() {
               ))}
             </div>
           )}
-
-          {/* Back to Home */}
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-            className="text-center mt-12"
-          >
-          </motion.div>
         </div>
       </section>
 

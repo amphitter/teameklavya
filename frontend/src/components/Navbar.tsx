@@ -1,12 +1,13 @@
 "use client";
 
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useState, useEffect } from "react";
-import { useTheme } from "next-themes";
-import { 
-  Sun, 
-  Moon, 
-  Menu, 
+import { useTheme } from "@/context/ThemeContext";
+import { Button } from "@/components/ui/button";
+import {
+  Sun,
+  Moon,
+  Menu,
   X,
   User,
   LogOut,
@@ -16,9 +17,7 @@ import {
   Users,
   FileText,
   BarChart3,
-  Shield
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,17 +26,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Sheet,
-  SheetContent,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { cn } from "@/components/lib/utlis";
 
 export default function Navbar() {
   const [role, setRole] = useState<"admin" | "user" | null>(null);
   const [mounted, setMounted] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { theme, setTheme } = useTheme();
+  const [isVisible, setIsVisible] = useState(true);
+  const [isAtTop, setIsAtTop] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
+  const { theme, toggleTheme } = useTheme();
+
+  const navbarRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -45,7 +46,44 @@ export default function Navbar() {
     setRole(storedRole);
   }, []);
 
-  // Navigation links based on role
+  useEffect(() => {
+    const controlNavbar = () => {
+      const currentScrollY = window.scrollY;
+      
+      // Check if at top of page
+      setIsAtTop(currentScrollY < 10);
+
+      // Show/hide navbar based on scroll direction
+      if (currentScrollY > lastScrollY && currentScrollY > 100) {
+        // Scrolling down and past 100px - hide navbar
+        setIsVisible(false);
+      } else {
+        // Scrolling up - show navbar
+        setIsVisible(true);
+      }
+      
+      setLastScrollY(currentScrollY);
+    };
+
+    // Throttle the scroll event for better performance
+    let ticking = false;
+    const throttledControlNavbar = () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          controlNavbar();
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    window.addEventListener('scroll', throttledControlNavbar, { passive: true });
+    
+    return () => {
+      window.removeEventListener('scroll', throttledControlNavbar);
+    };
+  }, [lastScrollY]);
+
   const getNavLinks = () => {
     if (role === "admin") {
       return [
@@ -79,7 +117,7 @@ export default function Navbar() {
   };
 
   const getUserInitials = () => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       const userData = localStorage.getItem("user");
       if (userData) {
         try {
@@ -99,7 +137,7 @@ export default function Navbar() {
   };
 
   const getUserName = () => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       const userData = localStorage.getItem("user");
       if (userData) {
         try {
@@ -116,241 +154,363 @@ export default function Navbar() {
     return "User";
   };
 
-  if (!mounted) {
-    return (
-      <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            {/* Loading skeleton */}
-            <div className="flex items-center space-x-3">
-              <div className="h-10 w-10 bg-gray-300 rounded animate-pulse"></div>
-              <div className="h-6 w-32 bg-gray-300 rounded animate-pulse"></div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <div className="h-9 w-9 bg-gray-300 rounded animate-pulse"></div>
-              <div className="h-9 w-9 bg-gray-300 rounded animate-pulse"></div>
-            </div>
-          </div>
-        </div>
-      </nav>
-    );
-  }
+  if (!mounted) return null;
 
   const navLinks = getNavLinks();
 
   return (
-    <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          {/* Logo and Brand */}
-          <div className="flex items-center space-x-3">
-            <Link href="/" className="flex items-center space-x-3 group">
-              <img 
-                src="/logo1.png" 
-                alt="Team Eklavya" 
-                className="h-10 w-auto transition-transform group-hover:scale-105"
+    <nav
+      ref={navbarRef}
+      className={cn(
+        "fixed top-0 left-0 right-0 z-50 w-full transition-all duration-500 ease-in-out",
+        isVisible ? "translate-y-0" : "-translate-y-full",
+        theme === "light" 
+          ? isAtTop 
+            ? "bg-white/80 border-b border-gray-200/50" 
+            : "bg-white/95 backdrop-blur-md border-b border-gray-200/80 shadow-sm"
+          : isAtTop
+          ? "bg-slate-950/80 border-b border-slate-800/50"
+          : "bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 shadow-lg shadow-black/10"
+      )}
+      style={{
+        backdropFilter: isAtTop ? 'blur(0px)' : 'blur(12px)',
+        WebkitBackdropFilter: isAtTop ? 'blur(0px)' : 'blur(12px)',
+      }}
+    >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex items-center justify-between h-16">
+          {/* Logo */}
+          <div className="flex items-center gap-2">
+            <Link
+              href="/"
+              className={cn(
+                "flex items-center gap-2 font-bold text-xl hover:text-blue-600 transition-colors",
+                theme === "light" ? "text-gray-900" : "text-white hover:text-blue-400"
+              )}
+            >
+              <img
+                src={theme === "dark" ? "/logo.png" : "/logo1.png"}
+                alt="Team Eklavya"
+                className="h-8 w-auto transition-transform duration-300 hover:scale-105"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = '/api/placeholder/40/40';
+                  (e.target as HTMLElement).style.display = "none";
                 }}
               />
-
             </Link>
 
-            {/* Role Badge */}
             {role && (
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                role === "admin" 
-                  ? "bg-red-100 text-red-800" 
-                  : "bg-blue-100 text-blue-800"
-              }`}>
-                {role === "admin" && <Shield className="w-3 h-3 mr-1" />}
-                {role?.charAt(0).toUpperCase() + role?.slice(1)}
+              <span
+                className={cn(
+                  "ml-4 px-3 py-1 rounded-full text-sm font-medium transition-colors duration-300",
+                  role === "admin"
+                    ? theme === "light"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-red-900/30 text-red-300"
+                    : theme === "light"
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-blue-900/30 text-blue-300"
+                )}
+              >
+                {role.charAt(0).toUpperCase() + role.slice(1)}
               </span>
             )}
           </div>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-1">
-            {/* Navigation Links */}
-            <div className="flex items-center space-x-1 mr-4">
-              {navLinks.map((link) => {
-                const Icon = link.icon;
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className="flex items-center space-x-1 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-gray-100 transition-all duration-200"
-                  >
-                    <Icon className="h-4 w-4" />
-                    <span>{link.name}</span>
-                  </Link>
-                );
-              })}
-            </div>
+          <div className="hidden md:flex items-center gap-1 ml-48">
+            {navLinks.map((link) => {
+              const Icon = link.icon;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 hover:text-blue-600 transition-all duration-200 group relative",
+                    theme === "light"
+                      ? "text-gray-700"
+                      : "text-gray-300 dark:hover:bg-slate-800 dark:hover:text-blue-400"
+                  )}
+                >
+                  <Icon className="h-4 w-4 transition-transform duration-200 group-hover:scale-110" />
+                  {link.name}
+                  <span className={cn(
+                    "absolute bottom-0 left-0 w-0 h-0.5 bg-blue-600 transition-all duration-300 group-hover:w-full",
+                    theme === "dark" && "bg-blue-400"
+                  )} />
+                </Link>
+              );
+            })}
+          </div>
 
+          {/* Desktop Right Section */}
+          <div className="hidden md:flex items-center gap-3">
             {/* Theme Toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              className={cn(
+                "hover:bg-gray-100 transition-all duration-300 hover:scale-110",
+                theme === "light"
+                  ? "text-gray-700 hover:bg-gray-200"
+                  : "text-gray-300 hover:bg-slate-800"
+              )}
+            >
+              {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+            </Button>
 
             {/* Auth Section */}
             {!role ? (
-              <div className="flex items-center space-x-2 ml-2">
-                <Button variant="ghost" asChild className="rounded-lg text-gray-700">
+              <div className="flex items-center gap-3 ml-4 pl-4 border-l border-gray-200 dark:border-slate-800">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  asChild
+                  className={cn(
+                    "transition-all duration-300 hover:scale-105",
+                    theme === "light" ? "text-gray-700 hover:text-blue-600" : "text-gray-300 hover:text-blue-400"
+                  )}
+                >
                   <Link href="/login">Login</Link>
                 </Button>
-                <Button asChild className="rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
+                <Button
+                  size="sm"
+                  asChild
+                  className="bg-blue-600 hover:bg-blue-700 text-white transition-all duration-300 hover:scale-105 shadow-lg hover:shadow-xl"
+                >
                   <Link href="/signup">Sign Up</Link>
                 </Button>
               </div>
             ) : (
               <DropdownMenu>
-                <DropdownMenuTrigger asChild >
-                  <Button variant="ghost" className="relative h-9 w-9 rounded-full ml-2">
-                    <div className="flex items-center space-x-2">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-purple-600 text-white text-sm font-medium">
-                        {getUserInitials()}
-                      </div>
-                      <ChevronDown className="h-4 w-4 text-gray-600" />
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "ml-4 pl-4 border-l border-gray-200 dark:border-slate-800 flex items-center gap-3 transition-all duration-300 hover:scale-105 group",
+                      theme === "light" ? "text-gray-700 hover:bg-gray-100" : "text-gray-300 hover:bg-slate-800"
+                    )}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-bold transition-transform duration-300 group-hover:scale-110 shadow-lg">
+                      {getUserInitials()}
                     </div>
+                    <div className="text-left">
+                      <div className="font-medium text-sm">{getUserName()}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {role === "admin" ? "Administrator" : "Member"}
+                      </div>
+                    </div>
+                    <ChevronDown className="h-4 w-4 opacity-50 transition-transform duration-300 group-hover:rotate-180" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56 text-blue-700" align="end" forceMount>
-                  <DropdownMenuLabel className="font-normal">
-                    <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-medium leading-none">{getUserName()}</p>
-                      <p className="text-xs leading-none text-gray-500">
-                        {role === "admin" ? "Administrator" : "Member"}
-                      </p>
-                    </div>
+                <DropdownMenuContent 
+                  align="end" 
+                  className={cn(
+                    "w-56 transition-all duration-300",
+                    theme === "dark" ? "bg-slate-900 border-slate-700" : "bg-white border-gray-200"
+                  )}
+                >
+                  <DropdownMenuLabel className={theme === "dark" ? "text-gray-200" : ""}>
+                    My Account
                   </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link href="/user/profile" className="cursor-pointer">
-                      <User className="mr-2 h-4 w-4" />
-                      <span>Profile</span>
+                  <DropdownMenuSeparator className={theme === "dark" ? "bg-slate-700" : ""} />
+                  <DropdownMenuItem asChild className={cn(
+                    "cursor-pointer transition-colors duration-200",
+                    theme === "dark" ? "hover:bg-slate-800 focus:bg-slate-800" : ""
+                  )}>
+                    <Link href="/user/profile">
+                      <User className="h-4 w-4 mr-2" />
+                      Profile
                     </Link>
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem 
+                  {role === "admin" && (
+                    <DropdownMenuItem asChild className={cn(
+                      "cursor-pointer transition-colors duration-200",
+                      theme === "dark" ? "hover:bg-slate-800 focus:bg-slate-800" : ""
+                    )}>
+                      <Link href="/admin/dashboard">
+                        <BarChart3 className="h-4 w-4 mr-2" />
+                        Dashboard
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator className={theme === "dark" ? "bg-slate-700" : ""} />
+                  <DropdownMenuItem
                     onClick={handleLogout}
-                    className="cursor-pointer text-red-600 focus:text-red-600"
+                    className={cn(
+                      "cursor-pointer transition-colors duration-200",
+                      theme === "dark" 
+                        ? "text-red-400 hover:bg-slate-800 hover:text-red-300 focus:bg-slate-800 focus:text-red-300" 
+                        : "text-red-600 hover:bg-red-50 focus:bg-red-50"
+                    )}
                   >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>Log out</span>
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Log out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
           </div>
 
-          {/* Mobile Menu Button */}
-          <div className="flex md:hidden items-center space-x-2">
+          {/* Mobile Menu */}
+          <div className="md:hidden flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              className={cn(
+                "transition-all duration-300 hover:scale-110",
+                theme === "light" ? "text-gray-700" : "text-gray-300 dark:hover:bg-slate-800"
+              )}
+            >
+              {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+            </Button>
 
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-lg">
-                  {mobileMenuOpen ? (
-                    <X className="h-6 w-6" />
-                  ) : (
-                    <Menu className="h-6 w-6" />
-                  )}
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  className="transition-all duration-300 hover:scale-110"
+                >
+                  {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="w-[300px] sm:w-[400px] bg-white">
-                <div className="flex flex-col h-full">
-                  {/* Mobile Navigation Header */}
-                  <div className="flex items-center space-x-3 pb-6 border-b border-gray-200">
-                    <img 
-                      src="/logo.png" 
-                      alt="Team Eklavya" 
-                      className="h-10 w-auto"
+              <SheetContent
+                side="right"
+                className={cn(
+                  "w-80 transition-all duration-300 backdrop-blur-lg",
+                  theme === "light" 
+                    ? "bg-white/95 border-l border-gray-200/50 text-gray-900" 
+                    : "bg-slate-950/95 border-l border-slate-800/50 text-gray-300"
+                )}
+                style={{
+                  backdropFilter: 'blur(16px)',
+                  WebkitBackdropFilter: 'blur(16px)',
+                }}
+              >
+                {/* Mobile Header */}
+                <div 
+                  className="mb-6 pb-6 border-b" 
+                  style={{ borderColor: theme === "light" ? "rgba(229, 231, 235, 0.5)" : "rgba(30, 41, 59, 0.5)" }}
+                >
+                  <div className="flex items-center gap-2 mb-4">
+                    <img
+                      src={theme === "dark" ? "/logo.png" : "/logo1.png"}
+                      alt="Team Eklavya"
+                      className="h-6 w-auto"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = '/logo.png';
+                        (e.target as HTMLElement).style.display = "none";
                       }}
                     />
-                    <div>
-                      <span className="text-lg font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                        Team Eklavya
-                      </span>
-                      {role && (
-                        <div className="text-xs text-gray-500">
+                  </div>
+                  {role && (
+                    <span
+                      className={cn(
+                        "inline-block px-3 py-1 rounded-full text-xs font-medium transition-colors duration-300",
+                        role === "admin"
+                          ? theme === "light"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-red-900/30 text-red-300"
+                          : theme === "light"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-blue-900/30 text-blue-300"
+                      )}
+                    >
+                      {role === "admin" ? "Administrator" : "Member"}
+                    </span>
+                  )}
+                </div>
+
+                {/* Mobile Links */}
+                <div className="space-y-2 mb-6">
+                  {navLinks.map((link) => {
+                    const Icon = link.icon;
+                    return (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={cn(
+                          "flex items-center gap-3 px-4 py-3 rounded-lg text-base font-medium hover:text-blue-600 transition-all duration-200 group",
+                          theme === "light"
+                            ? "text-gray-700 hover:bg-gray-100/80"
+                            : "text-gray-300 hover:bg-slate-800/80 dark:hover:text-blue-400"
+                        )}
+                      >
+                        <Icon className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
+                        {link.name}
+                      </Link>
+                    );
+                  })}
+                </div>
+
+                {/* Mobile Auth */}
+                <div 
+                  className="pt-6 border-t" 
+                  style={{ borderColor: theme === "light" ? "rgba(229, 231, 235, 0.5)" : "rgba(30, 41, 59, 0.5)" }}
+                >
+                  {!role ? (
+                    <div className="space-y-3">
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "w-full border-gray-300 transition-all duration-300 hover:scale-105",
+                          theme === "light" ? "text-gray-700" : "text-gray-300 dark:border-slate-700"
+                        )}
+                        asChild
+                      >
+                        <Link href="/login" onClick={() => setMobileMenuOpen(false)}>
+                          Login
+                        </Link>
+                      </Button>
+                      <Button 
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white transition-all duration-300 hover:scale-105 shadow-lg" 
+                        asChild
+                      >
+                        <Link href="/signup" onClick={() => setMobileMenuOpen(false)}>
+                          Sign Up
+                        </Link>
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className={cn(
+                        "px-4 py-3 rounded-lg transition-colors duration-300",
+                        theme === "light" ? "bg-gray-50/80 text-gray-900" : "bg-slate-900/80 text-gray-300"
+                      )}>
+                        <div className="font-medium text-sm">{getUserName()}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
                           {role === "admin" ? "Administrator" : "Member"}
                         </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Mobile Navigation Links */}
-                  <nav className="flex-1 py-6">
-                    <div className="space-y-2">
-                      {navLinks.map((link) => {
-                        const Icon = link.icon;
-                        return (
-                          <Link
-                            key={link.href}
-                            href={link.href}
-                            onClick={() => setMobileMenuOpen(false)}
-                            className="flex items-center space-x-3 px-3 py-3 rounded-lg text-base font-medium text-gray-700 hover:text-blue-600 hover:bg-gray-100 transition-all duration-200"
-                          >
-                            <Icon className="h-5 w-5" />
-                            <span>{link.name}</span>
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </nav>
-
-                  {/* Mobile Auth Section */}
-                  <div className="border-t border-gray-200 pt-6 space-y-4">
-                    {!role ? (
-                      <div className="space-y-3">
-                        <Button asChild className="w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
-                          <Link href="/login" onClick={() => setMobileMenuOpen(false)}>
-                            Login
-                          </Link>
-                        </Button>
-                        <Button asChild variant="outline" className="w-full rounded-lg">
-                          <Link href="/signup" onClick={() => setMobileMenuOpen(false)}>
-                            Sign Up
-                          </Link>
-                        </Button>
                       </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="flex items-center space-x-3 px-3 py-2">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-purple-600 text-white text-sm font-medium">
-                            {getUserInitials()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">
-                              {getUserName()}
-                            </p>
-                            <p className="text-xs text-gray-500 truncate">
-                              {role === "admin" ? "Administrator" : "Member"}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <Button 
-                            variant="outline" 
-                            asChild
-                            className="w-full rounded-lg justify-start"
-                          >
-                            <Link href="/user/profile" onClick={() => setMobileMenuOpen(false)}>
-                              <User className="mr-2 h-4 w-4" />
-                              Profile
-                            </Link>
-                          </Button>
-                          <Button 
-                            variant="destructive" 
-                            onClick={handleLogout}
-                            className="w-full rounded-lg justify-start"
-                          >
-                            <LogOut className="mr-2 h-4 w-4" />
-                            Log out
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "w-full border-gray-300 transition-all duration-300 hover:scale-105",
+                          theme === "light" ? "text-gray-700" : "text-gray-300 dark:border-slate-700"
+                        )}
+                        asChild
+                      >
+                        <Link href="/user/profile" onClick={() => setMobileMenuOpen(false)}>
+                          <User className="h-4 w-4 mr-2" />
+                          Profile
+                        </Link>
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        className="w-full transition-all duration-300 hover:scale-105"
+                        onClick={() => {
+                          handleLogout();
+                          setMobileMenuOpen(false);
+                        }}
+                      >
+                        <LogOut className="h-4 w-4 mr-2" />
+                        Log out
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </SheetContent>
             </Sheet>

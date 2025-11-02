@@ -723,74 +723,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Why Team Eklavya Section */}
-        <section className={`py-20 transition-colors duration-300 ${
-          theme === 'dark' ? 'bg-slate-800' : 'bg-gray-50'
-        }`}>
-          <div className="max-w-7xl mx-auto px-4 sm:px-6">
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6 }}
-              className="text-center mb-16"
-            >
-              <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium transition-colors duration-300 ${
-                theme === 'dark'
-                  ? 'bg-blue-500/20 text-blue-400'
-                  : 'bg-blue-50 text-blue-600'
-              }`}>
-                <Target className="h-4 w-4" />
-                <span>Why Choose Us</span>
-              </div>
-              <h2 className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 ${
-                theme === 'dark' ? 'text-white' : 'text-gray-900'
-              }`}>
-                Why <span className="text-blue-600">Team Eklavya</span>?
-              </h2>
-              <p className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
-                theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
-              }`}>
-                We provide a platform for students to learn, grow, and innovate together in a supportive community environment.
-              </p>
-            </motion.div>
-
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {features.map((feature, index) => (
-                <motion.div
-                  key={feature.title}
-                  initial={{ opacity: 0, y: 30 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: index * 0.1 }}
-                  className={`p-6 rounded-2xl transition-all duration-300 hover:scale-105 ${
-                    theme === 'dark'
-                      ? 'bg-slate-700/50 hover:bg-slate-700'
-                      : 'bg-white hover:bg-gray-100'
-                  } shadow-lg hover:shadow-xl`}
-                >
-                  <div className={`w-12 h-12 rounded-lg mb-4 flex items-center justify-center ${
-                    theme === 'dark' ? 'bg-slate-600' : 'bg-gray-100'
-                  }`}>
-                    <feature.icon className={`h-6 w-6 ${feature.color}`} />
-                  </div>
-                  <h3 className={`text-lg font-semibold mb-3 ${
-                    theme === 'dark' ? 'text-white' : 'text-gray-900'
-                  }`}>
-                    {feature.title}
-                  </h3>
-                  <p className={`text-sm leading-relaxed ${
-                    theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
-                  }`}>
-                    {feature.description}
-                  </p>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Upcoming Events Section - Conditionally Rendered */}
+         {/* Upcoming Events Section - Conditionally Rendered */}
         {events.length > 0 && (
           <section className={`py-20 transition-colors duration-300 ${
             theme === 'dark' ? 'bg-slate-900' : 'bg-white'
@@ -897,6 +830,75 @@ export default function Home() {
             </div>
           </section>
         )}
+
+        {/* Why Team Eklavya Section */}
+        <section className={`py-20 transition-colors duration-300 ${
+          theme === 'dark' ? 'bg-slate-800' : 'bg-gray-50'
+        }`}>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6 }}
+              className="text-center mb-16"
+            >
+              <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium transition-colors duration-300 ${
+                theme === 'dark'
+                  ? 'bg-blue-500/20 text-blue-400'
+                  : 'bg-blue-50 text-blue-600'
+              }`}>
+                <Target className="h-4 w-4" />
+                <span>Why Choose Us</span>
+              </div>
+              <h2 className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 ${
+                theme === 'dark' ? 'text-white' : 'text-gray-900'
+              }`}>
+                Why <span className="text-blue-600">Team Eklavya</span>?
+              </h2>
+              <p className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
+                theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+              }`}>
+                We provide a platform for students to learn, grow, and innovate together in a supportive community environment.
+              </p>
+            </motion.div>
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {features.map((feature, index) => (
+                <motion.div
+                  key={feature.title}
+                  initial={{ opacity: 0, y: 30 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5, delay: index * 0.1 }}
+                  className={`p-6 rounded-2xl transition-all duration-300 hover:scale-105 ${
+                    theme === 'dark'
+                      ? 'bg-slate-700/50 hover:bg-slate-700'
+                      : 'bg-white hover:bg-gray-100'
+                  } shadow-lg hover:shadow-xl`}
+                >
+                  <div className={`w-12 h-12 rounded-lg mb-4 flex items-center justify-center ${
+                    theme === 'dark' ? 'bg-slate-600' : 'bg-gray-100'
+                  }`}>
+                    <feature.icon className={`h-6 w-6 ${feature.color}`} />
+                  </div>
+                  <h3 className={`text-lg font-semibold mb-3 ${
+                    theme === 'dark' ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    {feature.title}
+                  </h3>
+                  <p className={`text-sm leading-relaxed ${
+                    theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+                  }`}>
+                    {feature.description}
+                  </p>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </section>
+ <NewsletterEvents />
+       
 
         {/* Past Events Carousel */}
         {pastEvents.length > 0 && (
@@ -1019,7 +1021,7 @@ export default function Home() {
 
         {/* Enhanced Double Scrolling Logos with Old School Marquee */}
         {/*<DoubleScrollingLogos />*/}
- <NewsletterEvents />
+
         {/* Social Media Section */}
         <section className={`py-20 transition-colors duration-300 ${
           theme === 'dark' ? 'bg-slate-900' : 'bg-white'

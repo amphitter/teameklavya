@@ -45,7 +45,7 @@ import {
 } from "lucide-react";
 import NewsletterEvents from "./NewsLetter";
 
-// Three.js component for 3D background
+// Three.js / canvas-ish particle component
 const ThreeScene = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { theme } = useTheme();
@@ -57,7 +57,6 @@ const ThreeScene = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas size
     const setCanvasSize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
@@ -65,7 +64,6 @@ const ThreeScene = () => {
     setCanvasSize();
     window.addEventListener('resize', setCanvasSize);
 
-    // Particle system
     const particles: Array<{
       x: number;
       y: number;
@@ -75,273 +73,76 @@ const ThreeScene = () => {
       color: string;
     }> = [];
 
-    // Create particles
-    const particleCount = 50;
+    const particleCount = 60;
     for (let i = 0; i < particleCount; i++) {
       particles.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
-        size: Math.random() * 2 + 1,
-        speedX: (Math.random() - 0.5) * 0.5,
-        speedY: (Math.random() - 0.5) * 0.5,
-        color: theme === 'dark' 
-          ? `rgba(100, 200, 255, ${Math.random() * 0.3 + 0.1})`
-          : `rgba(59, 130, 246, ${Math.random() * 0.2 + 0.1})`
+        size: Math.random() * 2 + 0.8,
+        speedX: (Math.random() - 0.5) * 0.4,
+        speedY: (Math.random() - 0.5) * 0.4,
+        color: theme === 'dark'
+          ? `rgba(100, 200, 255, ${Math.random() * 0.25 + 0.05})`
+          : `rgba(59, 130, 246, ${Math.random() * 0.18 + 0.04})`
       });
     }
 
-    // Animation loop
+    let rafId = 0;
     const animate = () => {
       if (!ctx) return;
-      
-      // Clear with fade effect
-      ctx.fillStyle = theme === 'dark' ? 'rgba(15, 23, 42, 0.1)' : 'rgba(255, 255, 255, 0.1)';
+
+      // semi-transparent clearing to create motion trails
+      ctx.fillStyle = theme === 'dark' ? 'rgba(10,12,20,0.08)' : 'rgba(255,255,255,0.06)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Update and draw particles
-      particles.forEach(particle => {
+      particles.forEach((particle) => {
         particle.x += particle.speedX;
         particle.y += particle.speedY;
 
-        // Wrap around edges
         if (particle.x < 0) particle.x = canvas.width;
         if (particle.x > canvas.width) particle.x = 0;
         if (particle.y < 0) particle.y = canvas.height;
         if (particle.y > canvas.height) particle.y = 0;
 
-        // Draw particle
         ctx.beginPath();
         ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
         ctx.fillStyle = particle.color;
         ctx.fill();
 
-        // Draw connections
-        particles.forEach(otherParticle => {
-          const dx = particle.x - otherParticle.x;
-          const dy = particle.y - otherParticle.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          if (distance < 100) {
+        // connections
+        particles.forEach((other) => {
+          const dx = particle.x - other.x;
+          const dy = particle.y - other.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 110) {
             ctx.beginPath();
-            ctx.strokeStyle = theme === 'dark' 
-              ? `rgba(100, 200, 255, ${0.2 * (1 - distance / 100)})`
-              : `rgba(59, 130, 246, ${0.1 * (1 - distance / 100)})`;
-            ctx.lineWidth = 0.5;
+            ctx.strokeStyle = theme === 'dark'
+              ? `rgba(100,200,255,${0.15 * (1 - dist / 110)})`
+              : `rgba(59,130,246,${0.08 * (1 - dist / 110)})`;
+            ctx.lineWidth = 0.4;
             ctx.moveTo(particle.x, particle.y);
-            ctx.lineTo(otherParticle.x, otherParticle.y);
+            ctx.lineTo(other.x, other.y);
             ctx.stroke();
           }
         });
       });
 
-      requestAnimationFrame(animate);
+      rafId = requestAnimationFrame(animate);
     };
 
     animate();
 
     return () => {
       window.removeEventListener('resize', setCanvasSize);
+      cancelAnimationFrame(rafId);
     };
   }, [theme]);
 
   return (
     <canvas
       ref={canvasRef}
-      className="absolute inset-0 w-full h-full pointer-events-none opacity-40"
+      className="absolute inset-0 w-full h-full pointer-events-none opacity-30 z-0"
     />
-  );
-};
-
-// Enhanced Double Scrolling Logos Component with Old School Marquee
-const DoubleScrollingLogos = () => {
-  const { theme } = useTheme();
-  
-  const partners = [
-    { 
-      name: "IIT Bombay Techfest", 
-      logo: "/iitb.png"
-    },
-    { name: "IIIT Delhi", logo: "/iiitd-logo.png" },
-    { name: "Google Developer Groups", logo: "/gdg-logo.png" },
-    { name: "Microsoft Learn", logo: "/microsoft-logo.png" },
-    { name: "AWS Educate", logo: "/aws-logo.png" },
-    { name: "GitHub Campus", logo: "/github-logo.png" },
-    { name: "Hackathon Club", logo: "/hackathon-logo.png" },
-    { name: "CodeChef", logo: "/codechef-logo.png" },
-    { name: "LeetCode", logo: "/leetcode-logo.png" },
-    { name: "Devfolio", logo: "/devfolio-logo.png" },
-    { name: "HackerRank", logo: "/hackerrank-logo.png" },
-    { name: "MLH", logo: "/mlh-logo.png" },
-  ];
-
-  const PartnerLogo = ({ partner, index }: { partner: any; index: number }) => (
-    <div className="flex-shrink-0 w-32 h-32 md:w-40 md:h-40 flex items-center justify-center p-4">
-      <div className={`w-full h-full flex items-center justify-center rounded-2xl transition-all duration-500 hover:scale-110 group ${
-        theme === 'dark' 
-          ? 'bg-gradient-to-br from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800' 
-          : 'bg-gradient-to-br from-white to-gray-50 hover:from-blue-50 hover:to-purple-50'
-      } shadow-lg hover:shadow-2xl border-2 ${
-        theme === 'dark' 
-          ? 'border-slate-700 hover:border-blue-500' 
-          : 'border-gray-200 hover:border-blue-400'
-      } relative overflow-hidden`}>
-        
-        {/* Hover effect overlay */}
-        <div className={`absolute inset-0 bg-gradient-to-br from-blue-500/0 to-purple-600/0 group-hover:from-blue-500/10 group-hover:to-purple-600/10 transition-all duration-500 rounded-2xl`} />
-        
-        {/* Animated border effect */}
-        <div className={`absolute inset-0 rounded-2xl bg-gradient-to-r from-transparent via-blue-500/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 -translate-x-full group-hover:translate-x-full`} />
-        
-        <div className="text-center relative z-10">
-          {partner.featured ? (
-            <div className="space-y-3">
-              {/* IIT Bombay Featured Logo */}
-              <div className="w-16 h-16 md:w-20 md:h-20 mx-auto rounded-xl bg-gradient-to-br from-yellow-400 to-orange-500 p-1 shadow-lg">
-                <div className="w-full h-full rounded-lg bg-white flex items-center justify-center p-2">
-                  <div className="text-center">
-                    <div className="text-xs font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
-                      IIT Bombay
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-xs md:text-sm font-bold bg-gradient-to-r from-yellow-500 to-orange-500 bg-clip-text text-transparent">
-                  Techfest 2025
-                </div>
-                <div className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
-                  Community Partner
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="w-12 h-12 md:w-16 md:h-16 mx-auto mb-3 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                <div className="text-white text-xs font-bold">{partner.name.split(' ')[0]}</div>
-              </div>
-              <div className="text-xs md:text-sm font-semibold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                {partner.name}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Shine effect on hover */}
-        <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
-      </div>
-    </div>
-  );
-
-  return (
-    <section className={`py-20 overflow-hidden transition-colors duration-300 ${
-      theme === 'dark' ? 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900' : 'bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50'
-    } relative`}>
-      
-      {/* Animated background elements */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className={`absolute top-10 left-10 w-32 h-32 rounded-full blur-3xl ${
-          theme === 'dark' ? 'bg-blue-600/10' : 'bg-blue-400/20'
-        } animate-pulse`} />
-        <div className={`absolute bottom-10 right-10 w-48 h-48 rounded-full blur-3xl ${
-          theme === 'dark' ? 'bg-purple-600/10' : 'bg-purple-400/20'
-        } animate-pulse delay-1000`} />
-      </div>
-
-      <div className=" px-4 sm:px-6 relative z-10">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-          className="text-center mb-16"
-        >
-          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium transition-colors duration-300 backdrop-blur-sm ${
-            theme === 'dark'
-              ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-              : 'bg-green-50 text-green-600 border border-green-200'
-          }`}>
-            <Users className="h-4 w-4" />
-            <span>Trusted By The Best</span>
-          </div>
-          <h2 className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 ${
-            theme === 'dark' ? 'text-white' : 'text-gray-900'
-          }`}>
-            Our <span className="text-green-600">Partners</span> & <span className="text-blue-600">Collaborators</span>
-          </h2>
-          <p className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
-            theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
-          }`}>
-            Collaborating with leading institutions and organizations to create amazing experiences and drive innovation forward.
-          </p>
-        </motion.div>
-
-        <div className="relative">
-          {/* First row - scroll left with enhanced marquee */}
-          <div className="flex mb-8 overflow-hidden py-4">
-            <motion.div 
-              className="flex"
-              animate={{ 
-                x: [0, -1920] 
-              }}
-              transition={{ 
-                x: {
-                  repeat: Infinity,
-                  repeatType: "loop",
-                  duration: 40,
-                  ease: "linear",
-                }
-              }}
-            >
-              {partners.map((partner, index) => (
-                <PartnerLogo key={`first-${index}`} partner={partner} index={index} />
-              ))}
-              {/* Duplicate for seamless loop */}
-              {partners.map((partner, index) => (
-                <PartnerLogo key={`first-dup-${index}`} partner={partner} index={index} />
-              ))}
-            </motion.div>
-          </div>
-
-          {/* Second row - scroll right with enhanced marquee */}
-          <div className="flex overflow-hidden py-4">
-            <motion.div 
-              className="flex"
-              animate={{ 
-                x: [-1920, 0] 
-              }}
-              transition={{ 
-                x: {
-                  repeat: Infinity,
-                  repeatType: "loop",
-                  duration: 40,
-                  ease: "linear",
-                }
-              }}
-            >
-              {partners.map((partner, index) => (
-                <PartnerLogo key={`second-${index}`} partner={partner} index={index} />
-              ))}
-              {/* Duplicate for seamless loop */}
-              {partners.map((partner, index) => (
-                <PartnerLogo key={`second-dup-${index}`} partner={partner} index={index} />
-              ))}
-            </motion.div>
-          </div>
-
-          {/* Gradient fades for modern look */}
-     </div>
-
-        {/* Stats below logos */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6, delay: 0.3 }}
-          className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-6 max-w-2xl mx-auto"
-        >
-        </motion.div>
-      </div>
-    </section>
   );
 };
 
@@ -364,7 +165,6 @@ export default function Home() {
   const { scrollYProgress } = useScroll();
   const opacity = useTransform(scrollYProgress, [0, 0.2], [1, 0]);
 
-  // Dynamic logo based on theme
   const logoUrl = theme === 'dark' ? '/logo.png' : '/logo1.png';
 
   const socialLinks = [
@@ -440,45 +240,32 @@ export default function Home() {
     }
   ];
 
-  // In your useEffect, replace the event fetching logic:
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-
-        // Fetch all events
-        const eventsRes = await api.get("/events?limit=50"); // Increased limit to get more events
+        const eventsRes = await api.get("/events?limit=50");
         const eventsData = eventsRes.data.events || [];
-        
-        // Separate upcoming and past events on the client side
+
         const now = new Date();
         const upcoming = eventsData
           .filter((event: any) => new Date(event.endDate) >= now)
           .sort((a: any, b: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-        
+
         const past = eventsData
           .filter((event: any) => new Date(event.endDate) < now)
           .sort((a: any, b: any) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
-        
+
         setEvents(upcoming.slice(0, 3));
-        setPastEvents(past.slice(0, 6)); // Show 6 past events for carousel
-
-        // Update stats with real event count
-        setStats(prev => ({
-          ...prev,
-          events: eventsData.length
-        }));
-
-        // Simulate member count animation
+        setPastEvents(past.slice(0, 6));
+        setStats(prev => ({ ...prev, events: eventsData.length }));
         animateCounter(900, 1200, setMemberCount);
-
       } catch (err) {
         console.error("Failed to fetch data:", err);
       } finally {
         setLoading(false);
       }
     };
-
     fetchData();
   }, []);
 
@@ -541,39 +328,33 @@ export default function Home() {
         <meta name="description" content="Join Team Eklavya - A community of innovators, learners, and creators shaping the future together through technology and collaboration." />
       </Head>
 
-      <div className={`min-h-screen transition-colors duration-300 ${
-        theme === 'dark' 
-          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white' 
+      {/* Top-level wrapper: unified dark gradient when theme is dark */}
+      <div className={`min-h-screen transition-colors duration-300 relative overflow-hidden ${
+        theme === 'dark'
+          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white'
           : 'bg-white text-gray-900'
       }`}>
 
+        {/* Decorative gradient overlay for depth (keeps everything unified) */}
+        {theme === 'dark' && (
+          <div className="absolute inset-0 pointer-events-none z-0">
+            {/* subtle radial vignette to add depth */}
+            <div className="absolute inset-0 bg-[radial-gradient(closest-side,rgba(255,255,255,0.01),transparent_40%)]" />
+          </div>
+        )}
+
         {/* Hero Section with 3D Background */}
         <section className="relative py-20 md:py-32 overflow-hidden min-h-screen flex items-center">
-          {/* Three.js Background */}
+          {/* Three.js Background canvas (particles/lines) */}
           <ThreeScene />
-          
-          {/* Enhanced Background Animation */}
+
+          {/* subtle translucent overlay so hero content remains readable over gradient + canvas */}
           <div className={`absolute inset-0 transition-colors duration-300 ${
-            theme === 'dark' 
-              ? 'bg-gradient-to-br from-slate-900 via-slate-800 to-purple-900/30' 
-              : 'bg-gradient-to-br from-blue-50 via-white to-purple-50'
+            theme === 'dark' ? 'bg-black/10' : 'bg-white/60'
           }`} />
-          
-          <div className="absolute inset-0 opacity-40">
-            <div className={`absolute top-20 left-10 w-48 h-48 sm:w-72 sm:h-72 rounded-full mix-blend-multiply filter blur-3xl animate-blob ${
-              theme === 'dark' ? 'bg-blue-600/20' : 'bg-blue-400'
-            }`} />
-            <div className={`absolute top-40 right-10 w-48 h-48 sm:w-72 sm:h-72 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000 ${
-              theme === 'dark' ? 'bg-purple-600/20' : 'bg-purple-400'
-            }`} />
-            <div className={`absolute bottom-20 left-1/2 w-48 h-48 sm:w-72 sm:h-72 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000 ${
-              theme === 'dark' ? 'bg-pink-600/20' : 'bg-pink-400'
-            }`} />
-          </div>
 
           <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10 w-full">
             <div className="text-center max-w-4xl mx-auto">
-              {/* Logo */}
               <div className="mb-8">
                 <motion.img
                   src={logoUrl}
@@ -635,7 +416,7 @@ export default function Home() {
                   size="lg"
                   className={`px-8 py-3 text-base font-semibold rounded-full transition-all duration-300 hover:scale-105 backdrop-blur-sm ${
                     theme === 'dark'
-                      ? 'border-2 border-slate-600 text-gray-300 hover:border-blue-500 hover:text-blue-400 bg-slate-800/50'
+                      ? 'border-2 border-slate-600 text-gray-300 hover:border-blue-500 hover:text-blue-400 bg-transparent'
                       : 'border-2 border-gray-300 text-gray-700 hover:border-blue-600 hover:text-blue-600 bg-white/80'
                   }`}
                   asChild
@@ -646,7 +427,6 @@ export default function Home() {
                 </Button>
               </motion.div>
 
-              {/* Social Media Links */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -661,7 +441,7 @@ export default function Home() {
                     rel="noopener noreferrer"
                     className={`p-3 rounded-full backdrop-blur-sm transition-all duration-300 hover:scale-110 shadow-lg ${
                       theme === 'dark'
-                        ? 'bg-slate-800/80 text-gray-300 hover:bg-slate-700'
+                        ? 'bg-slate-800/70 text-gray-300 hover:bg-slate-700'
                         : 'bg-white/80 text-gray-700'
                     } ${social.color}`}
                     aria-label={social.name}
@@ -674,9 +454,9 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Stats Section */}
+        {/* Stats Section - make transparent in dark so global gradient shows */}
         <section className={`py-16 relative transition-colors duration-300 ${
-          theme === 'dark' ? 'bg-slate-900' : 'bg-white'
+          theme === 'dark' ? 'bg-transparent' : 'bg-white'
         }`}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
@@ -691,8 +471,8 @@ export default function Home() {
                 >
                   <div className="relative inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 mb-3 sm:mb-4">
                     <div className={`absolute inset-0 rounded-2xl opacity-10 group-hover:opacity-20 transition-opacity duration-300 ${
-                      theme === 'dark' 
-                        ? 'bg-gradient-to-br from-blue-400 to-purple-400' 
+                      theme === 'dark'
+                        ? 'bg-gradient-to-br from-blue-400 to-purple-400'
                         : 'bg-gradient-to-br from-blue-500 to-purple-500'
                     }`} />
                     <stat.icon className={`relative h-6 w-6 sm:h-7 sm:w-7 transition-transform duration-300 group-hover:scale-110 ${
@@ -713,7 +493,7 @@ export default function Home() {
                     )}
                   </div>
                   <p className={`font-medium text-xs sm:text-sm ${
-                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                    theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
                   }`}>
                     {stat.label}
                   </p>
@@ -723,10 +503,10 @@ export default function Home() {
           </div>
         </section>
 
-         {/* Upcoming Events Section - Conditionally Rendered */}
+        {/* Upcoming Events Section - transparent in dark */}
         {events.length > 0 && (
           <section className={`py-20 transition-colors duration-300 ${
-            theme === 'dark' ? 'bg-slate-900' : 'bg-white'
+            theme === 'dark' ? 'bg-transparent' : 'bg-white'
           }`}>
             <div className="max-w-7xl mx-auto px-4 sm:px-6">
               <motion.div
@@ -738,7 +518,7 @@ export default function Home() {
               >
                 <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium transition-colors duration-300 ${
                   theme === 'dark'
-                    ? 'bg-blue-500/20 text-blue-400'
+                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/10'
                     : 'bg-blue-50 text-blue-600'
                 }`}>
                   <Calendar className="h-4 w-4" />
@@ -747,7 +527,7 @@ export default function Home() {
                 <h2 className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 ${
                   theme === 'dark' ? 'text-white' : 'text-gray-900'
                 }`}>
-                  Upcoming <span className="text-blue-600">Events</span>
+                  Upcoming <span className="text-blue-400">Events</span>
                 </h2>
                 <p className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
                   theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
@@ -766,8 +546,8 @@ export default function Home() {
                     transition={{ duration: 0.5, delay: index * 0.1 }}
                   >
                     <Card className={`group overflow-hidden border-0 shadow-lg hover:shadow-2xl transition-all duration-500 h-full ${
-                      theme === 'dark' 
-                        ? 'bg-slate-700 hover:bg-slate-600' 
+                      theme === 'dark'
+                        ? 'bg-slate-800/30 backdrop-blur-sm'
                         : 'bg-white hover:bg-gray-50'
                     }`}>
                       <div className="relative overflow-hidden">
@@ -779,11 +559,11 @@ export default function Home() {
                             (e.target as HTMLImageElement).src = '/api/placeholder/400/200';
                           }}
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                       </div>
 
                       <CardHeader className="pb-3">
-                        <CardTitle className={`text-lg font-bold line-clamp-2 group-hover:text-blue-600 transition-colors duration-300 ${
+                        <CardTitle className={`text-lg font-bold line-clamp-2 group-hover:text-blue-400 transition-colors duration-300 ${
                           theme === 'dark' ? 'text-white' : 'text-gray-900'
                         }`}>
                           {event.title}
@@ -833,7 +613,7 @@ export default function Home() {
 
         {/* Why Team Eklavya Section */}
         <section className={`py-20 transition-colors duration-300 ${
-          theme === 'dark' ? 'bg-slate-800' : 'bg-gray-50'
+          theme === 'dark' ? 'bg-transparent' : 'bg-gray-50'
         }`}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <motion.div
@@ -845,7 +625,7 @@ export default function Home() {
             >
               <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium transition-colors duration-300 ${
                 theme === 'dark'
-                  ? 'bg-blue-500/20 text-blue-400'
+                  ? 'bg-blue-500/10 text-blue-400'
                   : 'bg-blue-50 text-blue-600'
               }`}>
                 <Target className="h-4 w-4" />
@@ -873,12 +653,12 @@ export default function Home() {
                   transition={{ duration: 0.5, delay: index * 0.1 }}
                   className={`p-6 rounded-2xl transition-all duration-300 hover:scale-105 ${
                     theme === 'dark'
-                      ? 'bg-slate-700/50 hover:bg-slate-700'
+                      ? 'bg-slate-800/25 backdrop-blur-sm hover:bg-slate-800/30'
                       : 'bg-white hover:bg-gray-100'
                   } shadow-lg hover:shadow-xl`}
                 >
                   <div className={`w-12 h-12 rounded-lg mb-4 flex items-center justify-center ${
-                    theme === 'dark' ? 'bg-slate-600' : 'bg-gray-100'
+                    theme === 'dark' ? 'bg-slate-700' : 'bg-gray-100'
                   }`}>
                     <feature.icon className={`h-6 w-6 ${feature.color}`} />
                   </div>
@@ -897,179 +677,170 @@ export default function Home() {
             </div>
           </div>
         </section>
- <NewsletterEvents />
-       
 
-    {/* ✅ Past Events Carousel - Enhanced */}
-{pastEvents.length > 0 && (
-  <section
-    className={`py-20 transition-colors duration-500 relative overflow-hidden ${
-      theme === "dark" ? "bg-slate-900" : "bg-gray-50"
-    }`}
-  >
-    {/* Background Decoration */}
-    <div
-      className={`absolute inset-0 pointer-events-none ${
-        theme === "dark"
-          ? "bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.15),transparent_70%)]"
-          : "bg-[radial-gradient(circle_at_bottom_left,rgba(139,92,246,0.1),transparent_70%)]"
-      }`}
-    />
-
-    <div className="relative max-w-7xl mx-auto px-4 sm:px-6">
-      {/* Header Section */}
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ duration: 0.6 }}
-        className="text-center mb-16 relative z-10"
-      >
-        <div
-          className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium shadow-sm transition-all duration-300 ${
-            theme === "dark"
-              ? "bg-purple-500/20 text-purple-400 border border-purple-400/30"
-              : "bg-purple-100 text-purple-700 border border-purple-300/60"
-          }`}
-        >
-          <Award className="h-4 w-4" />
-          <span>Past Events</span>
-        </div>
-        <h2
-          className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 tracking-tight ${
-            theme === "dark" ? "text-white" : "text-gray-900"
-          }`}
-        >
-          Our <span className="text-purple-600">Success Stories</span>
-        </h2>
-        <p
-          className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
-            theme === "dark" ? "text-gray-300" : "text-gray-600"
-          }`}
-        >
-          Take a look at some of our most memorable events that inspired, connected,
-          and created impact within our community.
-        </p>
-      </motion.div>
-
-      {/* Carousel Wrapper */}
-      <div className="relative max-w-5xl mx-auto">
-        <div className="relative h-80 md:h-[450px] rounded-3xl overflow-hidden shadow-2xl">
-          {pastEvents.map((event, index) => (
-            <motion.div
-              key={event._id}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{
-                opacity: index === currentPastEventIndex ? 1 : 0,
-                scale: index === currentPastEventIndex ? 1 : 0.95,
-              }}
-              transition={{ duration: 0.6, ease: "easeInOut" }}
-              className={`absolute inset-0 w-full h-full ${
-                index === currentPastEventIndex ? "block" : "hidden"
-              }`}
-            >
-              <img
-                src={getImageUrl(event.bannerUrl)}
-                alt={event.title}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/api/placeholder/800/400";
-                }}
-              />
-              {/* Overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-              {/* Text Overlay */}
-              <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-white">
-                <motion.h3
-                  initial={{ y: 20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.4, delay: 0.1 }}
-                  className="text-2xl md:text-3xl font-semibold mb-2 drop-shadow-lg"
-                >
-                  {event.title}
-                </motion.h3>
-                <motion.p
-                  initial={{ y: 20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.4, delay: 0.2 }}
-                  className="text-sm md:text-base opacity-90 line-clamp-2"
-                >
-                  {event.description?.substring(0, 120) ||
-                    "An inspiring event organized by our amazing team."}
-                  ...
-                </motion.p>
-                <motion.div
-                  initial={{ y: 20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.4, delay: 0.3 }}
-                  className="flex items-center mt-3 text-xs md:text-sm opacity-80"
-                >
-                  <Calendar className="h-4 w-4 mr-2" />
-                  {formatDate(event.startDate)}
-                </motion.div>
-              </div>
-            </motion.div>
-          ))}
+        {/* NewsletterEvents (keeps its internal gradient for headings and buttons) */}
+        <div className={`${theme === 'dark' ? 'bg-transparent' : ''}`}>
+          <NewsletterEvents />
         </div>
 
-        {/* Carousel Controls */}
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Previous event"
-          onClick={prevPastEvent}
-          className={`absolute left-4 top-1/2 transform -translate-y-1/2 rounded-full backdrop-blur-md transition-all ${
-            theme === "dark"
-              ? "bg-slate-800/70 text-white hover:bg-slate-700"
-              : "bg-white/80 text-gray-700 hover:bg-gray-100"
-          }`}
-        >
-          <ChevronLeft className="h-6 w-6" />
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Next event"
-          onClick={nextPastEvent}
-          className={`absolute right-4 top-1/2 transform -translate-y-1/2 rounded-full backdrop-blur-md transition-all ${
-            theme === "dark"
-              ? "bg-slate-800/70 text-white hover:bg-slate-700"
-              : "bg-white/80 text-gray-700 hover:bg-gray-100"
-          }`}
-        >
-          <ChevronRight className="h-6 w-6" />
-        </Button>
-
-        {/* Indicators */}
-        <div className="flex justify-center mt-6 space-x-2">
-          {pastEvents.map((_, index) => (
-            <button
-              key={index}
-              onClick={() => setCurrentPastEventIndex(index)}
-              aria-label={`Go to event ${index + 1}`}
-              className={`h-2.5 rounded-full transition-all duration-300 ${
-                index === currentPastEventIndex
-                  ? "bg-purple-600 w-6"
-                  : theme === "dark"
-                  ? "bg-gray-600 w-2"
-                  : "bg-gray-300 w-2"
+        {/* Past Events Carousel - transparent in dark */}
+        {pastEvents.length > 0 && (
+          <section
+            className={`py-20 transition-colors duration-500 relative overflow-hidden ${
+              theme === "dark" ? "bg-transparent" : "bg-gray-50"
+            }`}
+          >
+            <div
+              className={`absolute inset-0 pointer-events-none ${
+                theme === "dark"
+                  ? "bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.06),transparent_70%)]"
+                  : "bg-[radial-gradient(circle_at_bottom_left,rgba(139,92,246,0.06),transparent_70%)]"
               }`}
             />
-          ))}
-        </div>
-      </div>
-    </div>
-  </section>
-)}
 
+            <div className="relative max-w-7xl mx-auto px-4 sm:px-6">
+              <motion.div
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6 }}
+                className="text-center mb-16 relative z-10"
+              >
+                <div
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium shadow-sm transition-all duration-300 ${
+                    theme === "dark"
+                      ? "bg-purple-500/10 text-purple-300 border border-purple-400/10"
+                      : "bg-purple-100 text-purple-700 border border-purple-300/60"
+                  }`}
+                >
+                  <Award className="h-4 w-4" />
+                  <span>Past Events</span>
+                </div>
+                <h2
+                  className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 tracking-tight ${
+                    theme === "dark" ? "text-white" : "text-gray-900"
+                  }`}
+                >
+                  Our <span className="text-purple-400">Success Stories</span>
+                </h2>
+                <p
+                  className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
+                    theme === "dark" ? "text-gray-300" : "text-gray-600"
+                  }`}
+                >
+                  Take a look at some of our most memorable events that inspired, connected,
+                  and created impact within our community.
+                </p>
+              </motion.div>
 
-        {/* Enhanced Double Scrolling Logos with Old School Marquee */}
-        {/*<DoubleScrollingLogos />*/}
+              <div className="relative max-w-5xl mx-auto">
+                <div className="relative h-80 md:h-[450px] rounded-3xl overflow-hidden shadow-2xl">
+                  {pastEvents.map((event, index) => (
+                    <motion.div
+                      key={event._id}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{
+                        opacity: index === currentPastEventIndex ? 1 : 0,
+                        scale: index === currentPastEventIndex ? 1 : 0.96,
+                      }}
+                      transition={{ duration: 0.6, ease: "easeInOut" }}
+                      className={`absolute inset-0 w-full h-full ${
+                        index === currentPastEventIndex ? "block" : "hidden"
+                      }`}
+                    >
+                      <img
+                        src={getImageUrl(event.bannerUrl)}
+                        alt={event.title}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = "/api/placeholder/800/400";
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
+                      <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-white">
+                        <motion.h3
+                          initial={{ y: 20, opacity: 0 }}
+                          animate={{ y: 0, opacity: 1 }}
+                          transition={{ duration: 0.4, delay: 0.1 }}
+                          className="text-2xl md:text-3xl font-semibold mb-2 drop-shadow-lg"
+                        >
+                          {event.title}
+                        </motion.h3>
+                        <motion.p
+                          initial={{ y: 20, opacity: 0 }}
+                          animate={{ y: 0, opacity: 1 }}
+                          transition={{ duration: 0.4, delay: 0.2 }}
+                          className="text-sm md:text-base opacity-90 line-clamp-2"
+                        >
+                          {event.description?.substring(0, 120) || "An inspiring event organized by our amazing team."}
+                          ...
+                        </motion.p>
+                        <motion.div
+                          initial={{ y: 20, opacity: 0 }}
+                          animate={{ y: 0, opacity: 1 }}
+                          transition={{ duration: 0.4, delay: 0.3 }}
+                          className="flex items-center mt-3 text-xs md:text-sm opacity-80"
+                        >
+                          <Calendar className="h-4 w-4 mr-2" />
+                          {formatDate(event.startDate)}
+                        </motion.div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Previous event"
+                  onClick={prevPastEvent}
+                  className={`absolute left-4 top-1/2 transform -translate-y-1/2 rounded-full backdrop-blur-md transition-all ${
+                    theme === "dark"
+                      ? "bg-slate-800/60 text-white hover:bg-slate-700"
+                      : "bg-white/80 text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  <ChevronLeft className="h-6 w-6" />
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Next event"
+                  onClick={nextPastEvent}
+                  className={`absolute right-4 top-1/2 transform -translate-y-1/2 rounded-full backdrop-blur-md transition-all ${
+                    theme === "dark"
+                      ? "bg-slate-800/60 text-white hover:bg-slate-700"
+                      : "bg-white/80 text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  <ChevronRight className="h-6 w-6" />
+                </Button>
+
+                <div className="flex justify-center mt-6 space-x-2">
+                  {pastEvents.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setCurrentPastEventIndex(index)}
+                      aria-label={`Go to event ${index + 1}`}
+                      className={`h-2.5 rounded-full transition-all duration-300 ${
+                        index === currentPastEventIndex
+                          ? "bg-purple-400 w-6"
+                          : theme === "dark"
+                          ? "bg-gray-600 w-2"
+                          : "bg-gray-300 w-2"
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Social Media Section */}
         <section className={`py-20 transition-colors duration-300 ${
-          theme === 'dark' ? 'bg-slate-900' : 'bg-white'
+          theme === 'dark' ? 'bg-transparent' : 'bg-white'
         }`}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <motion.div
@@ -1081,7 +852,7 @@ export default function Home() {
             >
               <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium transition-colors duration-300 ${
                 theme === 'dark'
-                  ? 'bg-pink-500/20 text-pink-400'
+                  ? 'bg-pink-500/10 text-pink-400'
                   : 'bg-pink-50 text-pink-600'
               }`}>
                 <TrendingUp className="h-4 w-4" />
@@ -1112,7 +883,7 @@ export default function Home() {
                   transition={{ duration: 0.5, delay: index * 0.1 }}
                   className={`p-6 rounded-2xl transition-all duration-300 hover:scale-105 group ${
                     theme === 'dark'
-                      ? 'bg-slate-800 hover:bg-slate-700'
+                      ? 'bg-slate-800/30 hover:bg-slate-700/40'
                       : 'bg-gray-50 hover:bg-gray-100'
                   } shadow-lg hover:shadow-xl text-center`}
                 >
@@ -1127,7 +898,7 @@ export default function Home() {
                     {social.name}
                   </h3>
                   <p className={`text-xs ${
-                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                    theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
                   }`}>
                     Follow us on {social.name} for latest updates
                   </p>
@@ -1137,9 +908,9 @@ export default function Home() {
           </div>
         </section>
 
-        {/* CTA Section */}
+        {/* CTA Section - keep the bright gradient to differentiate CTA but still show main background through edges */}
         <section className="relative py-20 md:py-32 overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600" />
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 opacity-90" />
           <div className="absolute inset-0">
             <div className="absolute top-0 left-0 w-64 h-64 md:w-96 md:h-96 bg-white/10 rounded-full blur-3xl animate-blob" />
             <div className="absolute bottom-0 right-0 w-64 h-64 md:w-96 md:h-96 bg-white/10 rounded-full blur-3xl animate-blob animation-delay-2000" />
@@ -1190,13 +961,12 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Footer */}
+        {/* Footer - transparent in dark so the page's gradient remains consistent */}
         <footer className={`py-12 transition-colors duration-300 ${
-          theme === 'dark' ? 'bg-slate-950 text-white' : 'bg-gray-900 text-white'
+          theme === 'dark' ? 'bg-transparent text-white' : 'bg-gray-900 text-white'
         }`}>
           <div className="max-w-7xl mx-auto px-6">
             <div className="grid md:grid-cols-4 gap-8 mb-8">
-              {/* Brand */}
               <div className="md:col-span-2">
                 <img
                   src="/logo.png"
@@ -1227,7 +997,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Quick Links */}
               <div>
                 <h3 className="font-semibold mb-4 text-sm">Quick Links</h3>
                 <div className="space-y-2">
@@ -1238,7 +1007,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Support */}
               <div>
                 <h3 className="font-semibold mb-4 text-sm">Support</h3>
                 <div className="space-y-2">

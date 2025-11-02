@@ -40,8 +40,10 @@ import {
   Lightbulb,
   Award,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ExternalLink
 } from "lucide-react";
+import NewsletterEvents from "./NewsLetter";
 
 // Three.js component for 3D background
 const ThreeScene = () => {
@@ -150,6 +152,199 @@ const ThreeScene = () => {
   );
 };
 
+// Enhanced Double Scrolling Logos Component with Old School Marquee
+const DoubleScrollingLogos = () => {
+  const { theme } = useTheme();
+  
+  const partners = [
+    { 
+      name: "IIT Bombay Techfest", 
+      logo: "/iitb.png"
+    },
+    { name: "IIIT Delhi", logo: "/iiitd-logo.png" },
+    { name: "Google Developer Groups", logo: "/gdg-logo.png" },
+    { name: "Microsoft Learn", logo: "/microsoft-logo.png" },
+    { name: "AWS Educate", logo: "/aws-logo.png" },
+    { name: "GitHub Campus", logo: "/github-logo.png" },
+    { name: "Hackathon Club", logo: "/hackathon-logo.png" },
+    { name: "CodeChef", logo: "/codechef-logo.png" },
+    { name: "LeetCode", logo: "/leetcode-logo.png" },
+    { name: "Devfolio", logo: "/devfolio-logo.png" },
+    { name: "HackerRank", logo: "/hackerrank-logo.png" },
+    { name: "MLH", logo: "/mlh-logo.png" },
+  ];
+
+  const PartnerLogo = ({ partner, index }: { partner: any; index: number }) => (
+    <div className="flex-shrink-0 w-32 h-32 md:w-40 md:h-40 flex items-center justify-center p-4">
+      <div className={`w-full h-full flex items-center justify-center rounded-2xl transition-all duration-500 hover:scale-110 group ${
+        theme === 'dark' 
+          ? 'bg-gradient-to-br from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800' 
+          : 'bg-gradient-to-br from-white to-gray-50 hover:from-blue-50 hover:to-purple-50'
+      } shadow-lg hover:shadow-2xl border-2 ${
+        theme === 'dark' 
+          ? 'border-slate-700 hover:border-blue-500' 
+          : 'border-gray-200 hover:border-blue-400'
+      } relative overflow-hidden`}>
+        
+        {/* Hover effect overlay */}
+        <div className={`absolute inset-0 bg-gradient-to-br from-blue-500/0 to-purple-600/0 group-hover:from-blue-500/10 group-hover:to-purple-600/10 transition-all duration-500 rounded-2xl`} />
+        
+        {/* Animated border effect */}
+        <div className={`absolute inset-0 rounded-2xl bg-gradient-to-r from-transparent via-blue-500/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 -translate-x-full group-hover:translate-x-full`} />
+        
+        <div className="text-center relative z-10">
+          {partner.featured ? (
+            <div className="space-y-3">
+              {/* IIT Bombay Featured Logo */}
+              <div className="w-16 h-16 md:w-20 md:h-20 mx-auto rounded-xl bg-gradient-to-br from-yellow-400 to-orange-500 p-1 shadow-lg">
+                <div className="w-full h-full rounded-lg bg-white flex items-center justify-center p-2">
+                  <div className="text-center">
+                    <div className="text-xs font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
+                      IIT Bombay
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs md:text-sm font-bold bg-gradient-to-r from-yellow-500 to-orange-500 bg-clip-text text-transparent">
+                  Techfest 2025
+                </div>
+                <div className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                  Community Partner
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="w-12 h-12 md:w-16 md:h-16 mx-auto mb-3 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                <div className="text-white text-xs font-bold">{partner.name.split(' ')[0]}</div>
+              </div>
+              <div className="text-xs md:text-sm font-semibold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                {partner.name}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Shine effect on hover */}
+        <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+      </div>
+    </div>
+  );
+
+  return (
+    <section className={`py-20 overflow-hidden transition-colors duration-300 ${
+      theme === 'dark' ? 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900' : 'bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50'
+    } relative`}>
+      
+      {/* Animated background elements */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className={`absolute top-10 left-10 w-32 h-32 rounded-full blur-3xl ${
+          theme === 'dark' ? 'bg-blue-600/10' : 'bg-blue-400/20'
+        } animate-pulse`} />
+        <div className={`absolute bottom-10 right-10 w-48 h-48 rounded-full blur-3xl ${
+          theme === 'dark' ? 'bg-purple-600/10' : 'bg-purple-400/20'
+        } animate-pulse delay-1000`} />
+      </div>
+
+      <div className=" px-4 sm:px-6 relative z-10">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6 }}
+          className="text-center mb-16"
+        >
+          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium transition-colors duration-300 backdrop-blur-sm ${
+            theme === 'dark'
+              ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+              : 'bg-green-50 text-green-600 border border-green-200'
+          }`}>
+            <Users className="h-4 w-4" />
+            <span>Trusted By The Best</span>
+          </div>
+          <h2 className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 ${
+            theme === 'dark' ? 'text-white' : 'text-gray-900'
+          }`}>
+            Our <span className="text-green-600">Partners</span> & <span className="text-blue-600">Collaborators</span>
+          </h2>
+          <p className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
+            theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+          }`}>
+            Collaborating with leading institutions and organizations to create amazing experiences and drive innovation forward.
+          </p>
+        </motion.div>
+
+        <div className="relative">
+          {/* First row - scroll left with enhanced marquee */}
+          <div className="flex mb-8 overflow-hidden py-4">
+            <motion.div 
+              className="flex"
+              animate={{ 
+                x: [0, -1920] 
+              }}
+              transition={{ 
+                x: {
+                  repeat: Infinity,
+                  repeatType: "loop",
+                  duration: 40,
+                  ease: "linear",
+                }
+              }}
+            >
+              {partners.map((partner, index) => (
+                <PartnerLogo key={`first-${index}`} partner={partner} index={index} />
+              ))}
+              {/* Duplicate for seamless loop */}
+              {partners.map((partner, index) => (
+                <PartnerLogo key={`first-dup-${index}`} partner={partner} index={index} />
+              ))}
+            </motion.div>
+          </div>
+
+          {/* Second row - scroll right with enhanced marquee */}
+          <div className="flex overflow-hidden py-4">
+            <motion.div 
+              className="flex"
+              animate={{ 
+                x: [-1920, 0] 
+              }}
+              transition={{ 
+                x: {
+                  repeat: Infinity,
+                  repeatType: "loop",
+                  duration: 40,
+                  ease: "linear",
+                }
+              }}
+            >
+              {partners.map((partner, index) => (
+                <PartnerLogo key={`second-${index}`} partner={partner} index={index} />
+              ))}
+              {/* Duplicate for seamless loop */}
+              {partners.map((partner, index) => (
+                <PartnerLogo key={`second-dup-${index}`} partner={partner} index={index} />
+              ))}
+            </motion.div>
+          </div>
+
+          {/* Gradient fades for modern look */}
+     </div>
+
+        {/* Stats below logos */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6, delay: 0.3 }}
+          className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-6 max-w-2xl mx-auto"
+        >
+        </motion.div>
+      </div>
+    </section>
+  );
+};
+
 export default function Home() {
   const [memberCount, setMemberCount] = useState(0);
   const [events, setEvents] = useState<any[]>([]);
@@ -245,47 +440,47 @@ export default function Home() {
     }
   ];
 
- // In your useEffect, replace the event fetching logic:
-useEffect(() => {
-  const fetchData = async () => {
-    try {
-      setLoading(true);
+  // In your useEffect, replace the event fetching logic:
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
 
-      // Fetch all events
-      const eventsRes = await api.get("/events?limit=50"); // Increased limit to get more events
-      const eventsData = eventsRes.data.events || [];
-      
-      // Separate upcoming and past events on the client side
-      const now = new Date();
-      const upcoming = eventsData
-        .filter((event: any) => new Date(event.endDate) >= now)
-        .sort((a: any, b: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-      
-      const past = eventsData
-        .filter((event: any) => new Date(event.endDate) < now)
-        .sort((a: any, b: any) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
-      
-      setEvents(upcoming.slice(0, 3));
-      setPastEvents(past.slice(0, 6)); // Show 6 past events for carousel
+        // Fetch all events
+        const eventsRes = await api.get("/events?limit=50"); // Increased limit to get more events
+        const eventsData = eventsRes.data.events || [];
+        
+        // Separate upcoming and past events on the client side
+        const now = new Date();
+        const upcoming = eventsData
+          .filter((event: any) => new Date(event.endDate) >= now)
+          .sort((a: any, b: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+        
+        const past = eventsData
+          .filter((event: any) => new Date(event.endDate) < now)
+          .sort((a: any, b: any) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
+        
+        setEvents(upcoming.slice(0, 3));
+        setPastEvents(past.slice(0, 6)); // Show 6 past events for carousel
 
-      // Update stats with real event count
-      setStats(prev => ({
-        ...prev,
-        events: eventsData.length
-      }));
+        // Update stats with real event count
+        setStats(prev => ({
+          ...prev,
+          events: eventsData.length
+        }));
 
-      // Simulate member count animation
-      animateCounter(900, 1200, setMemberCount);
+        // Simulate member count animation
+        animateCounter(900, 1200, setMemberCount);
 
-    } catch (err) {
-      console.error("Failed to fetch data:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+      } catch (err) {
+        console.error("Failed to fetch data:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  fetchData();
-}, []);
+    fetchData();
+  }, []);
 
   useEffect(() => {
     if (pastEvents.length > 0) {
@@ -378,8 +573,6 @@ useEffect(() => {
 
           <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10 w-full">
             <div className="text-center max-w-4xl mx-auto">
-
-
               {/* Logo */}
               <div className="mb-8">
                 <motion.img
@@ -775,6 +968,7 @@ useEffect(() => {
                     </motion.div>
                   ))}
                 </div>
+       
 
                 {/* Carousel Controls */}
                 <Button
@@ -823,6 +1017,9 @@ useEffect(() => {
           </section>
         )}
 
+        {/* Enhanced Double Scrolling Logos with Old School Marquee */}
+        {/*<DoubleScrollingLogos />*/}
+ <NewsletterEvents />
         {/* Social Media Section */}
         <section className={`py-20 transition-colors duration-300 ${
           theme === 'dark' ? 'bg-slate-900' : 'bg-white'

@@ -245,41 +245,47 @@ export default function Home() {
     }
   ];
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
+ // In your useEffect, replace the event fetching logic:
+useEffect(() => {
+  const fetchData = async () => {
+    try {
+      setLoading(true);
 
-        // Fetch events
-        const eventsRes = await api.get("/events");
-        const eventsData = eventsRes.data.events || [];
-        
-        // Separate upcoming and past events
-        const now = new Date();
-        const upcoming = eventsData.filter((event: any) => new Date(event.startDate) >= now);
-        const past = eventsData.filter((event: any) => new Date(event.startDate) < now);
-        
-        setEvents(upcoming.slice(0, 3));
-        setPastEvents(past.slice(0, 6)); // Show 6 past events for carousel
+      // Fetch all events
+      const eventsRes = await api.get("/events?limit=50"); // Increased limit to get more events
+      const eventsData = eventsRes.data.events || [];
+      
+      // Separate upcoming and past events on the client side
+      const now = new Date();
+      const upcoming = eventsData
+        .filter((event: any) => new Date(event.endDate) >= now)
+        .sort((a: any, b: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+      
+      const past = eventsData
+        .filter((event: any) => new Date(event.endDate) < now)
+        .sort((a: any, b: any) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
+      
+      setEvents(upcoming.slice(0, 3));
+      setPastEvents(past.slice(0, 6)); // Show 6 past events for carousel
 
-        // Update stats with real event count
-        setStats(prev => ({
-          ...prev,
-          events: eventsData.length
-        }));
+      // Update stats with real event count
+      setStats(prev => ({
+        ...prev,
+        events: eventsData.length
+      }));
 
-        // Simulate member count animation
-        animateCounter(900, 1200, setMemberCount);
+      // Simulate member count animation
+      animateCounter(900, 1200, setMemberCount);
 
-      } catch (err) {
-        console.error("Failed to fetch data:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
+    } catch (err) {
+      console.error("Failed to fetch data:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    fetchData();
-  }, []);
+  fetchData();
+}, []);
 
   useEffect(() => {
     if (pastEvents.length > 0) {

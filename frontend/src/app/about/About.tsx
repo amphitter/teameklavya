@@ -647,7 +647,7 @@ export default function AboutPage() {
 
         {/* Open Graph / Facebook */}
         <meta property="og:type" content="website" />
-        <meta property="og:url" content="https://iteameklavya.vercel.app/about" />
+        <meta property="og:url" content="https://www.teameklavya.xyz/about" />
         <meta
           property="og:title"
           content="About | Team Eklavya – Innovators Building the Future"
@@ -658,7 +658,7 @@ export default function AboutPage() {
         />
         <meta
           property="og:image"
-          content="https://iteameklavya.vercel.app/og-about.png"
+          content="https://www.teameklavya.xyz/og-about.png"
         />
         <meta property="og:site_name" content="Team Eklavya" />
 
@@ -675,11 +675,11 @@ export default function AboutPage() {
         />
         <meta
           name="twitter:image"
-          content="https://iteameklavya.vercel.app/og-about.png"
+          content="https://www.teameklavya.xyz/og-about.png"
         />
 
         {/* Canonical URL */}
-        <link rel="canonical" href="https://iteameklavya.vercel.app/about" />
+        <link rel="canonical" href="https://www.teameklavya.xyz/about" />
 
         {/* Favicon */}
         <link rel="icon" href="/favicon.ico" />

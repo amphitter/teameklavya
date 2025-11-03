@@ -13,9 +13,9 @@ export const metadata = {
 
   // ✅ Icon and branding
   icons: {
-    icon: "/logo.png",
+    icon: "/favicon.ico",
     shortcut: "/favicon.ico",
-    apple: "/logo.png",
+    apple: "/favicon.ico",
   },
 
   // ✅ Author info

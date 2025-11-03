@@ -692,8 +692,8 @@ export default function AboutPage() {
               "@context": "https://schema.org",
               "@type": "Organization",
               name: "Team Eklavya",
-              url: "https://iteameklavya.vercel.app/",
-              logo: "https://iteameklavya.vercel.app/logo.png",
+              url: "https://www.teameklavya.xyz/",
+              logo: "https://www.teameklavya.xyz/logo.png",
               sameAs: [
                 "https://x.com/iteameklavya",
                 "https://www.instagram.com/iteameklavya",

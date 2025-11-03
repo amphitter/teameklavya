@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://iteameklavya.vercel.app/sitemap.xml
+Sitemap: https://www.teameklavya.xyz/sitemap.xml

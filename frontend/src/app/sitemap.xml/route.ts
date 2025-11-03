@@ -20,7 +20,17 @@ export async function GET() {
 
   try {
     const res = await api.get("/events");
-    events = res.data || [];
+    const data = res?.data;
+
+    // Handle both possible shapes
+    if (Array.isArray(data)) {
+      events = data;
+    } else if (Array.isArray(data?.events)) {
+      events = data.events;
+    } else {
+      console.warn("Unexpected events API format:", data);
+      events = [];
+    }
   } catch (error) {
     console.error("Error fetching events for sitemap:", error);
   }
@@ -33,14 +43,14 @@ export async function GET() {
   ];
 
   const eventUrls: SitemapUrl[] = events
-    .filter((event: EventItem) => event.slug)
-    .map((event: EventItem) => ({
+    .filter((event) => event.slug)
+    .map((event) => ({
       loc: `${baseUrl}/events/${event.slug}`,
       priority: 0.9,
       lastmod: event.updatedAt || event.startDate || new Date().toISOString(),
     }));
 
-  const allUrls: SitemapUrl[] = [...staticUrls, ...eventUrls];
+  const allUrls = [...staticUrls, ...eventUrls];
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
   <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

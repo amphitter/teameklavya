@@ -19,18 +19,18 @@ export const metadata = {
   },
 
   // ✅ Author info
-  authors: [{ name: "Team Eklavya", url: "https://iteameklavya.vercel.app" }],
+  authors: [{ name: "Team Eklavya", url: "https://www.teameklavya.xyz" }],
 
   // ✅ Open Graph (for Facebook, LinkedIn, Bing previews)
   openGraph: {
     title: "Team Eklavya | Empowering Students, Enriching Futures",
     description:
       "Join Team Eklavya - a community of learners, innovators, and leaders empowering the next generation through technology, creativity, and collaboration.",
-    url: "https://iteameklavya.vercel.app",
+    url: "https://www.teameklavya.xyz",
     siteName: "Team Eklavya",
     images: [
       {
-        url: "https://iteameklavya.vercel.app/og-image.png",
+        url: "https://www.teameklavya.xyz/og-image.png",
         width: 1200,
         height: 630,
         alt: "Team Eklavya - Empowering Students, Enriching Futures",
@@ -46,13 +46,13 @@ export const metadata = {
     title: "Team Eklavya | Empowering Students, Enriching Futures",
     description:
       "Team Eklavya connects students and innovators through real-world projects, AR workshops, and technology-driven learning experiences.",
-    creator: "@iteameklavya",
-    site: "@iteameklavya",
-    images: ["https://iteameklavya.vercel.app/og-image.png"],
+    creator: "@teameklavya",
+    site: "@teameklavya",
+    images: ["https://www.teameklavya.xyz/og-image.png"],
   },
 
-  // ✅ Base URL
-  metadataBase: new URL("https://iteameklavya.vercel.app"),
+  // ✅ Base URL for canonical & OG tags
+  metadataBase: new URL("https://www.teameklavya.xyz"),
 
   // ✅ SEO Keywords
   keywords: [
@@ -84,7 +84,7 @@ export const metadata = {
 
   // ✅ Canonical URL
   alternates: {
-    canonical: "https://iteameklavya.vercel.app",
+    canonical: "https://www.teameklavya.xyz",
   },
 };
 
@@ -93,10 +93,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
         <ThemeProvider>
-        <Navbar />
-        <main>{children}</main>
-</ThemeProvider>
-        {/* ✅ Add Structured Data (for Google Knowledge Panel & rich results) */}
+          <Navbar />
+          <main>{children}</main>
+        </ThemeProvider>
+
+        {/* ✅ Add Structured Data (for Google Knowledge Panel & Bing) */}
         <Script
           id="structured-data"
           type="application/ld+json"
@@ -105,8 +106,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               "@context": "https://schema.org",
               "@type": "Organization",
               name: "Team Eklavya",
-              url: "https://iteameklavya.vercel.app",
-              logo: "https://iteameklavya.vercel.app/logo.png",
+              url: "https://www.teameklavya.xyz",
+              logo: "https://www.teameklavya.xyz/logo.png",
               sameAs: [
                 "https://www.linkedin.com/company/team-eklavya/",
                 "https://www.instagram.com/iteameklavya/",

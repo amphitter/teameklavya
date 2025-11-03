@@ -17,18 +17,18 @@ export const metadata: Metadata = {
   },
 
   // ✅ Author info
-  authors: [{ name: "Team Eklavya", url: "https://iteameklavya.vercel.app" }],
+  authors: [{ name: "Team Eklavya", url: "https://www.teameklavya.xyz" }],
 
-  // ✅ Open Graph (for Facebook, LinkedIn, Bing previews)
+  // ✅ Open Graph (for social previews)
   openGraph: {
     title: "Team Eklavya | Empowering Students, Enriching Futures",
     description:
       "Join Team Eklavya - a community of learners, innovators, and leaders empowering the next generation through technology, creativity, and collaboration.",
-    url: "https://iteameklavya.vercel.app",
+    url: "https://www.teameklavya.xyz",
     siteName: "Team Eklavya",
     images: [
       {
-        url: "https://iteameklavya.vercel.app/og-image.png",
+        url: "https://www.teameklavya.xyz/og-image.png",
         width: 1200,
         height: 630,
         alt: "Team Eklavya - Empowering Students, Enriching Futures",
@@ -46,11 +46,11 @@ export const metadata: Metadata = {
       "Team Eklavya connects students and innovators through real-world projects, AR workshops, and technology-driven learning experiences.",
     creator: "@iteameklavya",
     site: "@iteameklavya",
-    images: ["https://iteameklavya.vercel.app/og-image.png"],
+    images: ["https://www.teameklavya.xyz/og-image.png"],
   },
 
   // ✅ Base URL
-  metadataBase: new URL("https://iteameklavya.vercel.app"),
+  metadataBase: new URL("https://www.teameklavya.xyz"),
 
   // ✅ SEO Keywords
   keywords: [
@@ -67,8 +67,8 @@ export const metadata: Metadata = {
     "Student Empowerment",
     "Coding Workshops",
     "Tech Community India",
-    "Student Projects",
-    "Innovation Hub",
+    "Team Eklavya Events",
+    "Team Eklavya Community",
   ],
 
   // ✅ Robots & indexing rules
@@ -86,11 +86,11 @@ export const metadata: Metadata = {
 
   // ✅ Canonical URL
   alternates: {
-    canonical: "https://iteameklavya.vercel.app",
+    canonical: "https://www.teameklavya.xyz",
   },
 
-// ✅ Additional optimizations
-  category: "education",
+  // ✅ Additional optimizations
+  category: "events",
   classification: "Student Innovation Community",
   abstract: "Team Eklavya - Student Innovation and Technology Community",
 };

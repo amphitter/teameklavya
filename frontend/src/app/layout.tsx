@@ -15,7 +15,7 @@ export const metadata = {
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",
-    apple: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
   },
 
   // ✅ Author info
@@ -91,15 +91,25 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* ✅ Site name & favicon setup for Google Discover */}
+        <meta property="og:site_name" content="Team Eklavya" />
+        <meta name="application-name" content="Team Eklavya" />
+        <meta name="apple-mobile-web-app-title" content="Team Eklavya" />
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" href="/favicon.png" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+      </head>
+
       <body className="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
         <ThemeProvider>
           <Navbar />
           <main>{children}</main>
         </ThemeProvider>
 
-        {/* ✅ Add Structured Data (for Google Knowledge Panel & Bing) */}
+        {/* ✅ Organization structured data */}
         <Script
-          id="structured-data"
+          id="organization-schema"
           type="application/ld+json"
           dangerouslySetInnerHTML={{
             __html: JSON.stringify({
@@ -107,7 +117,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               "@type": "Organization",
               name: "Team Eklavya",
               url: "https://www.teameklavya.xyz",
-              logo: "https://www.teameklavya.xyz/logo.png",
+              logo: "https://www.teameklavya.xyz/favicon.png",
               sameAs: [
                 "https://www.linkedin.com/company/team-eklavya/",
                 "https://www.instagram.com/iteameklavya/",
@@ -118,6 +128,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 "@type": "Person",
                 name: "Team Eklavya Members",
               },
+            }),
+          }}
+        />
+
+        {/* ✅ WebSite schema for site name (controls 'teameklavya.xyz' text) */}
+        <Script
+          id="website-schema"
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "WebSite",
+              name: "Team Eklavya", // ← what shows above title
+              alternateName: "Eklavya",
+              url: "https://www.teameklavya.xyz/",
             }),
           }}
         />

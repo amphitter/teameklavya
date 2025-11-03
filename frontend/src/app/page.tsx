@@ -9,17 +9,14 @@ export const metadata: Metadata = {
   description:
     "Team Eklavya empowers students through innovation, hackathons, and mentorship—building a community of future tech leaders across India.",
 
-  // ✅ Icon and branding
   icons: {
-    icon: "/logo.png",
+    icon: "/favicon.ico",
     shortcut: "/favicon.ico",
-    apple: "/logo.png",
+    apple: "/apple-touch-icon.png",
   },
 
-  // ✅ Author info
   authors: [{ name: "Team Eklavya", url: "https://www.teameklavya.xyz" }],
 
-  // ✅ Open Graph (for social previews)
   openGraph: {
     title: "Team Eklavya | Empowering Students, Enriching Futures",
     description:
@@ -38,7 +35,6 @@ export const metadata: Metadata = {
     type: "website",
   },
 
-  // ✅ Twitter Cards
   twitter: {
     card: "summary_large_image",
     title: "Team Eklavya | Empowering Students, Enriching Futures",
@@ -49,10 +45,8 @@ export const metadata: Metadata = {
     images: ["https://www.teameklavya.xyz/og-image.png"],
   },
 
-  // ✅ Base URL
   metadataBase: new URL("https://www.teameklavya.xyz"),
 
-  // ✅ SEO Keywords
   keywords: [
     "Team Eklavya",
     "Eklavya India",
@@ -71,7 +65,6 @@ export const metadata: Metadata = {
     "Team Eklavya Community",
   ],
 
-  // ✅ Robots & indexing rules
   robots: {
     index: true,
     follow: true,
@@ -84,13 +77,11 @@ export const metadata: Metadata = {
     },
   },
 
-  // ✅ Canonical URL
   alternates: {
     canonical: "https://www.teameklavya.xyz",
   },
 
-  // ✅ Additional optimizations
-  category: "events",
+  category: "Events",
   classification: "Student Innovation Community",
   abstract: "Team Eklavya - Student Innovation and Technology Community",
 };

@@ -6,7 +6,8 @@ export const metadata: Metadata = {
     default: "Contact Team Eklavya | Get in Touch with Our Innovation Community",
     template: "%s | Team Eklavya",
   },
-  description: "Reach out to Team Eklavya for collaborations, inquiries, or to join our community. We're here to help with projects, events, and innovation opportunities.",
+  description:
+    "Reach out to Team Eklavya for collaborations, inquiries, or to join our community. We're here to help with projects, events, and innovation opportunities.",
 
   // ✅ Icon and branding
   icons: {
@@ -16,17 +17,19 @@ export const metadata: Metadata = {
   },
 
   // ✅ Author info
-  authors: [{ name: "Team Eklavya", url: "https://iteameklavya.vercel.app" }],
+  authors: [{ name: "Team Eklavya", url: "https://www.teameklavya.xyz" }],
 
   // ✅ Open Graph (for Facebook, LinkedIn, Bing previews)
   openGraph: {
-    title: "Contact Team Eklavya | Get in Touch with Our Innovation Community",
-    description: "Connect with Team Eklavya for collaborations, project inquiries, event partnerships, or to join our growing community of student innovators.",
-    url: "https://iteameklavya.vercel.app/contact",
+    title:
+      "Contact Team Eklavya | Get in Touch with Our Innovation Community",
+    description:
+      "Connect with Team Eklavya for collaborations, project inquiries, event partnerships, or to join our growing community of student innovators.",
+    url: "https://www.teameklavya.xyz/contact",
     siteName: "Team Eklavya",
     images: [
       {
-        url: "https://iteameklavya.vercel.app/og-contact.png",
+        url: "https://www.teameklavya.xyz/og-contact.png",
         width: 1200,
         height: 630,
         alt: "Contact Team Eklavya - Innovation Community",
@@ -39,15 +42,17 @@ export const metadata: Metadata = {
   // ✅ Twitter Cards
   twitter: {
     card: "summary_large_image",
-    title: "Contact Team Eklavya | Get in Touch with Our Innovation Community",
-    description: "Reach out to Team Eklavya for collaborations, event partnerships, or to join our student innovation community. Quick responses guaranteed!",
+    title:
+      "Contact Team Eklavya | Get in Touch with Our Innovation Community",
+    description:
+      "Reach out to Team Eklavya for collaborations, event partnerships, or to join our student innovation community. Quick responses guaranteed!",
     creator: "@iteameklavya",
     site: "@iteameklavya",
-    images: ["https://iteameklavya.vercel.app/og-contact.png"],
+    images: ["https://www.teameklavya.xyz/og-contact.png"],
   },
 
   // ✅ Base URL
-  metadataBase: new URL("https://iteameklavya.vercel.app"),
+  metadataBase: new URL("https://www.teameklavya.xyz"),
 
   // ✅ SEO Keywords
   keywords: [
@@ -68,19 +73,29 @@ export const metadata: Metadata = {
     "Student Innovation Hub",
   ],
 
-  // ✅ Robots & indexing rules
-  // (add robots property here if needed),
+  // ✅ Robots & indexing rules (TypeScript-safe)
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-snippet": -1,
+      "max-image-preview": "large",
+      "max-video-preview": -1,
+    },
+  },
 
   // ✅ Canonical URL
   alternates: {
-    canonical: "https://iteameklavya.vercel.app/contact",
+    canonical: "https://www.teameklavya.xyz/contact",
   },
 
-// ✅ Additional optimizations
+  // ✅ Additional optimizations
   category: "education",
   classification: "Student Innovation Community Contact",
-  abstract: "Contact Team Eklavya - Student Innovation Community"
-}
+  abstract: "Contact Team Eklavya - Student Innovation Community",
+};
 
 export default function Contact() {
   return <ContactPage />;

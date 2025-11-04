@@ -66,12 +66,12 @@ const NewsLetter: React.FC = () => {
     <section
       className={`py-20 md:py-28 relative transition-colors duration-300 ${
         theme === "dark"
-          ? "bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950"
+          ? ""
           : "bg-gradient-to-br from-gray-50 via-white to-gray-50"
       }`}
     >
       {/* Background Blur */}
-      <div className="absolute inset-0 overflow-hidden opacity-30 pointer-events-none">
+      <div className="absolute ">
         <div
           className={`absolute top-0 left-1/4 w-96 h-96 rounded-full blur-3xl ${
             theme === "dark" ? "bg-purple-600/20" : "bg-purple-400/30"

@@ -1453,7 +1453,7 @@ export default function EventSlugPage() {
                 {tabs.map((tab) => (
                   <button
                     key={tab.id}
-                    onClick={() => onTabChange(tab.id)}
+onClick={() => setActiveTab(tab.id)}
                     className={`flex-1 px-6 py-4 text-sm font-medium transition-all duration-200 ${
                       activeTab === tab.id
                         ? theme === 'dark'

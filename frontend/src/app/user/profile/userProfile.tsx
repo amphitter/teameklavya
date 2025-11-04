@@ -29,9 +29,13 @@ import {
   BarChart3,
   TrendingUp,
   Users,
-  FileText
+  FileText,
+  Sparkles,
+  Zap
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTheme } from "@/context/ThemeContext";
+import { motion } from "framer-motion";
 
 interface UserProfile {
   _id: string;
@@ -73,6 +77,8 @@ interface Ticket {
 export default function UserDashboard() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { theme } = useTheme();
+  
   const [activeTab, setActiveTab] = useState<"overview" | "tickets" | "profile">(
     (searchParams.get('tab') as any) || "overview"
   );
@@ -177,42 +183,96 @@ export default function UserDashboard() {
   };
 
   if (loading) {
-    return <DashboardSkeleton />;
+    return <DashboardSkeleton theme={theme} />;
   }
 
   if (error && !user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md border-0 shadow-2xl bg-white/80 backdrop-blur-sm">
-          <CardContent className="pt-8 pb-6">
-            <div className="text-center">
-              <div className="w-20 h-20 bg-gradient-to-br from-red-100 to-red-200 rounded-full flex items-center justify-center mx-auto mb-6">
-                <AlertCircle className="h-10 w-10 text-red-500" />
+      <motion.div 
+        className={`min-h-screen transition-colors duration-300 relative overflow-hidden ${
+          theme === 'dark'
+            ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white'
+            : 'bg-gradient-to-br from-slate-50 to-blue-50 text-gray-900'
+        }`}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.8 }}
+      >
+        <div className="flex items-center justify-center p-4 min-h-screen">
+          <Card className={`w-full max-w-md border-0 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
+            theme === 'dark'
+              ? 'bg-slate-800/30 text-white'
+              : 'bg-white/80 text-gray-900'
+          }`}>
+            <CardContent className="pt-8 pb-6">
+              <div className="text-center">
+                <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${
+                  theme === 'dark'
+                    ? 'bg-red-500/20'
+                    : 'bg-gradient-to-br from-red-100 to-red-200'
+                }`}>
+                  <AlertCircle className={`h-10 w-10 ${
+                    theme === 'dark' ? 'text-red-400' : 'text-red-500'
+                  }`} />
+                </div>
+                <h2 className={`text-2xl font-bold mb-3 ${
+                  theme === 'dark' ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Error Loading Dashboard
+                </h2>
+                <p className={`mb-6 leading-relaxed ${
+                  theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+                }`}>
+                  {error}
+                </p>
+                <div className="space-y-3">
+                  <Button 
+                    onClick={fetchDashboardData} 
+                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                  >
+                    Try Again
+                  </Button>
+                  <Button variant="outline" className={`w-full transition-all ${
+                    theme === 'dark'
+                      ? 'border-slate-600 text-gray-300 hover:border-blue-500 hover:text-blue-400'
+                      : 'border-2 hover:border-blue-300'
+                  }`} asChild>
+                    <Link href="/events">
+                      Browse Events
+                    </Link>
+                  </Button>
+                </div>
               </div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-3">Error Loading Dashboard</h2>
-              <p className="text-gray-600 mb-6 leading-relaxed">{error}</p>
-              <div className="space-y-3">
-                <Button 
-                  onClick={fetchDashboardData} 
-                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl"
-                >
-                  Try Again
-                </Button>
-                <Button variant="outline" className="w-full border-2 hover:border-blue-300 transition-all" asChild>
-                  <Link href="/events">
-                    Browse Events
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </div>
+      </motion.div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+    <motion.div 
+      className={`min-h-screen transition-colors duration-300 relative overflow-hidden ${
+        theme === 'dark'
+          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white'
+          : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-gray-900'
+      }`}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.8 }}
+    >
+      {/* Enhanced gradient overlay for dark theme */}
+      {theme === 'dark' && (
+        <motion.div 
+          className="absolute inset-0 pointer-events-none z-0"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 1 }}
+        >
+          <div className="absolute inset-0 bg-[radial-gradient(closest-side,rgba(255,255,255,0.02),transparent_40%)]" />
+        </motion.div>
+      )}
+
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-700 text-white shadow-2xl relative overflow-hidden">
         <div className="absolute inset-0 bg-black/10"></div>
@@ -229,7 +289,7 @@ export default function UserDashboard() {
                 <div className="flex items-center flex-wrap gap-2">
                   <p className="text-blue-100 text-sm md:text-base">{user?.email}</p>
                   {user?.role === "admin" && (
-                    <Badge variant="secondary" className="bg-white/20 text-white border-0 backdrop-blur-sm px-2 py-1 text-xs">
+                    <Badge className="bg-white/20 text-white border-0 backdrop-blur-sm px-2 py-1 text-xs">
                       <Shield className="h-3 w-3 mr-1" />
                       Admin
                     </Badge>
@@ -261,22 +321,42 @@ export default function UserDashboard() {
       {/* Error Banner */}
       {error && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
-          <div className="bg-gradient-to-r from-red-50 to-orange-50 border border-red-200 rounded-2xl p-4 flex items-center justify-between shadow-lg backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`rounded-2xl p-4 flex items-center justify-between shadow-lg backdrop-blur-sm transition-all duration-300 ${
+              theme === 'dark'
+                ? 'bg-red-500/10 border border-red-500/20'
+                : 'bg-gradient-to-r from-red-50 to-orange-50 border border-red-200'
+            }`}
+          >
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-red-100 rounded-lg">
-                <AlertCircle className="h-5 w-5 text-red-600" />
+              <div className={`p-2 rounded-lg ${
+                theme === 'dark' ? 'bg-red-500/20' : 'bg-red-100'
+              }`}>
+                <AlertCircle className={`h-5 w-5 ${
+                  theme === 'dark' ? 'text-red-400' : 'text-red-600'
+                }`} />
               </div>
-              <p className="text-red-800 font-medium text-sm">{error}</p>
+              <p className={`font-medium text-sm ${
+                theme === 'dark' ? 'text-red-300' : 'text-red-800'
+              }`}>
+                {error}
+              </p>
             </div>
             <Button 
               variant="outline" 
               size="sm" 
-              className="border-red-300 text-red-700 hover:bg-red-100 transition-all duration-200"
+              className={`transition-all duration-200 ${
+                theme === 'dark'
+                  ? 'border-red-500/30 text-red-300 hover:bg-red-500/20'
+                  : 'border-red-300 text-red-700 hover:bg-red-100'
+              }`}
               onClick={fetchDashboardData}
             >
               Retry
             </Button>
-          </div>
+          </motion.div>
         </div>
       )}
 
@@ -284,7 +364,11 @@ export default function UserDashboard() {
         <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
           {/* Sidebar Navigation - Mobile First */}
           <div className="lg:w-64 order-2 lg:order-1">
-            <Card className="border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-xl rounded-2xl lg:sticky lg:top-8">
+            <Card className={`border-0 shadow-xl rounded-2xl lg:sticky lg:top-8 backdrop-blur-sm transition-all duration-300 ${
+              theme === 'dark'
+                ? 'bg-slate-800/30'
+                : 'bg-white/70 border border-gray-200/60'
+            }`}>
               <CardContent className="p-4">
                 <nav className="space-y-2">
                   {[
@@ -294,29 +378,43 @@ export default function UserDashboard() {
                   ].map((item) => {
                     const Icon = item.icon;
                     return (
-                      <button
+                      <motion.button
                         key={item.id}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
                         onClick={() => handleTabChange(item.id as any)}
                         className={`w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm font-semibold transition-all duration-300 group ${
                           activeTab === item.id
                             ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg"
-                            : "text-gray-700 hover:bg-white hover:text-gray-900 hover:shadow-lg border border-transparent hover:border-gray-200"
+                            : `text-gray-700 hover:shadow-lg border border-transparent hover:border-gray-200 ${
+                                theme === 'dark'
+                                  ? 'text-gray-300 hover:bg-slate-700/50 hover:text-white'
+                                  : 'hover:bg-white hover:text-gray-900'
+                              }`
                         }`}
                       >
                         <div className="flex items-center space-x-3">
-                          <Icon className={`h-4 w-4 ${activeTab === item.id ? 'text-white' : 'text-gray-400 group-hover:text-blue-600'}`} />
+                          <Icon className={`h-4 w-4 ${
+                            activeTab === item.id 
+                              ? 'text-white' 
+                              : theme === 'dark'
+                                ? 'text-gray-400 group-hover:text-blue-400'
+                                : 'text-gray-400 group-hover:text-blue-600'
+                          }`} />
                           <span>{item.label}</span>
                         </div>
                         {item.count !== null && (
                           <span className={`px-2 py-1 rounded-full text-xs font-bold transition-all duration-300 ${
                             activeTab === item.id
                               ? "bg-white/20 text-white backdrop-blur-sm"
-                              : "bg-gray-100 text-gray-600 group-hover:bg-blue-100 group-hover:text-blue-700"
+                              : theme === 'dark'
+                                ? "bg-slate-700 text-gray-300 group-hover:bg-blue-500/20 group-hover:text-blue-400"
+                                : "bg-gray-100 text-gray-600 group-hover:bg-blue-100 group-hover:text-blue-700"
                           }`}>
                             {item.count}
                           </span>
                         )}
-                      </button>
+                      </motion.button>
                     );
                   })}
                 </nav>
@@ -335,6 +433,7 @@ export default function UserDashboard() {
                 onViewAllRegistrations={() => router.push('/user/registrations')}
                 onViewTicket={handleViewTicket}
                 onRetry={fetchDashboardData}
+                theme={theme}
               />
             )}
 
@@ -344,6 +443,7 @@ export default function UserDashboard() {
                 onDownloadTicket={downloadTicket}
                 onViewTicket={handleViewTicket}
                 onRetry={fetchDashboardData}
+                theme={theme}
               />
             )}
 
@@ -351,6 +451,7 @@ export default function UserDashboard() {
               <ProfileTab 
                 user={user}
                 onProfileUpdate={fetchDashboardData}
+                theme={theme}
               />
             )}
           </div>
@@ -363,14 +464,15 @@ export default function UserDashboard() {
         isOpen={showTicketModal}
         onClose={handleCloseTicketModal}
         onDownloadTicket={downloadTicket}
+        theme={theme}
       />
-    </div>
+    </motion.div>
   );
 }
 
 // Enhanced Overview Tab Component
 function OverviewTab({ 
-  user, stats, registeredEvents, tickets, onViewAllRegistrations, onViewTicket, onRetry 
+  user, stats, registeredEvents, tickets, onViewAllRegistrations, onViewTicket, onRetry, theme 
 }: any) {
   const upcomingEvents = registeredEvents.slice(0, 3);
   const recentTickets = tickets.slice(0, 3);
@@ -395,6 +497,7 @@ function OverviewTab({
           description="All registrations"
           icon={BarChart3}
           color="blue"
+          theme={theme}
         />
         <StatCard
           title="Upcoming"
@@ -402,6 +505,7 @@ function OverviewTab({
           description="Future events"
           icon={Clock}
           color="green"
+          theme={theme}
         />
         <StatCard
           title="Attended"
@@ -409,19 +513,21 @@ function OverviewTab({
           description="Completed events"
           icon={CheckCircle}
           color="purple"
+          theme={theme}
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 text-gray-600">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Upcoming Events */}
         <SectionCard
-          title ="My Registrations"
+          title="My Registrations"
           description="Your recently registered events"
           icon={Calendar}
           action={registeredEvents.length > 0 ? {
             label: "View All",
             onClick: onViewAllRegistrations
           } : undefined}
+          theme={theme}
         >
           {upcomingEvents.length === 0 ? (
             <EmptyState
@@ -432,6 +538,7 @@ function OverviewTab({
                 label: "Browse Events",
                 onClick: () => router.push('/events')
               }}
+              theme={theme}
             />
           ) : (
             upcomingEvents.map((event: any, index: number) => (
@@ -440,6 +547,7 @@ function OverviewTab({
                 event={event} 
                 formatDate={formatDate}
                 delay={index * 100}
+                theme={theme}
               />
             ))
           )}
@@ -454,6 +562,7 @@ function OverviewTab({
             label: "View All",
             onClick: () => {/* Tickets tab is handled by navigation */}
           } : undefined}
+          theme={theme}
         >
           {recentTickets.length === 0 ? (
             <EmptyState
@@ -464,6 +573,7 @@ function OverviewTab({
                 label: "Register for Events",
                 onClick: () => router.push('/events')
               }}
+              theme={theme}
             />
           ) : (
             recentTickets.map((ticket: any, index: number) => (
@@ -473,6 +583,7 @@ function OverviewTab({
                 formatDate={formatDate}
                 onViewTicket={onViewTicket}
                 delay={index * 100}
+                theme={theme}
               />
             ))
           )}
@@ -489,9 +600,10 @@ interface StatCardProps {
   description: string;
   icon: React.FC<React.SVGProps<SVGSVGElement>>;
   color: "blue" | "green" | "purple";
+  theme: string;
 }
 
-function StatCard({ title, value, description, icon: Icon, color }: StatCardProps) {
+function StatCard({ title, value, description, icon: Icon, color, theme }: StatCardProps) {
   const colorClasses: { [key in "blue" | "green" | "purple"]: string } = {
     blue: 'from-blue-500 to-blue-600',
     green: 'from-green-500 to-emerald-600',
@@ -499,46 +611,81 @@ function StatCard({ title, value, description, icon: Icon, color }: StatCardProp
   };
 
   return (
-    <Card className="border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-lg rounded-2xl hover:shadow-xl transition-all duration-300">
-      <CardContent className="p-4 sm:p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold text-gray-600 mb-1">{title}</p>
-            <p className="text-2xl sm:text-3xl font-bold text-gray-900">{value}</p>
-            <p className="text-xs text-gray-500 mt-1">{description}</p>
+    <motion.div
+      whileHover={{ scale: 1.05 }}
+      transition={{ duration: 0.2 }}
+    >
+      <Card className={`border-0 shadow-lg rounded-2xl hover:shadow-xl transition-all duration-300 backdrop-blur-sm ${
+        theme === 'dark'
+          ? 'bg-slate-800/30'
+          : 'bg-white/70 border border-gray-200/60'
+      }`}>
+        <CardContent className="p-4 sm:p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className={`text-sm font-semibold mb-1 ${
+                theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+              }`}>
+                {title}
+              </p>
+              <p className={`text-2xl sm:text-3xl font-bold ${
+                theme === 'dark' ? 'text-white' : 'text-gray-900'
+              }`}>
+                {value}
+              </p>
+              <p className={`text-xs mt-1 ${
+                theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+              }`}>
+                {description}
+              </p>
+            </div>
+            <div className={`rounded-2xl bg-gradient-to-br ${colorClasses[color]} p-3 shadow-lg`}>
+              <Icon className="h-6 w-6 text-white" />
+            </div>
           </div>
-          <div className={`rounded-2xl bg-gradient-to-br ${colorClasses[color]} p-3 shadow-lg`}>
-            <Icon className="h-6 w-6 text-white" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </motion.div>
   );
 }
 
 // Reusable Section Card Component
-function SectionCard({ title, description, icon: Icon, action, children }: any) {
+function SectionCard({ title, description, icon: Icon, action, children, theme }: any) {
   return (
-    <Card className="border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-lg rounded-2xl transition-all duration-300 hover:shadow-xl">
+    <Card className={`border-0 shadow-lg rounded-2xl transition-all duration-300 hover:shadow-xl backdrop-blur-sm ${
+      theme === 'dark'
+        ? 'bg-slate-800/30'
+        : 'bg-white/70 border border-gray-200/60'
+    }`}>
       <CardHeader className="pb-4">
         <CardTitle className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <Icon className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
-            <span className="text-lg sm:text-xl">{title}</span>
+            <Icon className={`h-5 w-5 sm:h-6 sm:w-6 ${
+              theme === 'dark' ? 'text-blue-400' : 'text-blue-600'
+            }`} />
+            <span className={`text-lg sm:text-xl ${
+              theme === 'dark' ? 'text-white' : 'text-gray-900'
+            }`}>
+              {title}
+            </span>
           </div>
           {action && (
             <Button 
               variant="ghost" 
               size="sm" 
               onClick={action.onClick}
-              className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-all duration-200"
+              className={`transition-all duration-200 ${
+                theme === 'dark'
+                  ? 'text-blue-400 hover:text-blue-300 hover:bg-blue-500/20'
+                  : 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
+              }`}
             >
               {action.label}
               <ArrowRight className="ml-1 h-4 w-4" />
             </Button>
           )}
         </CardTitle>
-        <CardDescription className="text-gray-600">
+        <CardDescription className={theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}>
           {description}
         </CardDescription>
       </CardHeader>
@@ -550,14 +697,28 @@ function SectionCard({ title, description, icon: Icon, action, children }: any) 
 }
 
 // Reusable Empty State Component
-function EmptyState({ icon: Icon, title, description, action }: any) {
+function EmptyState({ icon: Icon, title, description, action, theme }: any) {
   return (
     <div className="text-center py-6 sm:py-8">
-      <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-        <Icon className="h-6 w-6 sm:h-8 sm:w-8 text-gray-400" />
+      <div className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+        theme === 'dark'
+          ? 'bg-slate-700/50'
+          : 'bg-gradient-to-br from-gray-100 to-gray-200'
+      }`}>
+        <Icon className={`h-6 w-6 sm:h-8 sm:w-8 ${
+          theme === 'dark' ? 'text-gray-400' : 'text-gray-400'
+        }`} />
       </div>
-      <p className="text-gray-700 font-medium mb-2">{title}</p>
-      <p className="text-gray-500 text-sm mb-4 sm:mb-6">{description}</p>
+      <p className={`font-medium mb-2 ${
+        theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+      }`}>
+        {title}
+      </p>
+      <p className={`text-sm mb-4 sm:mb-6 ${
+        theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+      }`}>
+        {description}
+      </p>
       {action && (
         <Button 
           onClick={action.onClick}
@@ -571,7 +732,7 @@ function EmptyState({ icon: Icon, title, description, action }: any) {
 }
 
 // Enhanced Event Card Component
-function EventCard({ event, formatDate, delay = 0 }: any) {
+function EventCard({ event, formatDate, delay = 0, theme }: any) {
   const router = useRouter();
 
   const handleEventClick = () => {
@@ -579,25 +740,29 @@ function EventCard({ event, formatDate, delay = 0 }: any) {
     router.push(`/events/${event.slug}`);
   };
 
-const getImageUrl = (imagePath: string | undefined) => {
-  const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || ""; // backend base URL
+  const getImageUrl = (imagePath: string | undefined) => {
+    const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
-  if (!imagePath) return '/api/placeholder/400/200';
+    if (!imagePath) return '/api/placeholder/400/200';
 
-  // if already a full URL, return as is
-  if (imagePath.startsWith('http')) return imagePath;
+    if (imagePath.startsWith('http')) return imagePath;
 
-  // otherwise, append the path to backend URL safely (avoid double slashes)
-  const normalizedBase = BASE_URL === "" ? "" : (BASE_URL.endsWith('/') ? BASE_URL : `${BASE_URL}/`);
-  const normalizedPath = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
-  return `${normalizedBase}${normalizedPath}`;
-};
-
+    const normalizedBase = BASE_URL === "" ? "" : (BASE_URL.endsWith('/') ? BASE_URL : `${BASE_URL}/`);
+    const normalizedPath = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+    return `${normalizedBase}${normalizedPath}`;
+  };
 
   return (
-    <div 
-      className="flex items-center space-x-3 p-3 sm:p-4 rounded-xl border border-gray-200/60 bg-white/50 hover:bg-white hover:shadow-lg transition-all duration-300 transform hover:-translate-y-0.5 group cursor-pointer"
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: delay / 1000 }}
+      className="flex items-center space-x-3 p-3 sm:p-4 rounded-xl border border-gray-200/60 hover:shadow-lg transition-all duration-300 transform hover:-translate-y-0.5 group cursor-pointer backdrop-blur-sm"
       onClick={handleEventClick}
+      style={{
+        backgroundColor: theme === 'dark' ? 'rgba(30, 41, 59, 0.3)' : 'rgba(255, 255, 255, 0.5)',
+        borderColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+      }}
     >
       <img 
         src={getImageUrl(event.bannerUrl)} 
@@ -605,46 +770,75 @@ const getImageUrl = (imagePath: string | undefined) => {
         className="h-12 w-12 sm:h-14 sm:w-14 rounded-xl object-cover flex-shrink-0 shadow-md group-hover:shadow-lg transition-all duration-300"
       />
       <div className="flex-1 min-w-0">
-        <p className="font-semibold text-gray-900 truncate text-sm sm:text-base group-hover:text-blue-600 transition-colors">
+        <p className={`font-semibold truncate text-sm sm:text-base group-hover:text-blue-600 transition-colors ${
+          theme === 'dark' ? 'text-white' : 'text-gray-900'
+        }`}>
           {event.title}
         </p>
-        <p className="text-xs sm:text-sm text-gray-600 mt-1 truncate">
+        <p className={`text-xs sm:text-sm mt-1 truncate ${
+          theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+        }`}>
           {formatDate(event.startDate)} • {event.venue}
         </p>
         {event.category && (
-          <Badge variant="outline" className="mt-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+          <Badge variant="outline" className={`mt-2 text-xs ${
+            theme === 'dark'
+              ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
+              : 'bg-blue-50 text-blue-700 border-blue-200'
+          }`}>
             {event.category}
           </Badge>
         )}
       </div>
-      <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400 group-hover:text-blue-600 transition-all duration-300 transform group-hover:translate-x-1 flex-shrink-0" />
-    </div>
+      <ArrowRight className={`h-4 w-4 sm:h-5 sm:w-5 transition-all duration-300 transform group-hover:translate-x-1 flex-shrink-0 ${
+        theme === 'dark' ? 'text-gray-500 group-hover:text-blue-400' : 'text-gray-400 group-hover:text-blue-600'
+      }`} />
+    </motion.div>
   );
 }
 
 // Enhanced Ticket Card Component
-function TicketCard({ ticket, formatDate, onViewTicket, delay = 0 }: any) {
+function TicketCard({ ticket, formatDate, onViewTicket, delay = 0, theme }: any) {
   return (
-    <div 
-      className="flex items-center justify-between p-3 sm:p-4 rounded-xl border border-gray-200/60 bg-white/50 hover:bg-white hover:shadow-lg transition-all duration-300 transform hover:-translate-y-0.5 group"
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: delay / 1000 }}
+      className="flex items-center justify-between p-3 sm:p-4 rounded-xl border border-gray-200/60 hover:shadow-lg transition-all duration-300 transform hover:-translate-y-0.5 group backdrop-blur-sm"
+      style={{
+        backgroundColor: theme === 'dark' ? 'rgba(30, 41, 59, 0.3)' : 'rgba(255, 255, 255, 0.5)',
+        borderColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+      }}
     >
       <div className="flex items-center space-x-3 sm:space-x-4">
         <div className={`p-2 sm:p-3 rounded-xl transition-all duration-300 group-hover:scale-110 ${
           ticket.checkedIn 
-            ? 'bg-gradient-to-br from-green-100 to-emerald-100' 
-            : 'bg-gradient-to-br from-blue-100 to-indigo-100'
+            ? theme === 'dark'
+              ? 'bg-gradient-to-br from-green-500/20 to-emerald-500/20'
+              : 'bg-gradient-to-br from-green-100 to-emerald-100'
+            : theme === 'dark'
+              ? 'bg-gradient-to-br from-blue-500/20 to-indigo-500/20'
+              : 'bg-gradient-to-br from-blue-100 to-indigo-100'
         }`}>
           {ticket.checkedIn ? (
-            <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
+            <CheckCircle className={`h-4 w-4 sm:h-5 sm:w-5 ${
+              theme === 'dark' ? 'text-green-400' : 'text-green-600'
+            }`} />
           ) : (
-            <Ticket className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
+            <Ticket className={`h-4 w-4 sm:h-5 sm:w-5 ${
+              theme === 'dark' ? 'text-blue-400' : 'text-blue-600'
+            }`} />
           )}
         </div>
         <div className="min-w-0">
-          <p className="font-semibold text-gray-900 group-hover:text-purple-600 transition-colors truncate text-sm sm:text-base">
+          <p className={`font-semibold group-hover:text-purple-600 transition-colors truncate text-sm sm:text-base ${
+            theme === 'dark' ? 'text-white' : 'text-gray-900'
+          }`}>
             {ticket.eventId.title}
           </p>
-          <p className="text-xs sm:text-sm text-gray-600 mt-1">
+          <p className={`text-xs sm:text-sm mt-1 ${
+            theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+          }`}>
             {formatDate(ticket.eventId.startDate)}
           </p>
         </div>
@@ -652,8 +846,12 @@ function TicketCard({ ticket, formatDate, onViewTicket, delay = 0 }: any) {
       <div className="flex items-center space-x-2">
         <p className={`text-xs font-semibold px-2 py-1 rounded-full ${
           ticket.checkedIn 
-            ? 'bg-green-100 text-green-700' 
-            : 'bg-blue-100 text-blue-700'
+            ? theme === 'dark'
+              ? 'bg-green-500/20 text-green-300'
+              : 'bg-green-100 text-green-700'
+            : theme === 'dark'
+              ? 'bg-blue-500/20 text-blue-300'
+              : 'bg-blue-100 text-blue-700'
         }`}>
           {ticket.checkedIn ? 'Checked In' : 'Active'}
         </p>
@@ -661,17 +859,23 @@ function TicketCard({ ticket, formatDate, onViewTicket, delay = 0 }: any) {
           variant="ghost" 
           size="sm"
           onClick={() => onViewTicket(ticket)}
-          className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-all duration-300 bg-white shadow-md hover:shadow-lg"
+          className={`h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-md hover:shadow-lg ${
+            theme === 'dark'
+              ? 'bg-slate-700/50 hover:bg-slate-600/50'
+              : 'bg-white'
+          }`}
         >
-          <QrCode className="h-3 w-3 sm:h-4 sm:w-4" />
+          <QrCode className={`h-3 w-3 sm:h-4 sm:w-4 ${
+            theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+          }`} />
         </Button>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
 // Enhanced Tickets Tab
-function TicketsTab({ tickets, onDownloadTicket, onViewTicket, onRetry }: any) {
+function TicketsTab({ tickets, onDownloadTicket, onViewTicket, onRetry, theme }: any) {
   const router = useRouter();
 
   const formatDate = (dateString: string) => {
@@ -698,15 +902,27 @@ function TicketsTab({ tickets, onDownloadTicket, onViewTicket, onRetry }: any) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">My Tickets</h2>
-          <p className="text-gray-600 mt-2">Your event access passes with QR codes</p>
+          <h2 className={`text-2xl sm:text-3xl font-bold ${
+            theme === 'dark' ? 'text-white' : 'text-gray-900'
+          }`}>
+            My Tickets
+          </h2>
+          <p className={`mt-2 ${
+            theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+          }`}>
+            Your event access passes with QR codes
+          </p>
         </div>
         <div className="flex gap-2">
           <Button 
             asChild
             variant="outline"
             size="sm"
-            className="border-2 hover:border-blue-300 transition-all duration-200"
+            className={`transition-all duration-200 ${
+              theme === 'dark'
+                ? 'border-slate-600 text-gray-300 hover:border-blue-500 hover:text-blue-400'
+                : 'border-2 hover:border-blue-300'
+            }`}
           >
             <Link href="/events">
               <Calendar className="h-4 w-4 mr-2" />
@@ -725,112 +941,161 @@ function TicketsTab({ tickets, onDownloadTicket, onViewTicket, onRetry }: any) {
             label: "Register for Events",
             onClick: () => router.push('/events')
           }}
+          theme={theme}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:gap-6">
           {tickets.map((ticket: any, index: number) => (
-            <Card 
-              key={ticket._id} 
-              className="border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-lg rounded-2xl hover:shadow-xl transition-all duration-300"
+            <motion.div
+              key={ticket._id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 }}
             >
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex flex-col lg:flex-row gap-4 sm:gap-6">
-                  {/* Event Info */}
-                  <div className="flex-1">
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-4 gap-2">
-                      <div className="flex-1">
-                        <h3 
-                          className="text-lg sm:text-xl font-bold text-gray-900 mb-2 sm:mb-3 hover:text-blue-600 cursor-pointer transition-colors line-clamp-2"
-                          onClick={() => handleEventClick(ticket.eventId.slug)}
-                        >
-                          {ticket.eventId.title}
-                        </h3>
-                        <div className="space-y-2 text-sm text-gray-600">
-                          <div className="flex items-center space-x-2 bg-gray-50 rounded-lg px-3 py-2">
-                            <Calendar className="h-4 w-4 text-blue-500" />
-                            <span>{formatDate(ticket.eventId.startDate)} at {formatTime(ticket.eventId.startDate)}</span>
-                          </div>
-                          <div className="flex items-center space-x-2 bg-gray-50 rounded-lg px-3 py-2">
-                            <MapPin className="h-4 w-4 text-green-500" />
-                            <span className="truncate">{ticket.eventId.venue}</span>
+              <Card className={`border-0 shadow-lg rounded-2xl hover:shadow-xl transition-all duration-300 backdrop-blur-sm ${
+                theme === 'dark'
+                  ? 'bg-slate-800/30'
+                  : 'bg-white/70 border border-gray-200/60'
+              }`}>
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex flex-col lg:flex-row gap-4 sm:gap-6">
+                    {/* Event Info */}
+                    <div className="flex-1">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-4 gap-2">
+                        <div className="flex-1">
+                          <h3 
+                            className={`text-lg sm:text-xl font-bold mb-2 sm:mb-3 hover:text-blue-600 cursor-pointer transition-colors line-clamp-2 ${
+                              theme === 'dark' ? 'text-white' : 'text-gray-900'
+                            }`}
+                            onClick={() => handleEventClick(ticket.eventId.slug)}
+                          >
+                            {ticket.eventId.title}
+                          </h3>
+                          <div className="space-y-2 text-sm">
+                            <div className={`flex items-center space-x-2 rounded-lg px-3 py-2 ${
+                              theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-50'
+                            }`}>
+                              <Calendar className={`h-4 w-4 ${
+                                theme === 'dark' ? 'text-blue-400' : 'text-blue-500'
+                              }`} />
+                              <span className={theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}>
+                                {formatDate(ticket.eventId.startDate)} at {formatTime(ticket.eventId.startDate)}
+                              </span>
+                            </div>
+                            <div className={`flex items-center space-x-2 rounded-lg px-3 py-2 ${
+                              theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-50'
+                            }`}>
+                              <MapPin className={`h-4 w-4 ${
+                                theme === 'dark' ? 'text-green-400' : 'text-green-500'
+                              }`} />
+                              <span className={`truncate ${
+                                theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+                              }`}>
+                                {ticket.eventId.venue}
+                              </span>
+                            </div>
                           </div>
                         </div>
+                        <div className={`inline-flex items-center px-3 py-1 sm:px-4 sm:py-2 rounded-full text-sm font-semibold border ${
+                          ticket.checkedIn 
+                            ? theme === 'dark'
+                              ? 'bg-green-500/20 text-green-300 border-green-400/30'
+                              : 'bg-green-100 text-green-800 border-green-200'
+                            : theme === 'dark'
+                              ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
+                              : 'bg-blue-100 text-blue-800 border-blue-200'
+                        }`}>
+                          {ticket.checkedIn ? (
+                            <>
+                              <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                              Checked In
+                            </>
+                          ) : (
+                            <>
+                              <Ticket className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                              Active
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className={`inline-flex items-center px-3 py-1 sm:px-4 sm:py-2 rounded-full text-sm font-semibold border ${
-                        ticket.checkedIn 
-                          ? 'bg-green-100 text-green-800 border-green-200' 
-                          : 'bg-blue-100 text-blue-800 border-blue-200'
+
+                      {ticket.checkedIn && ticket.checkInTime && (
+                        <div className={`border rounded-xl p-3 sm:p-4 mb-4 ${
+                          theme === 'dark'
+                            ? 'bg-green-500/10 border-green-500/20'
+                            : 'bg-green-50 border-green-200'
+                        }`}>
+                          <p className={`text-sm font-semibold flex items-center ${
+                            theme === 'dark' ? 'text-green-300' : 'text-green-800'
+                          }`}>
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            Checked in at {formatTime(ticket.checkInTime)}
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleEventClick(ticket.eventId.slug)}
+                          className={`transition-all ${
+                            theme === 'dark'
+                              ? 'border-slate-600 text-gray-300 hover:border-blue-500 hover:text-blue-400'
+                              : 'border-2 hover:border-blue-300'
+                          }`}
+                        >
+                          <ExternalLink className="h-4 w-4 mr-2" />
+                          View Event
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => onDownloadTicket(ticket)}
+                          className={`transition-all ${
+                            theme === 'dark'
+                              ? 'border-slate-600 text-gray-300 hover:border-green-500 hover:text-green-400'
+                              : 'border-2 hover:border-green-300'
+                          }`}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Download
+                        </Button>
+                        <Button 
+                          size="sm"
+                          onClick={() => onViewTicket(ticket)}
+                          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                        >
+                          <QrCode className="h-4 w-4 mr-2" />
+                          View Ticket
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* QR Code */}
+                    <div className="lg:w-32 xl:w-48 flex flex-col items-center justify-center">
+                      <div className={`p-3 sm:p-4 rounded-xl border-2 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer ${
+                        theme === 'dark'
+                          ? 'bg-slate-700/50 border-slate-600'
+                          : 'bg-white border-gray-200'
+                      }`}
+                           onClick={() => onViewTicket(ticket)}>
+                        <img 
+                          src={ticket.qrCode} 
+                          alt="QR Code"
+                          className="w-24 h-24 sm:w-32 sm:h-32"
+                        />
+                      </div>
+                      <p className={`text-xs mt-2 text-center font-medium ${
+                        theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
                       }`}>
-                        {ticket.checkedIn ? (
-                          <>
-                            <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                            Checked In
-                          </>
-                        ) : (
-                          <>
-                            <Ticket className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                            Active
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {ticket.checkedIn && ticket.checkInTime && (
-                      <div className="bg-green-50 border border-green-200 rounded-xl p-3 sm:p-4 mb-4">
-                        <p className="text-sm text-green-800 font-semibold flex items-center">
-                          <CheckCircle className="h-4 w-4 mr-2" />
-                          Checked in at {formatTime(ticket.checkInTime)}
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleEventClick(ticket.eventId.slug)}
-                        className="border-2 hover:border-blue-300 transition-all"
-                      >
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        View Event
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => onDownloadTicket(ticket)}
-                        className="border-2 hover:border-green-300 transition-all"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Download
-                      </Button>
-                      <Button 
-                        size="sm"
-                        onClick={() => onViewTicket(ticket)}
-                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl"
-                      >
-                        <QrCode className="h-4 w-4 mr-2" />
-                        View Ticket
-                      </Button>
+                        Scan for event entry
+                      </p>
                     </div>
                   </div>
-
-                  {/* QR Code */}
-                  <div className="lg:w-32 xl:w-48 flex flex-col items-center justify-center">
-                    <div className="bg-white p-3 sm:p-4 rounded-xl border-2 border-gray-200 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer"
-                         onClick={() => onViewTicket(ticket)}>
-                      <img 
-                        src={ticket.qrCode} 
-                        alt="QR Code"
-                        className="w-24 h-24 sm:w-32 sm:h-32"
-                      />
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2 text-center font-medium">
-                      Scan for event entry
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </motion.div>
           ))}
         </div>
       )}
@@ -839,7 +1104,7 @@ function TicketsTab({ tickets, onDownloadTicket, onViewTicket, onRetry }: any) {
 }
 
 // Enhanced Profile Tab
-function ProfileTab({ user, onProfileUpdate }: any) {
+function ProfileTab({ user, onProfileUpdate, theme }: any) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
@@ -886,43 +1151,95 @@ function ProfileTab({ user, onProfileUpdate }: any) {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">Profile Settings</h2>
-        <p className="text-gray-600 mt-2">Update your personal information and preferences</p>
+        <h2 className={`text-2xl sm:text-3xl font-bold ${
+          theme === 'dark' ? 'text-white' : 'text-gray-900'
+        }`}>
+          Profile Settings
+        </h2>
+        <p className={`mt-2 ${
+          theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+        }`}>
+          Update your personal information and preferences
+        </p>
       </div>
 
-      <Card className="border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-lg rounded-2xl transition-all duration-300 hover:shadow-xl">
+      <Card className={`border-0 shadow-lg rounded-2xl transition-all duration-300 hover:shadow-xl backdrop-blur-sm ${
+        theme === 'dark'
+          ? 'bg-slate-800/30'
+          : 'bg-white/70 border border-gray-200/60'
+      }`}>
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center space-x-2">
-            <User className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
-            <span className= "text-gray-600">Personal Information</span>
+            <User className={`h-5 w-5 sm:h-6 sm:w-6 ${
+              theme === 'dark' ? 'text-blue-400' : 'text-blue-600'
+            }`} />
+            <span className={theme === 'dark' ? 'text-white' : 'text-gray-900'}>
+              Personal Information
+            </span>
           </CardTitle>
-          <CardDescription className="text-gray-600">
+          <CardDescription className={theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}>
             Update your profile details and institutional information
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Read-only Basic Info */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6 bg-gradient-to-br from-gray-50 to-blue-50 rounded-2xl border border-gray-200">
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6 rounded-2xl border ${
+              theme === 'dark'
+                ? 'bg-gradient-to-br from-slate-700/50 to-blue-500/10 border-slate-600'
+                : 'bg-gradient-to-br from-gray-50 to-blue-50 border-gray-200'
+            }`}>
               <div>
-                <label className="text-sm font-semibold text-gray-700 mb-2 block">First Name</label>
-                <p className="text-gray-900 font-bold text-base sm:text-lg">{user?.firstName}</p>
+                <label className={`text-sm font-semibold mb-2 block ${
+                  theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                }`}>
+                  First Name
+                </label>
+                <p className={`font-bold text-base sm:text-lg ${
+                  theme === 'dark' ? 'text-white' : 'text-gray-900'
+                }`}>
+                  {user?.firstName}
+                </p>
               </div>
               <div>
-                <label className="text-sm font-semibold text-gray-700 mb-2 block">Last Name</label>
-                <p className="text-gray-900 font-bold text-base sm:text-lg">{user?.lastName}</p>
+                <label className={`text-sm font-semibold mb-2 block ${
+                  theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                }`}>
+                  Last Name
+                </label>
+                <p className={`font-bold text-base sm:text-lg ${
+                  theme === 'dark' ? 'text-white' : 'text-gray-900'
+                }`}>
+                  {user?.lastName}
+                </p>
               </div>
               <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-gray-700 mb-2 block">Email</label>
-                <p className="text-gray-900 font-bold text-base sm:text-lg">{user?.email}</p>
+                <label className={`text-sm font-semibold mb-2 block ${
+                  theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                }`}>
+                  Email
+                </label>
+                <p className={`font-bold text-base sm:text-lg ${
+                  theme === 'dark' ? 'text-white' : 'text-gray-900'
+                }`}>
+                  {user?.email}
+                </p>
                 <div className="flex items-center mt-2">
                   {user?.emailVerified ? (
-                    <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100 border-green-200 px-2 py-1 text-xs">
+                    <Badge className={`px-2 py-1 text-xs ${
+                      theme === 'dark'
+                        ? 'bg-green-500/20 text-green-300 border-green-400/30'
+                        : 'bg-green-100 text-green-800 border-green-200'
+                    }`}>
                       <CheckCircle className="h-3 w-3 mr-1" />
                       Verified
                     </Badge>
                   ) : (
-                    <Badge variant="destructive" className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100 border-yellow-200 px-2 py-1 text-xs">
+                    <Badge className={`px-2 py-1 text-xs ${
+                      theme === 'dark'
+                        ? 'bg-yellow-500/20 text-yellow-300 border-yellow-400/30'
+                        : 'bg-yellow-100 text-yellow-800 border-yellow-200'
+                    }`}>
                       <XCircle className="h-3 w-3 mr-1" />
                       Not Verified
                     </Badge>
@@ -934,7 +1251,9 @@ function ProfileTab({ user, onProfileUpdate }: any) {
             {/* Editable Profile Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
               <div className="space-y-2">
-                <label htmlFor="institution" className="block text-sm font-semibold text-gray-700">
+                <label htmlFor="institution" className={`block text-sm font-semibold ${
+                  theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   Institution/Organization
                 </label>
                 <input
@@ -943,13 +1262,19 @@ function ProfileTab({ user, onProfileUpdate }: any) {
                   type="text"
                   value={form.institution}
                   onChange={handleChange}
-                  className="w-full px-3 py-2 sm:px-4 sm:py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-600 bg-white/50"
+                  className={`w-full px-3 py-2 sm:px-4 sm:py-3 border-2 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
+                    theme === 'dark'
+                      ? 'bg-slate-700/50 border-slate-600 text-white placeholder-gray-400'
+                      : 'bg-white/50 border-gray-200 text-gray-600'
+                  }`}
                   placeholder="Your institution"
                 />
               </div>
 
               <div className="space-y-2">
-                <label htmlFor="course" className="block text-sm font-semibold text-gray-700">
+                <label htmlFor="course" className={`block text-sm font-semibold ${
+                  theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   Course/Program
                 </label>
                 <input
@@ -958,13 +1283,19 @@ function ProfileTab({ user, onProfileUpdate }: any) {
                   type="text"
                   value={form.course}
                   onChange={handleChange}
-                  className="w-full px-3 py-2 sm:px-4 sm:py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-600 bg-white/50"
+                  className={`w-full px-3 py-2 sm:px-4 sm:py-3 border-2 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
+                    theme === 'dark'
+                      ? 'bg-slate-700/50 border-slate-600 text-white placeholder-gray-400'
+                      : 'bg-white/50 border-gray-200 text-gray-600'
+                  }`}
                   placeholder="Your course or program"
                 />
               </div>
 
               <div className="space-y-2">
-                <label htmlFor="year" className="block text-sm font-semibold text-gray-700">
+                <label htmlFor="year" className={`block text-sm font-semibold ${
+                  theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   Academic Year
                 </label>
                 <input
@@ -973,7 +1304,11 @@ function ProfileTab({ user, onProfileUpdate }: any) {
                   type="text"
                   value={form.year}
                   onChange={handleChange}
-                  className="w-full px-3 py-2 sm:px-4 sm:py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-600 bg-white/50"
+                  className={`w-full px-3 py-2 sm:px-4 sm:py-3 border-2 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
+                    theme === 'dark'
+                      ? 'bg-slate-700/50 border-slate-600 text-white placeholder-gray-400'
+                      : 'bg-white/50 border-gray-200 text-gray-600'
+                  }`}
                   placeholder="e.g., 2nd Year"
                 />
               </div>
@@ -982,8 +1317,12 @@ function ProfileTab({ user, onProfileUpdate }: any) {
             {message && (
               <div className={`p-3 sm:p-4 rounded-xl border-2 font-semibold ${
                 message.type === 'success' 
-                  ? "bg-green-50 border-green-200 text-green-700" 
-                  : "bg-red-50 border-red-200 text-red-700"
+                  ? theme === 'dark'
+                    ? "bg-green-500/10 border-green-500/20 text-green-300"
+                    : "bg-green-50 border-green-200 text-green-700"
+                  : theme === 'dark'
+                    ? "bg-red-500/10 border-red-500/20 text-red-300"
+                    : "bg-red-50 border-red-200 text-red-700"
               }`}>
                 {message.text}
               </div>
@@ -1011,7 +1350,7 @@ function ProfileTab({ user, onProfileUpdate }: any) {
 }
 
 // Enhanced Ticket Modal Component
-function TicketModal({ ticket, isOpen, onClose, onDownloadTicket }: { ticket: Ticket | null; isOpen: boolean; onClose: () => void; onDownloadTicket: (ticket: Ticket) => void }) {
+function TicketModal({ ticket, isOpen, onClose, onDownloadTicket, theme }: { ticket: Ticket | null; isOpen: boolean; onClose: () => void; onDownloadTicket: (ticket: Ticket) => void; theme: string }) {
   const [copying, setCopying] = useState(false);
 
   if (!isOpen || !ticket) return null;
@@ -1046,23 +1385,51 @@ function TicketModal({ ticket, isOpen, onClose, onDownloadTicket }: { ticket: Ti
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-200">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className={`rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border ${
+          theme === 'dark'
+            ? 'bg-slate-800 border-slate-700'
+            : 'bg-white border-gray-200'
+        }`}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-t-2xl">
+        <div className={`flex items-center justify-between p-4 sm:p-6 border-b rounded-t-2xl ${
+          theme === 'dark'
+            ? 'bg-gradient-to-r from-blue-500/10 to-indigo-500/10 border-slate-700'
+            : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-gray-100'
+        }`}>
           <div className="flex items-center space-x-3">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Ticket className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
+            <div className={`p-2 rounded-lg ${
+              theme === 'dark' ? 'bg-blue-500/20' : 'bg-blue-100'
+            }`}>
+              <Ticket className={`h-5 w-5 sm:h-6 sm:w-6 ${
+                theme === 'dark' ? 'text-blue-400' : 'text-blue-600'
+              }`} />
             </div>
             <div>
-              <h2 className="text-lg sm:text-xl font-bold text-gray-900">Your Event Ticket</h2>
-              <p className="text-sm text-blue-600">Digital Access Pass</p>
+              <h2 className={`text-lg sm:text-xl font-bold ${
+                theme === 'dark' ? 'text-white' : 'text-gray-900'
+              }`}>
+                Your Event Ticket
+              </h2>
+              <p className={`text-sm ${
+                theme === 'dark' ? 'text-blue-400' : 'text-blue-600'
+              }`}>
+                Digital Access Pass
+              </p>
             </div>
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="h-8 w-8 p-0 hover:bg-white/50 rounded-lg transition-all"
+            className={`h-8 w-8 p-0 rounded-lg transition-all ${
+              theme === 'dark'
+                ? 'hover:bg-slate-700/50'
+                : 'hover:bg-gray-100'
+            }`}
           >
             <X className="h-4 w-4" />
           </Button>
@@ -1072,21 +1439,43 @@ function TicketModal({ ticket, isOpen, onClose, onDownloadTicket }: { ticket: Ti
         <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
           {/* Event Info */}
           <div className="text-center">
-            <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-2 sm:mb-3 line-clamp-2">
+            <h3 className={`text-base sm:text-lg font-bold mb-2 sm:mb-3 line-clamp-2 ${
+              theme === 'dark' ? 'text-white' : 'text-gray-900'
+            }`}>
               {ticket.eventId.title}
             </h3>
-            <div className="space-y-2 text-sm text-gray-600">
-              <div className="flex items-center justify-center space-x-2 bg-gray-50 rounded-lg py-2">
-                <Calendar className="h-4 w-4 text-blue-500" />
-                <span>{formatDate(ticket.eventId.startDate)}</span>
+            <div className="space-y-2 text-sm">
+              <div className={`flex items-center justify-center space-x-2 rounded-lg py-2 ${
+                theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-50'
+              }`}>
+                <Calendar className={`h-4 w-4 ${
+                  theme === 'dark' ? 'text-blue-400' : 'text-blue-500'
+                }`} />
+                <span className={theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}>
+                  {formatDate(ticket.eventId.startDate)}
+                </span>
               </div>
-              <div className="flex items-center justify-center space-x-2 bg-gray-50 rounded-lg py-2">
-                <MapPin className="h-4 w-4 text-green-500" />
-                <span className="max-w-xs truncate">{ticket.eventId.venue}</span>
+              <div className={`flex items-center justify-center space-x-2 rounded-lg py-2 ${
+                theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-50'
+              }`}>
+                <MapPin className={`h-4 w-4 ${
+                  theme === 'dark' ? 'text-green-400' : 'text-green-500'
+                }`} />
+                <span className={`max-w-xs truncate ${
+                  theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+                }`}>
+                  {ticket.eventId.venue}
+                </span>
               </div>
               {ticket.checkedIn && ticket.checkInTime && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-2 sm:p-3 mt-2">
-                  <p className="text-green-800 font-medium flex items-center justify-center text-sm">
+                <div className={`border rounded-lg p-2 sm:p-3 mt-2 ${
+                  theme === 'dark'
+                    ? 'bg-green-500/10 border-green-500/20'
+                    : 'bg-green-50 border-green-200'
+                }`}>
+                  <p className={`font-medium flex items-center justify-center text-sm ${
+                    theme === 'dark' ? 'text-green-300' : 'text-green-800'
+                  }`}>
                     <CheckCircle className="h-4 w-4 mr-2" />
                     Checked in at {formatTime(ticket.checkInTime)}
                   </p>
@@ -1097,34 +1486,63 @@ function TicketModal({ ticket, isOpen, onClose, onDownloadTicket }: { ticket: Ti
 
           {/* QR Code */}
           <div className="flex flex-col items-center space-y-3 sm:space-y-4">
-            <div className="bg-white p-3 sm:p-4 rounded-xl border-2 border-gray-200 shadow-lg hover:shadow-xl transition-all duration-300">
+            <div className={`p-3 sm:p-4 rounded-xl border-2 shadow-lg hover:shadow-xl transition-all duration-300 ${
+              theme === 'dark'
+                ? 'bg-slate-700/50 border-slate-600'
+                : 'bg-white border-gray-200'
+            }`}>
               <img 
                 src={ticket.qrCode} 
                 alt="QR Code"
                 className="w-48 h-48 sm:w-56 sm:h-56"
               />
             </div>
-            <p className="text-sm text-gray-500 text-center font-medium">
+            <p className={`text-sm text-center font-medium ${
+              theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+            }`}>
               Scan this QR code for event entry
             </p>
           </div>
 
           {/* Ticket Details */}
-          <div className="bg-gradient-to-br from-gray-50 to-blue-50 rounded-xl p-3 sm:p-4 space-y-2 sm:space-y-3 border border-gray-200">
+          <div className={`rounded-xl p-3 sm:p-4 space-y-2 sm:space-y-3 border ${
+            theme === 'dark'
+              ? 'bg-slate-700/50 border-slate-600'
+              : 'bg-gradient-to-br from-gray-50 to-blue-50 border-gray-200'
+          }`}>
             <div className="flex justify-between items-center">
-              <span className="text-sm font-semibold text-gray-700">Ticket Status:</span>
+              <span className={`text-sm font-semibold ${
+                theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+              }`}>
+                Ticket Status:
+              </span>
               <Badge 
-                variant={ticket.checkedIn ? "success" : "default"}
-                className="font-medium px-2 sm:px-3 py-1 text-xs"
+                className={`font-medium px-2 sm:px-3 py-1 text-xs ${
+                  ticket.checkedIn
+                    ? theme === 'dark'
+                      ? 'bg-green-500/20 text-green-300 border-green-400/30'
+                      : 'bg-green-100 text-green-800 border-green-200'
+                    : theme === 'dark'
+                      ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
+                      : 'bg-blue-100 text-blue-800 border-blue-200'
+                }`}
               >
                 {ticket.checkedIn ? "Checked In" : "Active"}
               </Badge>
             </div>
             
             <div className="flex justify-between items-center">
-              <span className="text-sm font-semibold text-gray-700">Token:</span>
+              <span className={`text-sm font-semibold ${
+                theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+              }`}>
+                Token:
+              </span>
               <div className="flex items-center space-x-2">
-                <code className="text-xs bg-white px-2 sm:px-3 py-1 rounded-lg border font-mono">
+                <code className={`text-xs px-2 sm:px-3 py-1 rounded-lg border font-mono ${
+                  theme === 'dark'
+                    ? 'bg-slate-600 border-slate-500 text-gray-300'
+                    : 'bg-white border-gray-300'
+                }`}>
                   {ticket.token.substring(0, 8)}...
                 </code>
                 <Button
@@ -1132,7 +1550,11 @@ function TicketModal({ ticket, isOpen, onClose, onDownloadTicket }: { ticket: Ti
                   size="sm"
                   onClick={copyToken}
                   disabled={copying}
-                  className="h-6 w-6 sm:h-7 sm:w-7 p-0 hover:bg-white transition-colors"
+                  className={`h-6 w-6 sm:h-7 sm:w-7 p-0 transition-colors ${
+                    theme === 'dark'
+                      ? 'hover:bg-slate-600'
+                      : 'hover:bg-gray-100'
+                  }`}
                 >
                   <Copy className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 </Button>
@@ -1145,7 +1567,11 @@ function TicketModal({ ticket, isOpen, onClose, onDownloadTicket }: { ticket: Ti
             <Button
               variant="outline"
               onClick={() => onDownloadTicket(ticket)}
-              className="flex-1 border-2 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 text-sm"
+              className={`flex-1 border-2 transition-all duration-200 text-sm ${
+                theme === 'dark'
+                  ? 'border-slate-600 text-gray-300 hover:border-blue-500 hover:text-blue-400 hover:bg-blue-500/20'
+                  : 'hover:border-blue-300 hover:bg-blue-50'
+              }`}
             >
               <Download className="h-4 w-4 mr-2" />
               Download
@@ -1159,15 +1585,24 @@ function TicketModal({ ticket, isOpen, onClose, onDownloadTicket }: { ticket: Ti
             </Button>
           </div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
 
 // Enhanced Skeleton
-function DashboardSkeleton() {
+function DashboardSkeleton({ theme }: { theme: string }) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+    <motion.div 
+      className={`min-h-screen transition-colors duration-300 ${
+        theme === 'dark'
+          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950'
+          : 'bg-gradient-to-br from-slate-50 to-blue-50'
+      }`}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.8 }}
+    >
       {/* Header Skeleton */}
       <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -1185,10 +1620,14 @@ function DashboardSkeleton() {
         <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
           {/* Sidebar Skeleton */}
           <div className="lg:w-64">
-            <Card className="border border-gray-200 bg-white/70 backdrop-blur-sm rounded-2xl">
+            <Card className={`border-0 rounded-2xl backdrop-blur-sm ${
+              theme === 'dark' ? 'bg-slate-800/30' : 'bg-white/70'
+            }`}>
               <CardContent className="p-4 space-y-3">
                 {[1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-12 w-full rounded-xl bg-gray-200/50" />
+                  <Skeleton key={i} className={`h-12 w-full rounded-xl ${
+                    theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-200/50'
+                  }`} />
                 ))}
               </CardContent>
             </Card>
@@ -1199,15 +1638,25 @@ function DashboardSkeleton() {
             {/* Stats Skeleton */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {[1, 2, 3].map((i) => (
-                <Card key={i} className="border border-gray-200 bg-white/70 backdrop-blur-sm rounded-2xl">
+                <Card key={i} className={`border-0 rounded-2xl backdrop-blur-sm ${
+                  theme === 'dark' ? 'bg-slate-800/30' : 'bg-white/70'
+                }`}>
                   <CardContent className="p-4 sm:p-6">
                     <div className="flex items-center justify-between">
                       <div className="space-y-2">
-                        <Skeleton className="h-4 w-16 sm:w-20 bg-gray-200/50" />
-                        <Skeleton className="h-6 sm:h-8 w-12 sm:w-16 bg-gray-200/50" />
-                        <Skeleton className="h-3 w-20 sm:w-24 bg-gray-200/50" />
+                        <Skeleton className={`h-4 w-16 sm:w-20 ${
+                          theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-200/50'
+                        }`} />
+                        <Skeleton className={`h-6 sm:h-8 w-12 sm:w-16 ${
+                          theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-200/50'
+                        }`} />
+                        <Skeleton className={`h-3 w-20 sm:w-24 ${
+                          theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-200/50'
+                        }`} />
                       </div>
-                      <Skeleton className="h-10 w-10 sm:h-12 sm:w-12 rounded-2xl bg-gray-200/50" />
+                      <Skeleton className={`h-10 w-10 sm:h-12 sm:w-12 rounded-2xl ${
+                        theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-200/50'
+                      }`} />
                     </div>
                   </CardContent>
                 </Card>
@@ -1217,14 +1666,22 @@ function DashboardSkeleton() {
             {/* Content Skeleton */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               {[1, 2].map((i) => (
-                <Card key={i} className="border border-gray-200 bg-white/70 backdrop-blur-sm rounded-2xl">
+                <Card key={i} className={`border-0 rounded-2xl backdrop-blur-sm ${
+                  theme === 'dark' ? 'bg-slate-800/30' : 'bg-white/70'
+                }`}>
                   <CardHeader>
-                    <Skeleton className="h-5 w-24 sm:w-32 bg-gray-200/50 mb-2" />
-                    <Skeleton className="h-4 w-32 sm:w-48 bg-gray-200/50" />
+                    <Skeleton className={`h-5 w-24 sm:w-32 mb-2 ${
+                      theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-200/50'
+                    }`} />
+                    <Skeleton className={`h-4 w-32 sm:w-48 ${
+                      theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-200/50'
+                    }`} />
                   </CardHeader>
                   <CardContent className="space-y-3 sm:space-y-4">
                     {[1, 2, 3].map((j) => (
-                      <Skeleton key={j} className="h-16 sm:h-20 w-full rounded-xl bg-gray-200/50" />
+                      <Skeleton key={j} className={`h-16 sm:h-20 w-full rounded-xl ${
+                        theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-200/50'
+                      }`} />
                     ))}
                   </CardContent>
                 </Card>
@@ -1233,6 +1690,6 @@ function DashboardSkeleton() {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

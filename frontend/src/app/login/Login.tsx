@@ -369,7 +369,7 @@ export default function Login() {
                 <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>
                   Don't have an account?{" "}
                   <Link 
-                    href="/auth/signup" 
+                    href="/signup" 
                     className="text-blue-400 hover:text-blue-300 font-semibold transition-colors duration-200"
                   >
                     Create an account

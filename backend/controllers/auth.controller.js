@@ -65,7 +65,7 @@ exports.sendVerificationEmail = async (user, verifyUrl) => {
     <div style="max-width:600px;margin:0 auto;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,0.05);overflow:hidden;">
       
       <div style="background:#004aad;padding:20px 30px;text-align:center;">
-        <img src="https://ibb.co/S4PtCp4z" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
+        <img src="https://i.ibb.co/v6H3n86S/logo.png" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
         <h1 style="color:#fff;margin:0;font-size:22px;font-weight:600;">Verify Your Email</h1>
       </div>
 
@@ -229,7 +229,7 @@ exports.sendResetOtpEmail = async (user, otp, ttlMinutes) => {
     <div style="max-width:600px;margin:0 auto;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,0.05);overflow:hidden;">
 
       <div style="background:#004aad;padding:20px 30px;text-align:center;">
-        <img src="https://ibb.co/S4PtCp4z" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
+        <img src="https://i.ibb.co/v6H3n86S/logo.png" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
         <h1 style="color:#fff;margin:0;font-size:22px;font-weight:600;">Password Reset OTP</h1>
       </div>
 

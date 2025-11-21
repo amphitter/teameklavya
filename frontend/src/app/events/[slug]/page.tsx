@@ -35,7 +35,10 @@ import {
   Globe,
   Crown,
   Sun,
-  Moon
+  Moon,
+  Video,
+  Monitor,
+  Building
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -79,8 +82,13 @@ interface Event {
   _id: string;
   title: string;
   description: string;
+  eventType: "online" | "offline" | "hybrid";
   venue: string;
   venueIframeLink?: string;
+  onlineEventLink?: string;
+  platform?: "zoom" | "google-meet" | "teams" | "youtube" | "other" | null;
+  meetingId?: string;
+  passcode?: string;
   startDate: string;
   endDate: string;
   startTime?: string;
@@ -266,8 +274,18 @@ function TicketModal({ ticket, isOpen, onClose }: { ticket: UserTicket | null; i
               <div className={`flex items-center justify-center space-x-2 rounded-lg py-2 ${
                 theme === 'dark' ? 'bg-slate-700' : 'bg-gray-50'
               }`}>
-                <MapPin className="h-4 w-4 text-green-500" />
-                <span className="max-w-xs truncate">{ticket.eventId.venue}</span>
+                {ticket.eventId.eventType === 'online' ? (
+                  <Video className="h-4 w-4 text-green-500" />
+                ) : ticket.eventId.eventType === 'hybrid' ? (
+                  <Monitor className="h-4 w-4 text-green-500" />
+                ) : (
+                  <MapPin className="h-4 w-4 text-green-500" />
+                )}
+                <span className="max-w-xs truncate">
+                  {ticket.eventId.eventType === 'online' ? 'Online Event' : 
+                   ticket.eventId.eventType === 'hybrid' ? 'Hybrid Event' : 
+                   ticket.eventId.venue}
+                </span>
               </div>
               {ticket.checkedIn && ticket.checkInTime && (
                 <div className={`border rounded-lg p-3 mt-2 animate-in slide-in-from-bottom-2 ${
@@ -808,6 +826,20 @@ export default function EventSlugPage() {
     }
   };
 
+  // Helper function to get event type icon and color
+  const getEventTypeInfo = (eventType: string) => {
+    switch (eventType) {
+      case 'online':
+        return { icon: Video, color: 'text-green-500', label: 'Online Event', bgColor: 'bg-green-500/10' };
+      case 'offline':
+        return { icon: Building, color: 'text-blue-500', label: 'In-Person Event', bgColor: 'bg-blue-500/10' };
+      case 'hybrid':
+        return { icon: Monitor, color: 'text-purple-500', label: 'Hybrid Event', bgColor: 'bg-purple-500/10' };
+      default:
+        return { icon: Calendar, color: 'text-gray-500', label: 'Event', bgColor: 'bg-gray-500/10' };
+    }
+  };
+
   if (loading) {
     return <EventLoadingSkeleton />;
   }
@@ -822,6 +854,7 @@ export default function EventSlugPage() {
 
   const isEventFull = event?.maxAttendees && registrationCount >= event.maxAttendees;
   const isEventPast = event ? new Date(event.endDate) < new Date() : false;
+  const eventTypeInfo = getEventTypeInfo(event.eventType);
 
   // Tab Content Components
   const OverviewTab = () => (
@@ -841,12 +874,62 @@ export default function EventSlugPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-4">
-          <InfoItem
-            icon={MapPin}
-            title="Venue"
-            value={event.venue}
-            color="green"
-          />
+          {/* Event Type */}
+          <div className="flex items-start space-x-3">
+            <eventTypeInfo.icon className={`h-5 w-5 mt-1 flex-shrink-0 ${eventTypeInfo.color}`} />
+            <div>
+              <p className={`font-semibold ${
+                theme === 'dark' ? 'text-white' : 'text-gray-900'
+              }`}>
+                Event Type
+              </p>
+              <p className={theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}>
+                {eventTypeInfo.label}
+              </p>
+            </div>
+          </div>
+
+          {/* Venue for offline/hybrid */}
+          {(event.eventType === 'offline' || event.eventType === 'hybrid') && (
+            <InfoItem
+              icon={MapPin}
+              title="Venue"
+              value={event.venue}
+              color="green"
+            />
+          )}
+
+          {/* Online Link for online/hybrid */}
+          {(event.eventType === 'online' || event.eventType === 'hybrid') && event.onlineEventLink && (
+            <div className="flex items-start space-x-3">
+              <Video className="h-5 w-5 mt-1 flex-shrink-0 text-blue-500" />
+              <div>
+                <p className={`font-semibold ${
+                  theme === 'dark' ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Online Access
+                </p>
+                <a 
+                  href={event.onlineEventLink} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className={`text-blue-500 hover:text-blue-600 underline ${
+                    theme === 'dark' ? 'text-blue-400 hover:text-blue-300' : ''
+                  }`}
+                >
+                  Join Online Event
+                </a>
+                {event.platform && (
+                  <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Platform: {event.platform}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4">
           <InfoItem
             icon={Calendar}
             title="Date"
@@ -858,8 +941,7 @@ export default function EventSlugPage() {
             }
             color="blue"
           />
-        </div>
-        <div className="space-y-4">
+          
           <InfoItem
             icon={Clock}
             title="Time"
@@ -869,6 +951,7 @@ export default function EventSlugPage() {
             }
             color="purple"
           />
+          
           {event.organizer && (
             <InfoItem
               icon={User}
@@ -1150,6 +1233,7 @@ export default function EventSlugPage() {
         Event Location
       </h2>
       <div className="space-y-4">
+        {/* Event Type Badge */}
         <div className={`rounded-xl p-6 border shadow-sm ${
           theme === 'dark' 
             ? 'bg-slate-800/50 border-slate-600' 
@@ -1158,17 +1242,64 @@ export default function EventSlugPage() {
           <h3 className={`text-lg font-semibold mb-3 flex items-center ${
             theme === 'dark' ? 'text-white' : 'text-gray-900'
           }`}>
-            <MapPin className="h-5 w-5 text-green-600 mr-2" />
-            Venue Address
+            <eventTypeInfo.icon className={`h-5 w-5 mr-2 ${eventTypeInfo.color}`} />
+            Event Type: {eventTypeInfo.label}
           </h3>
-          <p className={`text-lg ${
+          <p className={`text-sm ${
             theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
           }`}>
-            {event.venue}
+            {event.eventType === 'online' && 'This is a virtual event that will be conducted entirely online.'}
+            {event.eventType === 'offline' && 'This is an in-person event at a physical venue.'}
+            {event.eventType === 'hybrid' && 'This event offers both in-person and online participation options.'}
           </p>
         </div>
-        
-        {event.venueIframeLink && (
+
+        {/* Venue Information for Offline/Hybrid */}
+        {(event.eventType === 'offline' || event.eventType === 'hybrid') && (
+          <div className={`rounded-xl p-6 border shadow-sm ${
+            theme === 'dark' 
+              ? 'bg-slate-800/50 border-slate-600' 
+              : 'bg-white border-gray-200'
+          }`}>
+            <h3 className={`text-lg font-semibold mb-3 flex items-center ${
+              theme === 'dark' ? 'text-white' : 'text-gray-900'
+            }`}>
+              <MapPin className="h-5 w-5 text-green-600 mr-2" />
+              Venue Address
+            </h3>
+            <p className={`text-lg ${
+              theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+            }`}>
+              {event.venue}
+            </p>
+            
+            {event.venueIframeLink && (
+              <div className="mt-4">
+                <h4 className={`text-md font-semibold mb-3 flex items-center ${
+                  theme === 'dark' ? 'text-white' : 'text-gray-900'
+                }`}>
+                  <Globe className="h-4 w-4 text-blue-600 mr-2" />
+                  Interactive Map
+                </h4>
+                <div className="relative h-96 rounded-lg overflow-hidden border-2 border-gray-200">
+                  <iframe
+                    src={event.venueIframeLink}
+                    width="100%"
+                    height="100%"
+                    style={{ border: 0 }}
+                    allowFullScreen
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    title={`Location map for ${event.title}`}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Online Information for Online/Hybrid */}
+        {(event.eventType === 'online' || event.eventType === 'hybrid') && (
           <div className={`rounded-xl p-6 border shadow-sm ${
             theme === 'dark' 
               ? 'bg-slate-800/50 border-slate-600' 
@@ -1177,20 +1308,81 @@ export default function EventSlugPage() {
             <h3 className={`text-lg font-semibold mb-4 flex items-center ${
               theme === 'dark' ? 'text-white' : 'text-gray-900'
             }`}>
-              <Globe className="h-5 w-5 text-blue-600 mr-2" />
-              Interactive Map
+              <Video className="h-5 w-5 text-blue-600 mr-2" />
+              Online Event Details
             </h3>
-            <div className="relative h-96 rounded-lg overflow-hidden border-2 border-gray-200">
-              <iframe
-                src={event.venueIframeLink}
-                width="100%"
-                height="100%"
-                style={{ border: 0 }}
-                allowFullScreen
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                title={`Location map for ${event.title}`}
-              />
+            
+            <div className="space-y-4">
+              {event.onlineEventLink && (
+                <div>
+                  <p className={`font-medium mb-2 ${
+                    theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                  }`}>
+                    Event Link:
+                  </p>
+                  <a 
+                    href={event.onlineEventLink} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className={`inline-flex items-center px-4 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-600 hover:bg-blue-500/20 transition-colors ${
+                      theme === 'dark' ? 'text-blue-400 hover:text-blue-300' : ''
+                    }`}
+                  >
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    Join Online Event
+                  </a>
+                </div>
+              )}
+
+              {event.platform && (
+                <div>
+                  <p className={`font-medium mb-1 ${
+                    theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                  }`}>
+                    Platform:
+                  </p>
+                  <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>
+                    {event.platform}
+                  </p>
+                </div>
+              )}
+
+              {event.meetingId && (
+                <div>
+                  <p className={`font-medium mb-1 ${
+                    theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                  }`}>
+                    Meeting ID:
+                  </p>
+                  <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>
+                    {event.meetingId}
+                  </p>
+                </div>
+              )}
+
+              {event.passcode && (
+                <div>
+                  <p className={`font-medium mb-1 ${
+                    theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                  }`}>
+                    Passcode:
+                  </p>
+                  <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>
+                    {event.passcode}
+                  </p>
+                </div>
+              )}
+
+              <div className={`rounded-lg p-4 ${
+                theme === 'dark' ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-blue-50 border border-blue-200'
+              }`}>
+                <p className={`text-sm ${
+                  theme === 'dark' ? 'text-blue-300' : 'text-blue-700'
+                }`}>
+                  <strong>Note:</strong> Please join the event 5-10 minutes early to ensure your connection is working properly.
+                  {event.eventType === 'hybrid' && ' For online participants, the event link will be active 15 minutes before the start time.'}
+                </p>
+              </div>
             </div>
           </div>
         )}
@@ -1387,6 +1579,14 @@ export default function EventSlugPage() {
               
               {/* Badges */}
               <div className="absolute top-4 left-4 flex flex-wrap gap-2">
+                {/* Event Type Badge */}
+                <Badge className={`backdrop-blur-sm border-0 shadow-lg px-3 py-2 font-semibold ${eventTypeInfo.bgColor} ${
+                  theme === 'dark' ? 'text-white' : 'text-gray-800'
+                }`}>
+                  <eventTypeInfo.icon className="h-3 w-3 mr-1" />
+                  {eventTypeInfo.label}
+                </Badge>
+
                 {event.category && (
                   <Badge className={`backdrop-blur-sm border-0 shadow-lg px-3 py-2 font-semibold ${
                     theme === 'dark'
@@ -1426,9 +1626,13 @@ export default function EventSlugPage() {
                 color="green"
               />
               <StatCard
-                icon={MapPin}
-                value={event.venue.split(',')[0]}
-                label="Venue"
+                icon={event.eventType === 'online' ? Video : event.eventType === 'hybrid' ? Monitor : MapPin}
+                value={
+                  event.eventType === 'online' ? 'Online' : 
+                  event.eventType === 'hybrid' ? 'Hybrid' : 
+                  event.venue.split(',')[0]
+                }
+                label={event.eventType === 'online' ? 'Platform' : 'Location'}
                 color="purple"
               />
               <StatCard
@@ -1453,7 +1657,7 @@ export default function EventSlugPage() {
                 {tabs.map((tab) => (
                   <button
                     key={tab.id}
-onClick={() => setActiveTab(tab.id)}
+                    onClick={() => setActiveTab(tab.id)}
                     className={`flex-1 px-6 py-4 text-sm font-medium transition-all duration-200 ${
                       activeTab === tab.id
                         ? theme === 'dark'
@@ -1587,6 +1791,24 @@ onClick={() => setActiveTab(tab.id)}
 
               {/* Additional Links */}
               <div className="space-y-3 mt-6 pt-6 border-t border-gray-200/60">
+                {/* Online Event Link for online/hybrid events */}
+                {(event.eventType === 'online' || event.eventType === 'hybrid') && event.onlineEventLink && (
+                  <a
+                    href={event.onlineEventLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`inline-flex items-center justify-center w-full px-4 py-3 border text-base font-semibold rounded-xl transition-all duration-200 shadow-sm hover:shadow-md ${
+                      theme === 'dark'
+                        ? 'border-blue-600 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20'
+                        : 'border-blue-600 text-blue-600 bg-white hover:bg-blue-50'
+                    }`}
+                  >
+                    <Video className="h-4 w-4 mr-2" />
+                    Join Online Event
+                    <ExternalLink className="h-4 w-4 ml-2" />
+                  </a>
+                )}
+
                 {event.whatsappGroup && (
                   <a
                     href={event.whatsappGroup}

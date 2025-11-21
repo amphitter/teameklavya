@@ -6,10 +6,62 @@ const mongoose = require('mongoose');
 const crypto = require('crypto');
 const { sendEmailWithAttachment, sendEmail } = require("../utils/email");
 
+// Helper functions for event location display
+const getEventLocationText = (event) => {
+  switch (event.eventType) {
+    case 'online':
+      return `🌐 Online Event - ${event.platform || 'Online Platform'}`;
+    case 'offline':
+      return `📍 Venue: ${event.venue}`;
+    case 'hybrid':
+      return `📍 Venue: ${event.venue} + 🌐 Online Option`;
+    default:
+      return `📍 Venue: ${event.venue}`;
+  }
+};
+
+const getEventLocationHTML = (event) => {
+  switch (event.eventType) {
+    case 'online':
+      return `<p><strong>🌐 Platform:</strong> ${event.platform || 'Online'}</p>
+              ${event.onlineEventLink ? `<p><strong>🔗 Event Link:</strong> <a href="${event.onlineEventLink}">Join Online</a></p>` : ''}`;
+    case 'offline':
+      return `<p><strong>📍 Venue:</strong> ${event.venue}</p>`;
+    case 'hybrid':
+      return `<p><strong>📍 Venue:</strong> ${event.venue}</p>
+              ${event.onlineEventLink ? `<p><strong>🌐 Online Option:</strong> <a href="${event.onlineEventLink}">Join Online</a></p>` : ''}`;
+    default:
+      return `<p><strong>📍 Venue:</strong> ${event.venue}</p>`;
+  }
+};
+
 exports.createEvent = async (req, res) => {
   try {
     const body = req.body || {};
     
+    // Validate event type and related fields
+    if (!body.eventType || !['online', 'offline', 'hybrid'].includes(body.eventType)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Event type must be 'online', 'offline', or 'hybrid'" 
+      });
+    }
+
+    // Validate required fields based on event type
+    if ((body.eventType === 'offline' || body.eventType === 'hybrid') && !body.venue) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Venue is required for offline and hybrid events" 
+      });
+    }
+
+    if ((body.eventType === 'online' || body.eventType === 'hybrid') && !body.onlineEventLink) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Online event link is required for online and hybrid events" 
+      });
+    }
+
     // Set default ticket settings if not provided
     if (!body.ticketSettings) {
       body.ticketSettings = {
@@ -62,10 +114,16 @@ exports.createEvent = async (req, res) => {
 };
 
 // Public: Get all events (paginated optional)
-// Public: Get all events (paginated optional)
 exports.getEvents = async (req, res) => {
   try {
-    const { page = 1, limit = 12, category, featured, type = 'all' } = req.query;
+    const { 
+      page = 1, 
+      limit = 12, 
+      category, 
+      featured, 
+      type = 'all',
+      eventType // New filter for event type
+    } = req.query;
     
     let query = {};
     
@@ -79,6 +137,11 @@ exports.getEvents = async (req, res) => {
       query.isFeatured = true;
     }
     
+    // Event type filter
+    if (eventType && eventType !== 'all') {
+      query.eventType = eventType;
+    }
+    
     // Event type filter - FIXED: Include all events by default
     const now = new Date();
     if (type === 'upcoming') {
@@ -89,7 +152,7 @@ exports.getEvents = async (req, res) => {
     // If type is 'all' or not provided, don't filter by date
     
     const events = await Event.find(query)
-      .select('title slug description category venue startDate endDate bannerUrl organizer price theme isFeatured ticketSettings')
+      .select('title slug description category venue venueIframeLink onlineEventLink platform eventType startDate endDate bannerUrl organizer price theme isFeatured ticketSettings')
       .sort({ startDate: 1 })
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));
@@ -148,6 +211,14 @@ exports.updateEvent = async (req, res) => {
   try {
     const body = req.body || {};
     
+    // Validate event type if being updated
+    if (body.eventType && !['online', 'offline', 'hybrid'].includes(body.eventType)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Event type must be 'online', 'offline', or 'hybrid'" 
+      });
+    }
+
     // Update slug if title changed
     if (body.title) {
       body.slug = body.title.toLowerCase().replace(/\s+/g, "-").replace(/[^\w-]+/g, "");
@@ -174,7 +245,7 @@ exports.updateEvent = async (req, res) => {
 // Get admin events with advanced filtering
 exports.getAdminEvents = async (req, res) => {
   try {
-    const { search, category, page = 1, limit = 50, status } = req.query;
+    const { search, category, page = 1, limit = 50, status, eventType } = req.query;
     
     let query = {};
     
@@ -191,6 +262,11 @@ exports.getAdminEvents = async (req, res) => {
     // Category filter
     if (category && category !== 'all') {
       query.category = category;
+    }
+
+    // Event type filter
+    if (eventType && eventType !== 'all') {
+      query.eventType = eventType;
     }
     
     // Status filter
@@ -295,7 +371,7 @@ exports.sendRSVP = async (req, res) => {
           <h3 style="margin-top:0;color:#555;">Event Details:</h3>
           <p><strong>📅 Date:</strong> ${new Date(event.startDate).toLocaleDateString()}</p>
           <p><strong>⏰ Time:</strong> ${event.startTime || 'To be announced'}</p>
-          <p><strong>📍 Venue:</strong> ${event.venue}</p>
+          ${getEventLocationHTML(event)}
           <p><strong>👨‍💼 Organizer:</strong> ${event.organizer}</p>
         </div>
 
@@ -360,7 +436,7 @@ You are invited to ${event.title}.
 Event Details:
 📅 Date: ${new Date(event.startDate).toLocaleDateString()}
 ⏰ Time: ${event.startTime || 'To be announced'}
-📍 Venue: ${event.venue}
+${getEventLocationText(event)}
 👨‍💼 Organizer: ${event.organizer}
 
 ${rsvpLink ? `Please confirm your RSVP by visiting: ${rsvpLink}` : ''}
@@ -538,8 +614,8 @@ exports.sendEventNotificationToAllUsers = async (req, res) => {
                   ` : ''}
                   <tr>
                     <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
-                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Venue:</td>
-                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${event.venue}</td>
+                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Location:</td>
+                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${getEventLocationText(event)}</td>
                   </tr>
                   <tr>
                     <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
@@ -677,7 +753,7 @@ EVENT DETAILS:
 ──────────────
   Event: ${event.title}
 ${event.organizer ? `  Organizer: ${event.organizer}\n` : ''}  Date: ${new Date(event.startDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-${event.startTime ? `  Time: ${event.startTime}\n` : ''}  Venue: ${event.venue}
+${event.startTime ? `  Time: ${event.startTime}\n` : ''}  Location: ${getEventLocationText(event)}
   Participation: ${event.price ? `$${event.price}` : "Complimentary"}
 
 ${event.description ? `ABOUT THIS EVENT:\n${event.description}\n\n` : ''}
@@ -817,7 +893,7 @@ exports.sendRSVPWithVerification = async (req, res) => {
           <h3 style="margin-top:0;color:#0369a1;">Event Details:</h3>
           <p><strong>📅 Date:</strong> ${new Date(event.startDate).toLocaleDateString()}</p>
           <p><strong>⏰ Time:</strong> ${event.startTime || 'To be announced'}</p>
-          <p><strong>📍 Venue:</strong> ${event.venue}</p>
+          ${getEventLocationHTML(event)}
           <p><strong>👨‍💼 Organizer:</strong> ${event.organizer}</p>
         </div>
 
@@ -858,7 +934,7 @@ You are invited to ${event.title}. Please confirm your attendance by visiting th
 Event Details:
 📅 Date: ${new Date(event.startDate).toLocaleDateString()}
 ⏰ Time: ${event.startTime || 'To be announced'}
-📍 Venue: ${event.venue}
+${getEventLocationText(event)}
 👨‍💼 Organizer: ${event.organizer}
 
 ${customMessage ? `Note from organizer: ${customMessage}\n` : ''}
@@ -1073,6 +1149,7 @@ const getRSVPTimelineData = async (eventId, days) => {
   
   return data;
 };
+
 // Get event statistics (Admin)
 exports.getEventStats = async (req, res) => {
   try {
@@ -1173,7 +1250,7 @@ exports.getEventsWithTicketStats = async (req, res) => {
     const { page = 1, limit = 50 } = req.query;
     
     const events = await Event.find()
-      .select('title slug startDate endDate venue organizer maxAttendees ticketSettings createdAt')
+      .select('title slug startDate endDate venue organizer maxAttendees ticketSettings createdAt eventType onlineEventLink platform')
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));

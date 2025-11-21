@@ -53,8 +53,13 @@ interface EventForm {
   slug: string;
   description: string;
   category: string;
+  eventType: "online" | "offline" | "hybrid";
   venue: string;
-  venueIframeLink: string; // Added this field
+  venueIframeLink: string;
+  onlineEventLink: string;
+  platform: "zoom" | "google-meet" | "teams" | "youtube" | "other" | null;
+  meetingId: string;
+  passcode: string;
   organizer: string;
   maxAttendees: number;
   minAttendees?: number;
@@ -82,8 +87,13 @@ export default function CreateEventPage() {
     slug: "",
     description: "",
     category: "General",
+    eventType: "offline",
     venue: "",
-    venueIframeLink: "", // Added this field
+    venueIframeLink: "",
+    onlineEventLink: "",
+    platform: null,
+    meetingId: "",
+    passcode: "",
     organizer: "",
     maxAttendees: 100,
     minAttendees: 10,
@@ -125,28 +135,30 @@ export default function CreateEventPage() {
   const [useManualLocation, setUseManualLocation] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
 
-  // Load Google Maps script
+  // Load Google Maps script (only for offline/hybrid events)
   useEffect(() => {
-    const loadGoogleMaps = () => {
-      if ((window as any).google && (window as any).google.maps) {
-        setMapLoaded(true);
-        initializeAutocomplete();
-        return;
-      }
+    if (form.eventType === 'offline' || form.eventType === 'hybrid') {
+      const loadGoogleMaps = () => {
+        if ((window as any).google && (window as any).google.maps) {
+          setMapLoaded(true);
+          initializeAutocomplete();
+          return;
+        }
 
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places`;
-      script.async = true;
-      script.defer = true;
-      script.onload = () => {
-        setMapLoaded(true);
-        initializeAutocomplete();
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places`;
+        script.async = true;
+        script.defer = true;
+        script.onload = () => {
+          setMapLoaded(true);
+          initializeAutocomplete();
+        };
+        document.head.appendChild(script);
       };
-      document.head.appendChild(script);
-    };
 
-    loadGoogleMaps();
-  }, []);
+      loadGoogleMaps();
+    }
+  }, [form.eventType]);
 
   const initializeAutocomplete = () => {
     if (!mapLoaded || !(window as any).google) return;
@@ -187,11 +199,19 @@ export default function CreateEventPage() {
     if (!form.title.trim()) newErrors.title = "Event title is required";
     if (!form.slug.trim()) newErrors.slug = "Slug is required";
     if (!form.description.trim()) newErrors.description = "Description is required";
-    if (!form.venue.trim()) newErrors.venue = "Venue is required";
     if (!form.startDate) newErrors.startDate = "Start date is required";
     if (!form.endDate) newErrors.endDate = "End date is required";
     if (!form.startTime) newErrors.startTime = "Start time is required";
     if (!form.endTime) newErrors.endTime = "End time is required";
+    
+    // Validate event type specific fields
+    if ((form.eventType === 'offline' || form.eventType === 'hybrid') && !form.venue.trim()) {
+      newErrors.venue = "Venue is required for offline and hybrid events";
+    }
+
+    if ((form.eventType === 'online' || form.eventType === 'hybrid') && !form.onlineEventLink.trim()) {
+      newErrors.onlineEventLink = "Online event link is required for online and hybrid events";
+    }
     
     if (form.maxAttendees < 1) newErrors.maxAttendees = "Max attendees must be at least 1";
     if (form.minAttendees && form.minAttendees < 1) newErrors.minAttendees = "Min attendees must be at least 1";
@@ -242,6 +262,29 @@ export default function CreateEventPage() {
       // Auto-generate slug when title changes
       if (name === "title" && !form.slug) {
         setForm(prev => ({ ...prev, slug: generateSlug(value) }));
+      }
+
+      // Clear online fields when switching to offline
+      if (name === "eventType" && value === "offline") {
+        setForm(prev => ({ 
+          ...prev, 
+          onlineEventLink: "",
+          platform: null,
+          meetingId: "",
+          passcode: ""
+        }));
+      }
+
+      // Clear venue fields when switching to online
+      if (name === "eventType" && value === "online") {
+        setForm(prev => ({ 
+          ...prev, 
+          venue: "",
+          venueIframeLink: "",
+          address: "",
+          latitude: undefined,
+          longitude: undefined
+        }));
       }
     }
     
@@ -552,6 +595,27 @@ export default function CreateEventPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Event Type *
+                    </label>
+                    <select
+                      name="eventType"
+                      value={form.eventType}
+                      onChange={handleChange}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="offline">📍 Offline Event</option>
+                      <option value="online">🌐 Online Event</option>
+                      <option value="hybrid">🔀 Hybrid Event</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {form.eventType === 'offline' && 'Physical event at a specific venue'}
+                      {form.eventType === 'online' && 'Virtual event conducted online'}
+                      {form.eventType === 'hybrid' && 'Combination of physical and online attendance'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       Category
                     </label>
                     <select
@@ -707,111 +771,194 @@ export default function CreateEventPage() {
                 </h2>
                 
                 <div className="space-y-4">
-                  <div className="flex items-center space-x-3">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={!useManualLocation}
-                        onChange={() => setUseManualLocation(false)}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="ml-2 text-sm text-gray-700">Use Google Maps</span>
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={useManualLocation}
-                        onChange={() => setUseManualLocation(true)}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="ml-2 text-sm text-gray-700">Enter manually</span>
-                    </label>
-                  </div>
-
-                  {!useManualLocation ? (
-                    <>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Search Venue on Google Maps *
+                  {/* Offline/Hybrid Event Location */}
+                  {(form.eventType === 'offline' || form.eventType === 'hybrid') && (
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-3">
+                        <label className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={!useManualLocation}
+                            onChange={() => setUseManualLocation(false)}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="ml-2 text-sm text-gray-700">Use Google Maps</span>
                         </label>
-                        <input
-                          id="venue-input"
-                          placeholder="Search for venue..."
-                          className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                            errors.venue ? 'border-red-500' : 'border-gray-300'
-                          }`}
-                        />
-                        {!mapLoaded && (
-                          <p className="text-xs text-yellow-600 mt-1">
-                            Loading Google Maps...
-                          </p>
-                        )}
-                        {form.address && (
-                          <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
-                            <p className="text-sm text-green-800">
-                              <strong>Selected:</strong> {form.venue}
-                            </p>
-                            <p className="text-sm text-green-700">{form.address}</p>
-                            {form.latitude && form.longitude && (
-                              <p className="text-xs text-green-600">
-                                Coordinates: {form.latitude.toFixed(6)}, {form.longitude.toFixed(6)}
+                        <label className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={useManualLocation}
+                            onChange={() => setUseManualLocation(true)}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="ml-2 text-sm text-gray-700">Enter manually</span>
+                        </label>
+                      </div>
+
+                      {!useManualLocation ? (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Search Venue on Google Maps *
+                            </label>
+                            <input
+                              id="venue-input"
+                              placeholder="Search for venue..."
+                              className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                                errors.venue ? 'border-red-500' : 'border-gray-300'
+                              }`}
+                            />
+                            {!mapLoaded && (
+                              <p className="text-xs text-yellow-600 mt-1">
+                                Loading Google Maps...
                               </p>
                             )}
+                            {form.address && (
+                              <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                                <p className="text-sm text-green-800">
+                                  <strong>Selected:</strong> {form.venue}
+                                </p>
+                                <p className="text-sm text-green-700">{form.address}</p>
+                                {form.latitude && form.longitude && (
+                                  <p className="text-xs text-green-600">
+                                    Coordinates: {form.latitude.toFixed(6)}, {form.longitude.toFixed(6)}
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </div>
-                        )}
+                          
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Venue Map Embed URL
+                            </label>
+                            <input
+                              name="venueIframeLink"
+                              placeholder="https://maps.google.com/embed?..."
+                              value={form.venueIframeLink}
+                              onChange={handleChange}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">
+                              Optional: Add a Google Maps embed URL for interactive venue map
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Venue Name *
+                            </label>
+                            <input
+                              name="venue"
+                              placeholder="Enter venue name"
+                              value={form.venue}
+                              onChange={handleChange}
+                              className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                                errors.venue ? 'border-red-500' : 'border-gray-300'
+                              }`}
+                              required
+                            />
+                            {errors.venue && <p className="text-red-500 text-xs mt-1">{errors.venue}</p>}
+                          </div>
+                          
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Venue Map Embed URL
+                            </label>
+                            <input
+                              name="venueIframeLink"
+                              placeholder="https://maps.google.com/embed?..."
+                              value={form.venueIframeLink}
+                              onChange={handleChange}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">
+                              Optional: Add a Google Maps embed URL for interactive venue map
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Online/Hybrid Event Location */}
+                  {(form.eventType === 'online' || form.eventType === 'hybrid') && (
+                    <div className="space-y-4">
+                      <div className="border-t pt-4">
+                        <h3 className="text-md font-medium text-gray-900 mb-3">
+                          {form.eventType === 'hybrid' ? '🌐 Online Event Details' : 'Online Event Details'}
+                        </h3>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Online Event Link *
+                            </label>
+                            <input
+                              name="onlineEventLink"
+                              placeholder="https://zoom.us/j/... or https://meet.google.com/..."
+                              value={form.onlineEventLink}
+                              onChange={handleChange}
+                              className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                                errors.onlineEventLink ? 'border-red-500' : 'border-gray-300'
+                              }`}
+                              required={form.eventType === 'online' || form.eventType === 'hybrid'}
+                            />
+                            {errors.onlineEventLink && <p className="text-red-500 text-xs mt-1">{errors.onlineEventLink}</p>}
+                            <p className="text-xs text-gray-500 mt-1">
+                              The link where participants can join the online event
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Platform
+                            </label>
+                            <select
+                              name="platform"
+                              value={form.platform || ''}
+                              onChange={handleChange}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            >
+                              <option value="">Select Platform</option>
+                              <option value="zoom">Zoom</option>
+                              <option value="google-meet">Google Meet</option>
+                              <option value="teams">Microsoft Teams</option>
+                              <option value="youtube">YouTube</option>
+                              <option value="other">Other</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Meeting ID
+                            </label>
+                            <input
+                              name="meetingId"
+                              placeholder="123 456 7890"
+                              value={form.meetingId}
+                              onChange={handleChange}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Passcode
+                            </label>
+                            <input
+                              name="passcode"
+                              placeholder="Enter passcode"
+                              value={form.passcode}
+                              onChange={handleChange}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                        </div>
                       </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Venue Map Embed URL
-                        </label>
-                        <input
-                          name="venueIframeLink"
-                          placeholder="https://maps.google.com/embed?..."
-                          value={form.venueIframeLink}
-                          onChange={handleChange}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          Optional: Add a Google Maps embed URL for interactive venue map
-                        </p>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Venue Name *
-                        </label>
-                        <input
-                          name="venue"
-                          placeholder="Enter venue name"
-                          value={form.venue}
-                          onChange={handleChange}
-                          className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                            errors.venue ? 'border-red-500' : 'border-gray-300'
-                          }`}
-                          required
-                        />
-                        {errors.venue && <p className="text-red-500 text-xs mt-1">{errors.venue}</p>}
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Venue Map Embed URL
-                        </label>
-                        <input
-                          name="venueIframeLink"
-                          placeholder="https://maps.google.com/embed?..."
-                          value={form.venueIframeLink}
-                          onChange={handleChange}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          Optional: Add a Google Maps embed URL for interactive venue map
-                        </p>
-                      </div>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>

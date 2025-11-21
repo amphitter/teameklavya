@@ -290,7 +290,7 @@ exports.sendTicketEmail = async (ticket, user, event) => {
 
         <!-- Header -->
         <div style="background: #004aad; padding: 20px 30px; text-align: center;">
-          <img src="https://i.ibb.co/ZzYmZNxQ/24.png" alt="Team Eklavya Logo" style="max-height: 55px; margin-bottom: 10px;" />
+          <img src="https://ibb.co/S4PtCp4z" alt="Team Eklavya Logo" style="max-height: 55px; margin-bottom: 10px;" />
           <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 600;">${event.title}</h1>
         </div>
 

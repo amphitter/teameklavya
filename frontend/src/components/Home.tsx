@@ -961,234 +961,182 @@ export default function Home() {
           <NewsletterEvents />
         </motion.div>
 
-        {/* Enhanced Past Events Carousel */}
-        {pastEvents.length > 0 && (
-          <motion.section
-            className={`py-20 transition-colors duration-500 relative overflow-hidden ${
-              theme === "dark" ? "bg-transparent" : "bg-gray-50"
-            }`}
-            initial={{ opacity: 0 }}
-            whileInView={{ opacity: 1 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
-          >
-            <motion.div
-              className={`absolute inset-0 pointer-events-none ${
-                theme === "dark"
-                  ? "bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.06),transparent_70%)]"
-                  : "bg-[radial-gradient(circle_at_bottom_left,rgba(139,92,246,0.06),transparent_70%)]"
+{/* Enhanced Past Events Carousel */}
+{pastEvents.length > 0 && (
+  <motion.section
+    className={`py-20 transition-colors duration-500 relative overflow-hidden ${
+      theme === "dark" ? "bg-transparent" : "bg-gray-50"
+    }`}
+    initial={{ opacity: 0 }}
+    whileInView={{ opacity: 1 }}
+    viewport={{ once: true }}
+    transition={{ duration: 0.6 }}
+  >
+    {/* Background Effect */}
+    <motion.div
+      className={`absolute inset-0 pointer-events-none ${
+        theme === "dark"
+          ? "bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.06),transparent_70%)]"
+          : "bg-[radial-gradient(circle_at_bottom_left,rgba(139,92,246,0.06),transparent_70%)]"
+      }`}
+      animate={{
+        backgroundPosition: ["0% 0%", "100% 100%"],
+      }}
+      transition={{
+        duration: 12,
+        repeat: Infinity,
+        ease: "linear",
+      }}
+    />
+
+    <div className="relative max-w-7xl mx-auto px-4 sm:px-6">
+      {/* Heading */}
+      <motion.div
+        initial={{ opacity: 0, y: 30 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.5 }}
+        className="text-center mb-16 relative z-10"
+      >
+        <motion.div
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium shadow-sm ${
+            theme === "dark"
+              ? "bg-purple-500/10 text-purple-300 border border-purple-400/10"
+              : "bg-purple-100 text-purple-700 border border-purple-300/60"
+          }`}
+          whileHover={{ scale: 1.05 }}
+        >
+          <Award className="h-4 w-4" />
+          <span>Past Events</span>
+        </motion.div>
+
+        <h2
+          className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 ${
+            theme === "dark" ? "text-white" : "text-gray-900"
+          }`}
+        >
+          Our <span className="text-purple-400">Success Stories</span>
+        </h2>
+
+        <p
+          className={`text-base sm:text-lg max-w-2xl mx-auto ${
+            theme === "dark" ? "text-gray-300" : "text-gray-600"
+          }`}
+        >
+          Take a look at some of our most memorable events that inspired,
+          connected, and created impact within our community.
+        </p>
+      </motion.div>
+
+      {/* Slider */}
+      <div className="relative max-w-5xl mx-auto">
+        <div className="relative h-80 md:h-[450px] rounded-3xl overflow-hidden shadow-2xl">
+
+          <AnimatePresence mode="wait">
+            {pastEvents.map((event, index) => {
+              if (index !== currentPastEventIndex) return null;
+
+              return (
+                <motion.div
+                  key={event._id}
+                  initial={{ x: 120, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: -120, opacity: 0 }}
+                  transition={{
+                    duration: 0.4,
+                    ease: "easeInOut",
+                  }}
+                  className="absolute inset-0 w-full h-full"
+                >
+                  {/* Image */}
+                  <img
+                    src={getImageUrl(event.bannerUrl)}
+                    alt={event.title}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.src = "/api/placeholder/800/400";
+                    }}
+                  />
+
+                  {/* Overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
+
+                  {/* Content */}
+                  <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-white">
+                    <h3 className="text-2xl md:text-3xl font-semibold mb-2">
+                      {event.title}
+                    </h3>
+
+                    <p className="text-sm md:text-base opacity-90 line-clamp-2">
+                      {event.description?.substring(0, 120) ||
+                        "An inspiring event organized by our amazing team."}
+                      ...
+                    </p>
+
+                    <div className="flex items-center mt-3 text-xs md:text-sm opacity-80">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      {formatDate(event.startDate)}
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+        </div>
+
+        {/* Previous Button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Previous event"
+          onClick={prevPastEvent}
+          className={`absolute left-4 top-1/2 -translate-y-1/2 rounded-full backdrop-blur-md ${
+            theme === "dark"
+              ? "bg-slate-800/60 text-white hover:bg-slate-700"
+              : "bg-white/80 text-gray-700 hover:bg-gray-100"
+          }`}
+        >
+          <ChevronLeft className="h-6 w-6" />
+        </Button>
+
+        {/* Next Button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Next event"
+          onClick={nextPastEvent}
+          className={`absolute right-4 top-1/2 -translate-y-1/2 rounded-full backdrop-blur-md ${
+            theme === "dark"
+              ? "bg-slate-800/60 text-white hover:bg-slate-700"
+              : "bg-white/80 text-gray-700 hover:bg-gray-100"
+          }`}
+        >
+          <ChevronRight className="h-6 w-6" />
+        </Button>
+
+        {/* Dots */}
+        <div className="flex justify-center mt-6 space-x-2">
+          {pastEvents.map((_, index) => (
+            <motion.button
+              key={index}
+              onClick={() => setCurrentPastEventIndex(index)}
+              className={`h-2.5 rounded-full transition-all ${
+                index === currentPastEventIndex
+                  ? "bg-purple-400 w-6"
+                  : theme === "dark"
+                  ? "bg-gray-600 w-2"
+                  : "bg-gray-300 w-2"
               }`}
-              animate={{
-                backgroundPosition: ["0% 0%", "100% 100%"],
-              }}
-              transition={{
-                duration: 10,
-                repeat: Infinity,
-                ease: "linear"
-              }}
+              whileHover={{ scale: 1.3 }}
+              whileTap={{ scale: 0.8 }}
             />
+          ))}
+        </div>
+      </div>
+    </div>
+  </motion.section>
+)}
 
-            <div className="relative max-w-7xl mx-auto px-4 sm:px-6">
-              <motion.div
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.6 }}
-                className="text-center mb-16 relative z-10"
-              >
-                <motion.div
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 font-medium shadow-sm transition-all duration-300 ${
-                    theme === "dark"
-                      ? "bg-purple-500/10 text-purple-300 border border-purple-400/10"
-                      : "bg-purple-100 text-purple-700 border border-purple-300/60"
-                  }`}
-                  whileHover={{ scale: 1.05 }}
-                >
-                  <Award className="h-4 w-4" />
-                  <span>Past Events</span>
-                </motion.div>
-                <h2
-                  className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-6 tracking-tight ${
-                    theme === "dark" ? "text-white" : "text-gray-900"
-                  }`}
-                >
-                  Our <span className="text-purple-400">Success Stories</span>
-                </h2>
-                <p
-                  className={`text-base sm:text-lg max-w-2xl mx-auto leading-relaxed ${
-                    theme === "dark" ? "text-gray-300" : "text-gray-600"
-                  }`}
-                >
-                  Take a look at some of our most memorable events that inspired, connected,
-                  and created impact within our community.
-                </p>
-              </motion.div>
-
-              <div className="relative max-w-5xl mx-auto">
-                <div className="relative h-80 md:h-[450px] rounded-3xl overflow-hidden shadow-2xl">
-  <AnimatePresence mode="wait">
-    {pastEvents.map((event, index) => {
-      if (index !== currentPastEventIndex) return null;
-
-      return (
-        <motion.div
-          key={event._id}
-          initial={{ x: 100, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: -100, opacity: 0 }}
-          transition={{
-            duration: 0.4,
-            ease: "easeInOut",
-          }}
-          className="absolute inset-0 w-full h-full"
-        >
-          {/* Image */}
-          <img
-            src={getImageUrl(event.bannerUrl)}
-            alt={event.title}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-            }}
-          />
-
-          {/* Overlay */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-
-          {/* Content */}
-          <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-white">
-            <h3 className="text-2xl md:text-3xl font-semibold mb-2">
-              {event.title}
-            </h3>
-
-            <p className="text-sm md:text-base opacity-90 line-clamp-2">
-              {event.description?.substring(0, 120) ||
-                "An inspiring event organized by our amazing team."}
-              ...
-            </p>
-
-            <div className="flex items-center mt-3 text-xs md:text-sm opacity-80">
-              <Calendar className="h-4 w-4 mr-2" />
-              {formatDate(event.startDate)}
-            </div>
-          </div>
-        </motion.div>
-      );
-    })}
-  </AnimatePresence>
-</div>
-<div className="relative h-80 md:h-[450px] rounded-3xl overflow-hidden shadow-2xl">
-  <AnimatePresence mode="wait">
-    {pastEvents.map((event, index) => {
-      if (index !== currentPastEventIndex) return null;
-
-      return (
-        <motion.div
-          key={event._id}
-          initial={{ x: 100, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: -100, opacity: 0 }}
-          transition={{
-            duration: 0.4,
-            ease: "easeInOut",
-          }}
-          className="absolute inset-0 w-full h-full"
-        >
-          {/* Image */}
-          <img
-            src={getImageUrl(event.bannerUrl)}
-            alt={event.title}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-            }}
-          />
-
-          {/* Overlay */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-
-          {/* Content */}
-          <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-white">
-            <h3 className="text-2xl md:text-3xl font-semibold mb-2">
-              {event.title}
-            </h3>
-
-            <p className="text-sm md:text-base opacity-90 line-clamp-2">
-              {event.description?.substring(0, 120) ||
-                "An inspiring event organized by our amazing team."}
-              ...
-            </p>
-
-            <div className="flex items-center mt-3 text-xs md:text-sm opacity-80">
-              <Calendar className="h-4 w-4 mr-2" />
-              {formatDate(event.startDate)}
-            </div>
-          </div>
-        </motion.div>
-      );
-    })}
-  </AnimatePresence>
-</div>
-
-
-                <motion.div
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Previous event"
-                    onClick={prevPastEvent}
-                    className={`absolute left-4 top-1/2 transform -translate-y-1/2 rounded-full backdrop-blur-md transition-all ${
-                      theme === "dark"
-                        ? "bg-slate-800/60 text-white hover:bg-slate-700"
-                        : "bg-white/80 text-gray-700 hover:bg-gray-100"
-                    }`}
-                  >
-                    <ChevronLeft className="h-6 w-6" />
-                  </Button>
-                </motion.div>
-
-                <motion.div
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Next event"
-                    onClick={nextPastEvent}
-                    className={`absolute right-4 top-1/2 transform -translate-y-1/2 rounded-full backdrop-blur-md transition-all ${
-                      theme === "dark"
-                        ? "bg-slate-800/60 text-white hover:bg-slate-700"
-                        : "bg-white/80 text-gray-700 hover:bg-gray-100"
-                    }`}
-                  >
-                    <ChevronRight className="h-6 w-6" />
-                  </Button>
-                </motion.div>
-
-                <div className="flex justify-center mt-6 space-x-2">
-                  {pastEvents.map((_, index) => (
-                    <motion.button
-                      key={index}
-                      onClick={() => setCurrentPastEventIndex(index)}
-                      aria-label={`Go to event ${index + 1}`}
-                      className={`h-2.5 rounded-full transition-all duration-300 ${
-                        index === currentPastEventIndex
-                          ? "bg-purple-400 w-6"
-                          : theme === "dark"
-                          ? "bg-gray-600 w-2"
-                          : "bg-gray-300 w-2"
-                      }`}
-                      whileHover={{ scale: 1.3 }}
-                      whileTap={{ scale: 0.8 }}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-          </motion.section>
-        )}
 
         {/* Enhanced Social Media Section */}
         <motion.section 

@@ -1026,62 +1026,108 @@ export default function Home() {
 
               <div className="relative max-w-5xl mx-auto">
                 <div className="relative h-80 md:h-[450px] rounded-3xl overflow-hidden shadow-2xl">
-                  <AnimatePresence mode="wait">
-                    {pastEvents.map((event, index) => (
-                      index === currentPastEventIndex && (
-                        <motion.div
-                          key={event._id}
-                          initial={{ opacity: 0, scale: 1.1, x: 100 }}
-                          animate={{ opacity: 1, scale: 1, x: 0 }}
-                          exit={{ opacity: 0, scale: 0.9, x: -100 }}
-                          transition={{ duration: 0.7, ease: "easeInOut" }}
-                          className="absolute inset-0 w-full h-full"
-                        >
-                          <motion.img
-                            src={getImageUrl(event.bannerUrl)}
-                            alt={event.title}
-                            className="w-full h-full object-cover"
-                            initial={{ scale: 1.1 }}
-                            animate={{ scale: 1 }}
-                            transition={{ duration: 10, ease: "linear" }}
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = "/api/placeholder/800/400";
-                            }}
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-                          <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-white">
-                            <motion.h3
-                              initial={{ y: 20, opacity: 0 }}
-                              animate={{ y: 0, opacity: 1 }}
-                              transition={{ duration: 0.4, delay: 0.1 }}
-                              className="text-2xl md:text-3xl font-semibold mb-2 drop-shadow-lg"
-                            >
-                              {event.title}
-                            </motion.h3>
-                            <motion.p
-                              initial={{ y: 20, opacity: 0 }}
-                              animate={{ y: 0, opacity: 1 }}
-                              transition={{ duration: 0.4, delay: 0.2 }}
-                              className="text-sm md:text-base opacity-90 line-clamp-2"
-                            >
-                              {event.description?.substring(0, 120) || "An inspiring event organized by our amazing team."}
-                              ...
-                            </motion.p>
-                            <motion.div
-                              initial={{ y: 20, opacity: 0 }}
-                              animate={{ y: 0, opacity: 1 }}
-                              transition={{ duration: 0.4, delay: 0.3 }}
-                              className="flex items-center mt-3 text-xs md:text-sm opacity-80"
-                            >
-                              <Calendar className="h-4 w-4 mr-2" />
-                              {formatDate(event.startDate)}
-                            </motion.div>
-                          </div>
-                        </motion.div>
-                      )
-                    ))}
-                  </AnimatePresence>
-                </div>
+  <AnimatePresence mode="wait">
+    {pastEvents.map((event, index) => {
+      if (index !== currentPastEventIndex) return null;
+
+      return (
+        <motion.div
+          key={event._id}
+          initial={{ x: 100, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: -100, opacity: 0 }}
+          transition={{
+            duration: 0.4,
+            ease: "easeInOut",
+          }}
+          className="absolute inset-0 w-full h-full"
+        >
+          {/* Image */}
+          <img
+            src={getImageUrl(event.bannerUrl)}
+            alt={event.title}
+            className="w-full h-full object-cover"
+            onError={(e) => {
+            }}
+          />
+
+          {/* Overlay */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
+
+          {/* Content */}
+          <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-white">
+            <h3 className="text-2xl md:text-3xl font-semibold mb-2">
+              {event.title}
+            </h3>
+
+            <p className="text-sm md:text-base opacity-90 line-clamp-2">
+              {event.description?.substring(0, 120) ||
+                "An inspiring event organized by our amazing team."}
+              ...
+            </p>
+
+            <div className="flex items-center mt-3 text-xs md:text-sm opacity-80">
+              <Calendar className="h-4 w-4 mr-2" />
+              {formatDate(event.startDate)}
+            </div>
+          </div>
+        </motion.div>
+      );
+    })}
+  </AnimatePresence>
+</div>
+<div className="relative h-80 md:h-[450px] rounded-3xl overflow-hidden shadow-2xl">
+  <AnimatePresence mode="wait">
+    {pastEvents.map((event, index) => {
+      if (index !== currentPastEventIndex) return null;
+
+      return (
+        <motion.div
+          key={event._id}
+          initial={{ x: 100, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: -100, opacity: 0 }}
+          transition={{
+            duration: 0.4,
+            ease: "easeInOut",
+          }}
+          className="absolute inset-0 w-full h-full"
+        >
+          {/* Image */}
+          <img
+            src={getImageUrl(event.bannerUrl)}
+            alt={event.title}
+            className="w-full h-full object-cover"
+            onError={(e) => {
+            }}
+          />
+
+          {/* Overlay */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
+
+          {/* Content */}
+          <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-white">
+            <h3 className="text-2xl md:text-3xl font-semibold mb-2">
+              {event.title}
+            </h3>
+
+            <p className="text-sm md:text-base opacity-90 line-clamp-2">
+              {event.description?.substring(0, 120) ||
+                "An inspiring event organized by our amazing team."}
+              ...
+            </p>
+
+            <div className="flex items-center mt-3 text-xs md:text-sm opacity-80">
+              <Calendar className="h-4 w-4 mr-2" />
+              {formatDate(event.startDate)}
+            </div>
+          </div>
+        </motion.div>
+      );
+    })}
+  </AnimatePresence>
+</div>
+
 
                 <motion.div
                   whileHover={{ scale: 1.1 }}

@@ -872,7 +872,7 @@ exports.sendRSVPWithVerification = async (req, res) => {
     <div style="max-width:600px;margin:0 auto;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,0.05);overflow:hidden;">
       
       <div style="background:#004aad;padding:20px 30px;text-align:center;">
-        <img src="https://i.ibb.co/v6H3n86S/logo.png" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
+        <img src="https://www.teameklavya.xyz/logo.png" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
         <h1 style="color:#fff;margin:0;font-size:22px;font-weight:600;">You're Invited!</h1>
         <p style="color:#fff;margin:10px 0 0;font-size:16px;opacity:0.9;">${event.title}</p>
       </div>

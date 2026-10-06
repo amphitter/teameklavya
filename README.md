@@ -48,11 +48,11 @@ attendee management, all in one place.
 cd backend
 cp .env.example .env        # fill in MONGO_URI, JWT_SECRET, etc.
 npm install
-npm run dev                 # http://localhost:5000
+npm run dev                 # https://teameklavya.onrender.com
 
 # 2. Frontend
 cd frontend
-cp .env.example .env.local  # set NEXT_PUBLIC_API_URL=http://localhost:5000
+cp .env.example .env.local  # set NEXT_PUBLIC_API_URL=https://teameklavya.onrender.com
 npm install
 npm run dev                 # http://localhost:3000
 ```

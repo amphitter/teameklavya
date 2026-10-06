@@ -69,7 +69,7 @@ export default function SignupForm() {
   };
 
   const handleGoogleSignup = () => {
-    window.location.href = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/api/auth/google`;
+    window.location.href = `${process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com"}/api/auth/google`;
   };
 
   return (

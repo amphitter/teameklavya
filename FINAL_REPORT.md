@@ -147,7 +147,7 @@ npm run dev                   # :5000
 
 # Frontend
 cd frontend
-cp .env.example .env.local    # NEXT_PUBLIC_API_URL=http://localhost:5000
+cp .env.example .env.local    # NEXT_PUBLIC_API_URL=https://teameklavya.onrender.com
 npm install
 npm run dev                   # :3000
 

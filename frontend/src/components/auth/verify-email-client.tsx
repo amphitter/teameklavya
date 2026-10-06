@@ -14,7 +14,7 @@ export default function VerifyEmailClient() {
   useEffect(() => {
     if (token && email) {
       // The backend verifies the token and redirects to /verify-success
-      const backend = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      const backend = process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com";
       window.location.href = `${backend}/api/auth/verify-email?token=${encodeURIComponent(
         token
       )}&email=${encodeURIComponent(email)}`;

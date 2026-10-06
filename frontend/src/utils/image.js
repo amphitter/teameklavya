@@ -7,7 +7,7 @@ export const getImageUrl = (imagePath) => {
 
   // Relative paths served by the backend (legacy local uploads)
   if (imagePath.startsWith("/uploads")) {
-    const baseURL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+    const baseURL = process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com";
     return `${baseURL}${imagePath}`;
   }
   return imagePath;

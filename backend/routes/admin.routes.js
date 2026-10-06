@@ -9,4 +9,6 @@ router.get("/users/export", requireAuth, requireAdmin, adminController.exportUse
 router.get("/events", requireAuth, requireAdmin, adminController.getAdminEvents);
 router.get("/activity", requireAuth, requireAdmin, adminController.getRecentActivity);
 router.get("/analytics", requireAuth, requireAdmin, adminController.getAnalytics);
+// Part 5, Phase 7 (§59/§60/§61) — admin-only; exposes provider budgets
+router.get("/infrastructure", requireAuth, requireAdmin, adminController.getInfrastructure);
 module.exports = router;

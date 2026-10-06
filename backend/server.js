@@ -188,14 +188,18 @@ app.get('/', (req, res) => {
 
 app.get('/api/health', (req, res) => {
   const mongoose = require('mongoose');
-  const { cache } = require('./services/cache.service');
+  /* §61 — this route is PUBLIC, so it says "up" and nothing more.
+   * Cache occupancy, latency percentiles, provider state and every other
+   * internal figure were removed from here and live behind
+   * GET /api/admin/infrastructure (requireAuth + requireAdmin). Advertising
+   * cache size and configuration to anonymous callers is infrastructure
+   * detail they have no reason to see. */
   res.json({
     status: 'OK',
     service: 'eventhub-api',
     timestamp: new Date().toISOString(),
     uptimeSec: Math.round(process.uptime()),
     db: mongoose.connection.readyState === 1 ? 'connected' : 'degraded',
-    cache: cache.stats(),
   });
 });
 

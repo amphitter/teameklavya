@@ -4,6 +4,7 @@ const Event = require("../models/event.model");
 const Ticket = require("../models/ticket.model");
 const RegistrationResponse = require("../models/registrationResponse.model");
 const { Parser } = require("json2csv");
+const infrastructureService = require("../services/infrastructure.service");
 
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -221,5 +222,32 @@ exports.getAnalytics = async (req, res) => {
   } catch (err) {
     console.error("getAnalytics error:", err);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+/**
+ * GET /api/admin/infrastructure (Part 5, Phase 7 — spec §59, §60)
+ * ─────────────────────────────────────────────────────────────────────────
+ * Admin-only infrastructure health: database storage/counts, cache
+ * occupancy + hit rate, API latency percentiles, rate-limit events, socket
+ * connections, provider health, upload failures and process memory — each
+ * scored against a budget on the §59 scale (80 WARNING / 90 HIGH / 95
+ * CRITICAL).
+ *
+ * §61 — provider quotas and budgets are visible HERE and nowhere else. The
+ * route is gated by requireAuth + requireAdmin, and none of these numbers
+ * are ever folded into a user-facing error message.
+ *
+ * ?fresh=1 forces a new db.stats() read instead of the 30s cached one.
+ */
+exports.getInfrastructure = async (req, res) => {
+  try {
+    const report = await infrastructureService.collect({ fresh: req.query.fresh === "1" });
+    // Diagnostics must never be cached by a proxy or the browser.
+    res.set("Cache-Control", "private, no-store");
+    res.json({ success: true, ...report });
+  } catch (error) {
+    console.error("Infrastructure report error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to build the infrastructure report" });
   }
 };

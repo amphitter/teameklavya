@@ -1,0 +1,41 @@
+Part 5 Phase 7: observability & admin infrastructure (spec 59/60/61)
+
+New GET /api/admin/infrastructure (requireAuth + requireAdmin, no-store)
+returning eight sections scored against configurable budgets on the
+80/90/95 scale: database, cache, api, rateLimits, sockets, providers,
+uploads, process -- plus an overall status and a sorted alerts array so
+the page leads with what needs attention.
+
+New services/infrastructure.service.js. Budgets are env-overridable via
+INFRA_BUDGET_* so a paid deployment raises the ceiling without a code
+change.
+
+Three decisions worth recording:
+
+- Provider health is inferred from recent traffic (per-provider ok/error
+  counters plus a configuration check), NOT a synthetic ping. A ping adds
+  latency to an admin click, fails for reasons unrelated to the provider
+  (sandbox egress, DNS blip), and says less than "our last 200 uploads
+  succeeded". A provider with no traffic reports null, not 0% -- no
+  evidence is not the same as healthy.
+
+- Collection stats are cached 30s. db.stats() is a real database round
+  trip and an admin holding down refresh should not turn a diagnostic
+  into a load generator. ?fresh=1 forces a new read.
+
+- Real leak closed (§61): the PUBLIC /api/health was returning
+  cache.stats() -- occupancy, maxEntries, in-flight count -- to
+  anonymous callers. Nothing consumed it, so the endpoint is trimmed to
+  status/service/timestamp/uptime/db and every internal figure now lives
+  behind the admin route only.
+
+Frontend Admin -> Infrastructure page, added to the admin nav. Reads
+through the Phase 5 data layer (useQuery, 15s staleTime, refetch on
+focus) so navigating away and back paints from cache.
+
+phase7 selftest 83/83, including the exact threshold boundaries
+(79/80/89/90/94/95/100 plus zero/missing/NaN budgets), access control,
+full section shape, and a leakage sweep over /api/health,
+GET /api/events, a 404 body and the 403 body.
+
+All green: 364 selftest assertions + 6 e2e suites. next build exit 0.

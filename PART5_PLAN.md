@@ -210,10 +210,54 @@ room-full refusal + re-join allowance, sweep behaviour at each stage, the
 throttle inventory, and that a duplicate answer never double-scores.
 
 
-## Phase 7 — Observability & admin infrastructure dashboard
+## Phase 7 — Observability & admin infrastructure dashboard  ✅ **DONE**
 - `/api/admin/infrastructure` (admin-only, §59–60): DB storage/counts, cache hit rate/size/evictions, API latency percentiles, rate-limit event counts, socket connections, provider health (Cloudinary/email ping), upload failures, thresholds (80/90/95 = WARNING/HIGH/CRITICAL).
 - Frontend `Admin → Infrastructure` page (§60). Admin-only, clean messages, no provider quotas leaked to normal users (§61).
 - Structured request logging from Phase 1 surfaced per-route (slow-query warnings, N+1 heuristics).
+
+### Phase 7 results
+
+**`GET /api/admin/infrastructure`** (admin-gated, `no-store`) returns eight
+sections, each scored against a budget on the §59 scale
+(80 WARNING / 90 HIGH / 95 CRITICAL): `database`, `cache`, `api`, `rateLimits`,
+`sockets`, `providers`, `uploads`, `process` — plus an overall `status` and a
+sorted `alerts` array so the page leads with what needs attention instead of
+making an admin scan.
+
+New `services/infrastructure.service.js`. Budgets are env-overridable
+(`INFRA_BUDGET_*`) so a paid deployment raises the ceiling without a code change.
+
+Three decisions worth recording:
+
+1. **Provider health is inferred from recent traffic, not a synthetic ping.**
+   A ping adds latency to an admin click, can fail for reasons unrelated to the
+   provider (sandbox egress, DNS blip), and tells you less than "our last 200
+   uploads succeeded". Health is derived from the existing per-provider
+   ok/error counters plus a configuration check. **A provider with no traffic
+   reports `null`, not 0%** — no evidence is not the same as healthy.
+2. **Collection stats are cached 30s.** `db.stats()` is a real database round
+   trip; an admin holding down refresh should not turn a diagnostic into a load
+   generator. `?fresh=1` forces a new read.
+3. **§61 — a real leak found and closed.** The public `GET /api/health` was
+   returning `cache.stats()` (occupancy, `maxEntries`, in-flight count). That is
+   internal configuration advertised to anonymous callers. Nothing consumed it,
+   so the endpoint is now trimmed to status/service/timestamp/uptime/db, and
+   every internal figure lives behind the admin route only.
+
+**Frontend `Admin → Infrastructure`** (`app/admin/infrastructure/page.tsx`),
+added to the admin nav. Reads through the Phase 5 data layer (`useQuery`,
+15s staleTime, refetch on focus) so navigating away and back paints from cache.
+Severity badges, per-section gauges, collapsible largest-collections table, and
+a threshold footnote. The tab title reflects the current severity.
+
+**Selftest:** `backend/tests/phase7.selftest.js` — **83/83**. Covers the exact
+threshold boundaries (79/80/89/90/94/95/100, plus zero/missing/NaN budgets),
+access control (anon 401, non-admin 403, garbage token 401, admin 200,
+`no-store`), full section shape, provider health derived from real recorded
+outcomes, cache/latency responding to real load, and a **leakage sweep** that
+scans `/api/health`, `GET /api/events`, a 404 body and the 403 body for any
+provider, budget or internal-metric term.
+
 
 ## Phase 8 — Docs & retention
 - `docs/DATA-RETENTION.md` (§53–54): TEMPORARY (OTP tokens, upload records, live runtime docs policy) vs PERMANENT (events, posts, registrations, results, certificates — never auto-deleted). TTL indexes only on temporary classes; cleanup script for live chat/Q&A archives with explicit policy.

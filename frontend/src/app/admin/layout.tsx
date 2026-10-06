@@ -13,6 +13,7 @@ import {
   Users,
   Flag,
   ShieldAlert,
+  ServerCog,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Logo } from "@/components/logo";
@@ -27,6 +28,7 @@ const NAV = [
   { name: "Users", href: "/admin/users", icon: Users },
   { name: "Claims", href: "/admin/claims", icon: Flag },
   { name: "Moderation", href: "/admin/moderation", icon: ShieldAlert },
+  { name: "Infrastructure", href: "/admin/infrastructure", icon: ServerCog },
 ];
 
 /**

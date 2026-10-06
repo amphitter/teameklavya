@@ -25,7 +25,7 @@ architecture; it makes the existing architecture production-safe.
 | 1 | Reconciliation service + script | §2, §3, §4, §6 | ✅ |
 | 2 | Dead-letter system + migration safety | §5, §7 | ✅ |
 | 3 | Real-provider test suite | §1 | ✅ |
-| 4 | Security audits (Supabase, Redis, cache) | §8, §9, §11, §13 | pending |
+| 4 | Security audits (Supabase, Redis, cache) | §8, §9, §11, §13 | ✅ |
 | 5 | Community ownership & Super Admin protection | §10 | pending |
 | 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | pending |
 | 7 | Provider failure matrix + preflight | §12, §31 | pending |
@@ -82,6 +82,56 @@ on the second run (needs `MONGODB_URI`).
 reason, and the summary warns that they are not passes.
 
 Regression: **997 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
+### Phase 4 — RESULT: ✅ **DONE** (`tests/phase12.selftest.js`, 56 assertions) + `docs/SECURITY-MODEL.md`
+
+These four sections are all one question asked at different layers: **can a
+value reach someone it does not belong to?** §13 a cached value served to the
+wrong principal · §11 a Redis key collided with or read by the wrong path ·
+§8 a Supabase credential or raw error reaching the wrong audience · §9 a
+browser reaching Supabase directly.
+
+**§13 — five privacy classes, not two.** Part 6 drew the line at
+public|private. Enough to decide SWR, not enough to answer *whose data is
+this, and how bad is it if it leaks* — a leaked TRENDING list is a bug, a
+leaked FEED is a breach. Added `CACHE_PRIVACY` / `DOMAIN_PRIVACY`; every
+domain the `keys` builder can emit must be classified, and `privacy` is now
+DERIVED from that table so registry and classification cannot drift.
+
+**Three real findings while building it:**
+1. The registry declared **14 domains while the builder could emit 23**. The
+   nine undeclared ones (slugs, counters, unread counts) had no stated owner,
+   TTL or invalidation — nobody had decided. All 23 declared now.
+2. Dropping the legacy `user` domain from `PRIVATE_DOMAINS` **weakened the SWR
+   guard**: keys written by older builds still exist in a live Redis and are
+   still readable, so a domain leaving the private list silently makes them
+   SWR-eligible. Privacy rules must cover the data that is out there, not just
+   the data this build writes. `user` retained, with the reason recorded.
+3. Two phase10 assertions passed **vacuously** — `UNREAD_MESSAGES` and
+   `UNREAD_NOTIFICATIONS` had no builder in the test's map, so the loop
+   short-circuited to `true`. Both now checked for real.
+
+**Two of my own tests were wrong, not the code.** The DSN-scrub check
+pattern-matched the source text and missed (the regex uses `postgres(?:ql)?`,
+so the literal `postgres://` never appears), and `assertConfigured` was looked
+for in `client.js` when it lives in `index.js`. Fixed by exporting `__scrub`
+and testing its **behaviour** — a source-pattern test keeps passing even if the
+function stops being called.
+
+**§9 — RLS is OFF, deliberately, and now argued in writing** in
+`docs/SECURITY-MODEL.md`: the service-role key bypasses RLS entirely, so
+enabling it would buy nothing while duplicating authorisation into SQL where
+it would drift from the tested API layer. It becomes **mandatory** the moment a
+browser→Supabase path appears. No half-configured RLS: enabled-with-no-policy
+denies everything, so a migration "succeeds" having written nothing.
+
+**§11** — every `SET` carries PX · no credential logged or in a key · DSN/JWT
+scrubbing · no controller constructs a key · prefix isolation (`event` vs
+`event-counts`) · lock tokens are UUIDs, release is compare-and-delete, expiry
+recovers.
+
+Regression: 999 → **1055 assertions, 0 failed** (924 floor held); 6/6 e2e.
+phase10 went 363 → 365 (2 assertions strengthened, none weakened).
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

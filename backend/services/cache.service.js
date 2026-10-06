@@ -132,12 +132,127 @@ const VERSION = String(process.env.CACHE_KEY_VERSION || "v1").trim();
 /** Build a fully-qualified key. The ONLY way a key enters this system. */
 const build = (domain, id) => `${NAMESPACE}:${VERSION}:cache:${domain}:${id}`;
 
-/**
- * Domains whose values are scoped to one identity and must therefore never
- * be served stale-while-revalidate, and must never be reachable without
- * that identity in the key.
+/* ══ §13 Privacy classification ═══════════════════════════════════════════
+ *
+ * Part 6 drew the line at public | private. That is enough to decide whether
+ * stale-while-revalidate is safe, but not enough to answer the question that
+ * actually matters during an incident: WHOSE data is in this key, and what is
+ * the blast radius if it leaks?
+ *
+ * A leaked TRENDING list is embarrassing. A leaked FEED is a privacy breach —
+ * it contains what one specific person sees. A leaked admin export is both.
+ * Collapsing all three into "private" loses exactly the distinction an
+ * on-call engineer needs, so every cached value now carries one of five
+ * classes, and the class is declared in one table.
+ *
+ *   PUBLIC               any caller may see it; SWR allowed
+ *   PRIVATE_USER         scoped to one user id, which is IN the key
+ *   PRIVATE_ORGANIZATION scoped to one org/community, for its members
+ *   PRIVATE_EVENT        scoped to one event's non-public data
+ *   PRIVATE_ADMIN        platform-operator data; must never reach a user
+ *
+ * The four private classes are all forbidden from SWR and must all carry
+ * their scope in the key, so a value can never be served to the wrong
+ * principal by accident of key construction.
  */
-const PRIVATE_DOMAINS = ["followlist", "notif", "user", "msg", "feed", "profile", "community-members"];
+const CACHE_PRIVACY = Object.freeze({
+  PUBLIC: "PUBLIC",
+  PRIVATE_USER: "PRIVATE_USER",
+  PRIVATE_ORGANIZATION: "PRIVATE_ORGANIZATION",
+  PRIVATE_EVENT: "PRIVATE_EVENT",
+  PRIVATE_ADMIN: "PRIVATE_ADMIN",
+});
+
+const PUBLIC_ = CACHE_PRIVACY.PUBLIC;
+const PRIV_USER = CACHE_PRIVACY.PRIVATE_USER;
+const PRIV_ORG = CACHE_PRIVACY.PRIVATE_ORGANIZATION;
+const PRIV_EVENT = CACHE_PRIVACY.PRIVATE_EVENT;
+const PRIV_ADMIN = CACHE_PRIVACY.PRIVATE_ADMIN;
+
+/**
+ * THE SINGLE SOURCE OF TRUTH for privacy.
+ *
+ * Every domain the `keys` builder can emit MUST appear here. Part 6 kept this
+ * list separate from CACHE_REGISTRY's `privacy` flag, which meant the two
+ * could drift — and a domain that drifted out of the private list would
+ * silently become eligible for SWR. `PRIVATE_DOMAINS` is now DERIVED from
+ * this table and the registry's `privacy` is checked against it, so drift
+ * becomes an impossible state rather than a silent one.
+ *
+ * PRIVATE_EVENT and PRIVATE_ADMIN are currently UNUSED: no cache entry holds
+ * event-private or operator-only data today. They are declared so that the
+ * day one is added it has an obvious home — an unclassifiable new domain is a
+ * decision, not an accident.
+ */
+const DOMAIN_PRIVACY = Object.freeze({
+  // ── PUBLIC: shareable by any caller, SWR allowed ──
+  event: PUBLIC_,
+  "event-counts": PUBLIC_,
+  explore: PUBLIC_,
+  trending: PUBLIC_,
+  organization: PUBLIC_,
+  community: PUBLIC_,
+  "post-counts": PUBLIC_,
+  leaderboard: PUBLIC_,
+  search: PUBLIC_,
+  "event-slug": PUBLIC_,
+  "org-slug": PUBLIC_,
+  "community-slug": PUBLIC_,
+  "stats:event": PUBLIC_,
+  "counts:interest": PUBLIC_,
+  "counts:org": PUBLIC_,
+  "counts:community": PUBLIC_,
+  static: PUBLIC_,
+
+  // ── PRIVATE_USER: the user id is part of the key ──
+  followlist: PRIV_USER,
+  feed: PRIV_USER,
+  profile: PRIV_USER,
+  msg: PRIV_USER,
+  notif: PRIV_USER,
+
+  // ── PRIVATE_ORGANIZATION: member lists, scoped to one community ──
+  "community-members": PRIV_ORG,
+
+  /* ── Legacy, defensive ──
+   * No builder emits the `user` domain any more — PROFILE replaced it. It is
+   * kept because `isPrivateKey` guards keys that ALREADY EXIST in a live
+   * Redis from older builds: a key written by the previous version is still
+   * readable, and if this domain dropped out of the private list such a key
+   * would silently become eligible for stale-while-revalidate. Privacy rules
+   * have to cover the data that is out there, not just the data this build
+   * writes. */
+  user: PRIV_USER,
+
+  // ── PRIVATE_EVENT / PRIVATE_ADMIN: no entries today ──
+});
+
+/** Every domain that is not PUBLIC. Derived — never hand-maintained. */
+const PRIVATE_DOMAINS = Object.freeze(
+  Object.entries(DOMAIN_PRIVACY)
+    .filter(([, cls]) => cls !== PUBLIC_)
+    .map(([d]) => d)
+);
+
+/**
+ * Classify a domain, or a fully-built key.
+ * Returns undefined for an unknown domain — callers MUST treat that as a bug,
+ * not as "probably public".
+ */
+function classifyDomain(domain) {
+  return DOMAIN_PRIVACY[String(domain)];
+}
+
+function classifyKey(key) {
+  const k = String(key);
+  // Longest match first: "counts:org" must not be shadowed by a shorter
+  // domain that happens to be a substring of it.
+  const domains = Object.keys(DOMAIN_PRIVACY).sort((a, b) => b.length - a.length);
+  for (const d of domains) {
+    if (k === d || k.startsWith(`${d}:`) || k.includes(`:${d}:`)) return DOMAIN_PRIVACY[d];
+  }
+  return undefined;
+}
 
 /**
  * Is this key private? Handles BOTH fully-built keys and bare domain keys
@@ -201,92 +316,88 @@ const keys = {
  * map, because the repositories pass TTL.X straight into getOrSet() as a
  * number.
  */
+/**
+ * The authoritative declaration of every cached value: who owns it, how long
+ * it lives, what invalidates it, and which key domain it maps to.
+ *
+ * `privacy` is DERIVED from DOMAIN_PRIVACY via `domain` — it is never written
+ * by hand here. Part 6 kept a hand-written `privacy` string next to a separate
+ * PRIVATE_DOMAINS list; the two could disagree, and the loser was whichever
+ * one the SWR guard happened to read. Now there is one table.
+ *
+ * Part 6 declared 14 entries while the `keys` builder could emit 23 domains.
+ * The nine un-declared ones (slugs, counters, unread counters) had no stated
+ * owner, TTL or invalidation — which means nobody had decided. They are
+ * declared now with conservative TTLs.
+ */
 const CACHE_REGISTRY = {
-  PUBLIC_EVENT: {
-    owner: "event",
-    ttl: 3 * 60 * 1000,
-    invalidatedBy: ["event:update", "event:publish", "event:delete"],
-    privacy: "public",
-  },
-  EVENT_COUNTS: {
-    owner: "registration",
-    ttl: 45 * 1000,
-    invalidatedBy: ["registration:write", "eventInterest:write"],
-    privacy: "public",
-  },
-  EXPLORE: {
-    owner: "discovery",
-    ttl: 60 * 1000,
-    invalidatedBy: ["event:create", "event:update"],
-    privacy: "public",
-  },
-  TRENDING: {
-    owner: "feed",
-    ttl: 2 * 60 * 1000,
-    invalidatedBy: ["post:create"],
-    privacy: "public",
-  },
-  ORG_PROFILE: {
-    owner: "organization",
-    ttl: 10 * 60 * 1000,
-    invalidatedBy: ["org:update", "orgFollow:change"],
-    privacy: "public",
-  },
-  COMMUNITY_META: {
-    owner: "community",
-    ttl: 10 * 60 * 1000,
-    invalidatedBy: ["community:update", "community:delete"],
-    privacy: "public",
-  },
-  COMMUNITY_MEMBERS: {
-    owner: "community",
-    ttl: 60 * 1000,
-    invalidatedBy: ["communityMember:join", "communityMember:leave", "communityMember:role"],
-    privacy: "private",
-  },
-  POST_COUNTS: {
-    owner: "post",
-    ttl: 60 * 1000,
-    invalidatedBy: ["reaction:write", "comment:write"],
-    privacy: "public",
-  },
-  QUIZ_LEADERBOARD: {
-    owner: "quiz",
-    ttl: 5 * 1000,
-    invalidatedBy: ["liveAnswer:write"],
-    privacy: "public",
-  },
-  FEED: {
-    owner: "feed",
-    ttl: 60 * 1000,
-    invalidatedBy: ["post:create", "post:delete", "follow:change"],
-    privacy: "private",
-  },
-  PROFILE: {
-    owner: "user",
-    ttl: 2 * 60 * 1000,
-    invalidatedBy: ["user:update"],
-    privacy: "private",
-  },
-  SEARCH: {
-    owner: "search",
-    ttl: 30 * 1000,
-    invalidatedBy: ["event:create", "post:create", "community:create"],
-    privacy: "public",
-  },
-  FOLLOW_LIST: {
-    owner: "feed",
-    ttl: 45 * 1000,
-    invalidatedBy: ["follow:change"],
-    privacy: "private",
-  },
-  STATIC_CONFIG: {
-    owner: "platform",
-    ttl: 24 * 60 * 60 * 1000,
-    invalidatedBy: ["deploy"],
-    privacy: "public",
-  },
+  PUBLIC_EVENT: { domain: "event", owner: "event", ttl: 3 * 60 * 1000,
+    invalidatedBy: ["event:update", "event:publish", "event:delete"] },
+  EVENT_COUNTS: { domain: "event-counts", owner: "registration", ttl: 45 * 1000,
+    invalidatedBy: ["registration:write", "eventInterest:write"] },
+  EXPLORE: { domain: "explore", owner: "discovery", ttl: 60 * 1000,
+    invalidatedBy: ["event:create", "event:update"] },
+  TRENDING: { domain: "trending", owner: "feed", ttl: 2 * 60 * 1000,
+    invalidatedBy: ["post:create"] },
+  ORG_PROFILE: { domain: "organization", owner: "organization", ttl: 10 * 60 * 1000,
+    invalidatedBy: ["org:update", "orgFollow:change"] },
+  COMMUNITY_META: { domain: "community", owner: "community", ttl: 10 * 60 * 1000,
+    invalidatedBy: ["community:update", "community:delete"] },
+  COMMUNITY_MEMBERS: { domain: "community-members", owner: "community", ttl: 60 * 1000,
+    invalidatedBy: ["communityMember:join", "communityMember:leave", "communityMember:role"] },
+  POST_COUNTS: { domain: "post-counts", owner: "post", ttl: 60 * 1000,
+    invalidatedBy: ["reaction:write", "comment:write"] },
+  QUIZ_LEADERBOARD: { domain: "leaderboard", owner: "quiz", ttl: 5 * 1000,
+    invalidatedBy: ["liveAnswer:write"] },
+  FEED: { domain: "feed", owner: "feed", ttl: 60 * 1000,
+    invalidatedBy: ["post:create", "post:delete", "follow:change"] },
+  PROFILE: { domain: "profile", owner: "user", ttl: 2 * 60 * 1000,
+    invalidatedBy: ["user:update"] },
+  SEARCH: { domain: "search", owner: "search", ttl: 30 * 1000,
+    invalidatedBy: ["event:create", "post:create", "community:create"] },
+  FOLLOW_LIST: { domain: "followlist", owner: "feed", ttl: 45 * 1000,
+    invalidatedBy: ["follow:change"] },
+  STATIC_CONFIG: { domain: "static", owner: "platform", ttl: 24 * 60 * 60 * 1000,
+    invalidatedBy: ["deploy"] },
+
+  /* ── Declared in Part 7 §13: previously un-declared domains ── */
+  EVENT_SLUG: { domain: "event-slug", owner: "event", ttl: 10 * 60 * 1000,
+    invalidatedBy: ["event:update", "event:delete"] },
+  ORG_SLUG: { domain: "org-slug", owner: "organization", ttl: 10 * 60 * 1000,
+    invalidatedBy: ["org:update", "org:delete"] },
+  COMMUNITY_SLUG: { domain: "community-slug", owner: "community", ttl: 10 * 60 * 1000,
+    invalidatedBy: ["community:update", "community:delete"] },
+  EVENT_STATS: { domain: "stats:event", owner: "event", ttl: 60 * 1000,
+    invalidatedBy: ["event:update", "registration:write"] },
+  INTEREST_COUNT: { domain: "counts:interest", owner: "registration", ttl: 45 * 1000,
+    invalidatedBy: ["eventInterest:write"] },
+  ORG_COUNTS: { domain: "counts:org", owner: "organization", ttl: 60 * 1000,
+    invalidatedBy: ["orgFollow:change", "org:update"] },
+  COMMUNITY_COUNTS: { domain: "counts:community", owner: "community", ttl: 60 * 1000,
+    invalidatedBy: ["communityMember:join", "communityMember:leave"] },
+  /** Unread counts are per-user and short-lived: a wrong unread badge is
+   *  visible immediately, so the TTL is deliberately tight. */
+  UNREAD_MESSAGES: { domain: "msg", owner: "messaging", ttl: 15 * 1000,
+    invalidatedBy: ["message:read", "message:send"] },
+  UNREAD_NOTIFICATIONS: { domain: "notif", owner: "notification", ttl: 15 * 1000,
+    invalidatedBy: ["notification:read", "notification:create"] },
 };
+
+/* Derive `privacy` from the single source of truth. A registry entry naming a
+ * domain that DOMAIN_PRIVACY does not know is a programming error, and it is
+ * caught here at require-time rather than surfacing as a privacy bug. */
+for (const [name, entry] of Object.entries(CACHE_REGISTRY)) {
+  const cls = DOMAIN_PRIVACY[entry.domain];
+  if (!cls) {
+    throw new Error(
+      `cache: registry entry "${name}" names unknown domain "${entry.domain}" — ` +
+        `every cached domain must be classified in DOMAIN_PRIVACY (§13)`
+    );
+  }
+  entry.privacy = cls;
+}
+Object.freeze(CACHE_REGISTRY);
+
 
 /** Plain name→ms view, derived so it can never disagree with the registry. */
 const TTL = Object.freeze(
@@ -602,6 +713,10 @@ module.exports = {
   PRIVATE_PREFIXES,
   PRIVATE_DOMAINS,
   isPrivateKey,
+  CACHE_PRIVACY,
+  DOMAIN_PRIVACY,
+  classifyKey,
+  classifyDomain,
   resolvePrefix,
   KEY_PREFIX,
   KEY_NAMESPACE: NAMESPACE,

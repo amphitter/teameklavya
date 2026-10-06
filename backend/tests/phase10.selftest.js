@@ -471,7 +471,7 @@ function createFakePostgrest() {
 
   const { createUpstashProvider } = require("../providers/redis/upstash.provider");
   const cacheService = require("../services/cache.service");
-  const { cache, keys, TTL, CACHE_REGISTRY, KEY_PREFIX, isPrivateKey, resolvePrefix } = cacheService;
+  const { cache, keys, TTL, CACHE_REGISTRY, KEY_PREFIX, isPrivateKey, resolvePrefix, CACHE_PRIVACY } = cacheService;
 
   /* ══ §1 Provider interface parity ═══════════════════════════════════ */
   sec("1. Provider interface parity (§1)");
@@ -576,7 +576,10 @@ function createFakePostgrest() {
   ok("the registry is populated", registryEntries.length > 0, String(registryEntries.length));
   let complete = 0;
   for (const [name, e] of registryEntries) {
-    if (e && typeof e.ttl === "number" && e.owner && Array.isArray(e.invalidatedBy) && (e.privacy === "public" || e.privacy === "private")) {
+    // Part 7 §13 replaced the binary public|private flag with five classes.
+    // Accepting only the current enum is stricter, not looser: an unrecognised
+    // class is now an incomplete entry rather than an untested assumption.
+    if (e && typeof e.ttl === "number" && e.owner && Array.isArray(e.invalidatedBy) && Object.values(CACHE_PRIVACY).includes(e.privacy)) {
       complete += 1;
     } else {
       console.log(`     (incomplete registry entry: ${name})`);
@@ -592,8 +595,12 @@ function createFakePostgrest() {
     PROFILE: "profile",
     FOLLOW_LIST: "followList",
     COMMUNITY_MEMBERS: "communityMembers",
+    // Part 7 §13: these two domains now have registry entries, so they must
+    // be checked for real rather than passing vacuously.
+    UNREAD_MESSAGES: "unreadMessages",
+    UNREAD_NOTIFICATIONS: "unreadNotifications",
   };
-  const privateEntries = Object.entries(CACHE_REGISTRY).filter(([, e]) => e.privacy === "private");
+  const privateEntries = Object.entries(CACHE_REGISTRY).filter(([, e]) => e.privacy !== CACHE_PRIVACY.PUBLIC);
   ok("there is at least one private registry entry", privateEntries.length > 0, String(privateEntries.length));
   for (const [name] of privateEntries) {
     const builder = PRIVATE_ENTRY_BUILDER[name];

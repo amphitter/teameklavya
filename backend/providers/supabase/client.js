@@ -532,7 +532,12 @@ class SupabaseRestClient {
   }
 }
 
+/** Exported for the Part 7 §8 audit: the leak guarantees have to be
+ *  testable as behaviour, not as a pattern match on this file's text. */
+const __scrub = scrub;
+
 module.exports = {
+  __scrub,
   SupabaseRestClient,
   SupabaseError,
   Query,

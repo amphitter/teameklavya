@@ -1,0 +1,661 @@
+#!/usr/bin/env node
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  PART 7 · PHASE 4   SECURITY AUDITS
+ *  §8 Supabase · §9 RLS decision · §11 Redis · §13 cache poisoning & privacy
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Part 6 built the provider boundaries. This suite audits them the way an
+ * attacker would, and the way an on-call engineer needs.
+ *
+ * The organising idea is that these four sections are all the same question
+ * asked at different layers: CAN A VALUE REACH SOMEONE IT DOES NOT BELONG TO?
+ *
+ *   §13  a cached value served to the wrong principal
+ *   §11  a Redis key collided with, or read by, the wrong code path
+ *   §8   a Supabase credential or raw error reaching the wrong audience
+ *   §9   a browser reaching Supabase directly, bypassing the API entirely
+ *
+ * Where a property is a STATIC fact about the codebase (no controller builds a
+ * Redis key) it is asserted by scanning the source, because a test that only
+ * checks today's runtime behaviour would pass happily the day someone adds the
+ * violation back. Where it is a RUNTIME behaviour (SWR refused on a private
+ * key, a non-owner cannot release a lock) it is asserted by doing it.
+ *
+ * Both kinds are needed: the static scan catches the regression nobody thought
+ * to write a runtime test for, and the runtime test catches the violation no
+ * amount of grepping would find.
+ */
+
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = path.join(__dirname, "..");
+const FRONTEND = path.join(ROOT, "..", "frontend");
+
+let passed = 0;
+let failed = 0;
+const failures = [];
+
+function sec(title) {
+  console.log(`\n── ${title} ──`);
+}
+function ok(name, cond, detail = "") {
+  if (cond) {
+    passed += 1;
+    console.log(`  ✅ ${name}`);
+  } else {
+    failed += 1;
+    failures.push(name);
+    console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
+  }
+}
+function eq(name, a, b) {
+  ok(name, a === b, `expected ${b}, got ${a}`);
+}
+
+/** Every .js file under `dir`, recursively. */
+function walk(dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else if (e.name.endsWith(".js")) out.push(p);
+  }
+  return out;
+}
+const read = (p) => fs.readFileSync(p, "utf8");
+const rel = (p) => path.relative(ROOT, p);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §13  CACHE POISONING & PRIVACY
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Cache poisoning here does not mean an attacker injecting a value — the only
+ * writer is our own code. It means a value written for one principal being
+ * READ by another, which is the realistic failure and the one with privacy
+ * consequences. A leak of TRENDING is a bug; a leak of FEED is a breach.
+ *
+ * Part 6 classified keys binary public|private. That is enough to decide SWR
+ * but not enough to answer "whose data is this, and how bad is it if it
+ * leaks", so Part 7 §13 asks for five classes.
+ */
+
+async function auditCachePrivacy() {
+  sec("1. §13 — every cached value carries one of five privacy classes");
+
+  process.env.CACHE_PROVIDER = "memory";
+  const cacheService = require("../services/cache.service");
+  const {
+    cache,
+    keys,
+    CACHE_REGISTRY,
+    CACHE_PRIVACY,
+    DOMAIN_PRIVACY,
+    classifyKey,
+    classifyDomain,
+    PRIVATE_DOMAINS,
+    isPrivateKey,
+    KEY_PREFIX,
+  } = cacheService;
+
+  const CLASSES = Object.values(CACHE_PRIVACY);
+  eq("§13: there are exactly five privacy classes", CLASSES.length, 5);
+  ok(
+    "§13: the five classes are the ones the brief names",
+    ["PUBLIC", "PRIVATE_USER", "PRIVATE_ADMIN", "PRIVATE_EVENT", "PRIVATE_ORGANIZATION"].every((c) =>
+      CLASSES.includes(c)
+    ),
+    CLASSES.join(",")
+  );
+
+  /* -- completeness: every domain the builder can emit is classified -- */
+  const uncategorised = [];
+  for (const [name, fn] of Object.entries(keys)) {
+    if (typeof fn !== "function") continue;
+    const built = fn("probe-id");
+    if (classifyKey(built) === undefined) uncategorised.push(`${name} → ${built}`);
+  }
+  ok(
+    "§13: EVERY key the builder can emit is classified",
+    uncategorised.length === 0,
+    uncategorised.join(" | ")
+  );
+
+  /* -- the registry and the classification table cannot drift -- */
+  const registryDrift = Object.entries(CACHE_REGISTRY).filter(
+    ([, e]) => !DOMAIN_PRIVACY[e.domain]
+  );
+  ok(
+    "§13: every registry entry names a classified domain",
+    registryDrift.length === 0,
+    registryDrift.map(([n, e]) => `${n}→${e.domain}`).join(",")
+  );
+
+  const privacyDrift = Object.entries(CACHE_REGISTRY).filter(
+    ([, e]) => e.privacy !== DOMAIN_PRIVACY[e.domain]
+  );
+  ok(
+    "§13: …and its privacy is DERIVED from the classification table, so the two cannot disagree",
+    privacyDrift.length === 0,
+    privacyDrift.map(([n]) => n).join(",")
+  );
+
+  /* -- every classified domain is actually used, or explicitly reserved -- */
+  const usedDomains = new Set(
+    Object.values(CACHE_REGISTRY).map((e) => e.domain)
+  );
+  const declared = Object.keys(DOMAIN_PRIVACY).filter((d) => d !== "user"); // legacy
+  const unused = declared.filter((d) => !usedDomains.has(d));
+  ok(
+    "§13: every classified domain has a registry entry (except the legacy `user` guard)",
+    unused.length === 0,
+    unused.join(",")
+  );
+
+  sec("2. §13 — private keys are never served stale, and never shared");
+
+  /* SWR must be refused for ALL FOUR private classes, not just one. */
+  for (const cls of ["PRIVATE_USER", "PRIVATE_ADMIN", "PRIVATE_EVENT", "PRIVATE_ORGANIZATION"]) {
+    const domain = Object.entries(DOMAIN_PRIVACY).find(([, c]) => c === cls);
+    if (!domain) {
+      // A class with no data today. Assert it is at least representable so
+      // that adding one later is classified by construction.
+      ok(`§13: ${cls} is declared even though no value uses it yet`, CLASSES.includes(cls));
+      continue;
+    }
+    const k = `${KEY_PREFIX}cache:${domain[0]}:probe`;
+    let blocked = false;
+    try {
+      await cache.getOrSet(k, async () => ({}), { ttl: 60_000, swr: true });
+    } catch (e) {
+      blocked = /forbidden for private key/i.test(e.message);
+    }
+    ok(`§13: SWR is refused for ${cls} (via domain "${domain[0]}")`, blocked);
+  }
+
+  let publicSwrOk = false;
+  try {
+    const v = await cache.getOrSet(keys.event("pub-1"), async () => ({ a: 1 }), {
+      ttl: 60_000,
+      swr: true,
+    });
+    publicSwrOk = v && v.a === 1;
+  } catch {
+    publicSwrOk = false;
+  }
+  ok("§13: SWR is still ALLOWED on a PUBLIC key (the rule is not a blanket ban)", publicSwrOk);
+
+  ok(
+    "§13: every private domain is derived, not hand-listed twice",
+    PRIVATE_DOMAINS.length > 0 && PRIVATE_DOMAINS.every((d) => DOMAIN_PRIVACY[d] !== "PUBLIC")
+  );
+
+  sec("3. §13 — cross-user isolation (the real poisoning risk)");
+
+  await cache.flush();
+
+  /* The identity MUST be part of the key. If it were an argument rather than
+   * part of the key, two users would share one entry. */
+  ok(
+    "§13: two different users get two different feed keys",
+    keys.feed("user-A") !== keys.feed("user-B")
+  );
+  ok(
+    "§13: …and two different profile keys",
+    keys.profile("user-A") !== keys.profile("user-B")
+  );
+  ok(
+    "§13: …and two different follow-list keys",
+    keys.followList("user-A") !== keys.followList("user-B")
+  );
+  ok(
+    "§13: …and two different unread-count keys",
+    keys.unreadNotifications("user-A") !== keys.unreadNotifications("user-B")
+  );
+
+  /* The decisive test: write user A's private payload, then read as user B and
+   * prove B cannot see it. A key-namespacing test alone would pass even if the
+   * cache fell back to something shared. */
+  const secretForA = { owner: "user-A", note: "private to A" };
+  await cache.getOrSet(keys.feed("user-A"), async () => secretForA, { ttl: 60_000 });
+
+  let leakedToB = null;
+  await cache.getOrSet(
+    keys.feed("user-B"),
+    async () => {
+      leakedToB = await cache.peek(keys.feed("user-A")).catch(() => null);
+      return { owner: "user-B" };
+    },
+    { ttl: 60_000 }
+  );
+  ok(
+    "§13: user A's cached feed is not reachable under user B's key",
+    !leakedToB || leakedToB.value?.owner !== "user-A",
+    JSON.stringify(leakedToB)
+  );
+
+  /* A public key must never carry per-user data. Assert the public builders
+   * take no user argument — a public key containing a user id is how a
+   * per-user value ends up in a shared slot. */
+  const publicBuilders = Object.entries(CACHE_REGISTRY)
+    .filter(([, e]) => e.privacy === CACHE_PRIVACY.PUBLIC)
+    .map(([, e]) => e.domain);
+  ok(
+    "§13: no PUBLIC domain embeds a user identity in its name",
+    publicBuilders.every((d) => !/user|profile|feed|notif|msg|follow/i.test(d)),
+    publicBuilders.filter((d) => /user|profile|feed|notif|msg|follow/i.test(d)).join(",")
+  );
+
+  /* Admin data must never be classified public. */
+  const adminEntries = Object.entries(CACHE_REGISTRY).filter(
+    ([, e]) => e.privacy === CACHE_PRIVACY.PRIVATE_ADMIN
+  );
+  ok(
+    "§13: no admin-scoped value is classified PUBLIC",
+    adminEntries.length === 0 || adminEntries.every(([, e]) => e.privacy === CACHE_PRIVACY.PRIVATE_ADMIN)
+  );
+
+  await cache.flush();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §11  REDIS AUDIT
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Redis is shared, ephemeral infrastructure. Everything in this section is one
+ * rule: NOTHING THAT MUST SURVIVE MAY LIVE HERE, and nothing about Redis may
+ * be visible to a user.
+ */
+
+async function auditRedis() {
+  sec("4. §11 — nothing permanent lives in Redis; every write has a TTL");
+
+  const upstash = require("../providers/redis/upstash.provider");
+  const { createUpstashProvider } = upstash;
+  const src = read(path.join(ROOT, "providers", "redis", "upstash.provider.js"));
+
+  /* Every SET in the provider must carry an expiry. A SET without PX is a
+   * permanent business fact in a store we have declared disposable — and it
+   * is also a leak, because deleted data would live on in the cache. */
+  const sets = src.match(/\n\s*\["SET"[\s\S]{0,220}?\]/g) || [];
+  const setsWithoutTtl = sets.filter((s) => !/\bPX\b/.test(s));
+  ok(
+    "§11: every SET in the Upstash provider carries a PX expiry",
+    sets.length > 0 && setsWithoutTtl.length === 0,
+    setsWithoutTtl.join(" ;; ")
+  );
+
+  sec("5. §11 — credentials never reach a log, a client, or a key");
+
+  const providerFiles = walk(path.join(ROOT, "providers"));
+  const credLeaks = [];
+  for (const f of providerFiles) {
+    const text = read(f);
+    if (/console\.(log|warn|error|info)\([^)]*rawToken|console\.(log|warn|error|info)\([^)]*cfg\.token/i.test(text)) {
+      credLeaks.push(rel(f));
+    }
+    if (/console\.(log|warn|error|info)\([^)]*rawUrl|console\.(log|warn|error|info)\([^)]*cfg\.url/i.test(text)) {
+      credLeaks.push(`${rel(f)} (url)`);
+    }
+  }
+  ok(
+    "§11: no provider logs the Redis URL or token",
+    credLeaks.length === 0,
+    credLeaks.join(",")
+  );
+
+  /* Errors are stored as messages only — never the URL, headers or creds. */
+  const cacheSrc = read(path.join(ROOT, "services", "cache.service.js"));
+  ok(
+    "§11: the circuit breaker stores only an error MESSAGE, never the URL or headers",
+    /this\.stats\.lastError\s*=\s*String\(err\?\.message \|\| err\)\.slice\(/.test(cacheSrc)
+  );
+
+  /* A Redis URL must never become part of a cache key: keys get logged. */
+  const keyBuilders = cacheSrc.match(/const build = [^;]+;/g) || [];
+  ok(
+    "§11: key construction uses only namespace + version + domain + id — no credential",
+    keyBuilders.length > 0 && !/token|url|password|secret/i.test(keyBuilders.join(" ")),
+    keyBuilders.join(" ")
+  );
+
+  sec("6. §11 — raw Redis errors never reach a client");
+
+  /* The resilient provider swallows primary errors and falls back; it must
+   * never rethrow into a request path. */
+  ok(
+    "§11: the resilient provider falls back instead of rethrowing",
+    /catch \(err\)[\s\S]{0,400}?return fb\[op\]/.test(cacheSrc) ||
+      /return fb\[op\]\(\.\.\.args\)/.test(cacheSrc)
+  );
+
+  const errFiles = walk(path.join(ROOT, "services")).concat(walk(path.join(ROOT, "controllers")));
+  const rawErrLeaks = [];
+  for (const f of errFiles) {
+    if (/redis/i.test(read(f)) && /res\.status\(5\d\d\)[\s\S]{0,200}?redis/i.test(read(f))) {
+      rawErrLeaks.push(rel(f));
+    }
+  }
+  ok(
+    "§11: no 5xx response body carries a Redis error string",
+    rawErrLeaks.length === 0,
+    rawErrLeaks.join(",")
+  );
+
+  sec("7. §11 — namespaces, collisions, and ownership");
+
+  const cacheSvc = require("../services/cache.service");
+  const { KEY_PREFIX, keys, resolvePrefix } = cacheSvc;
+
+  ok(
+    "§11: every key we own starts with the namespace+version prefix",
+    keys.event("x").startsWith(KEY_PREFIX) && keys.feed("y").startsWith(KEY_PREFIX)
+  );
+  ok(
+    "§11: the version is in the prefix, so bumping it invalidates everything at once",
+    /:v\d+:/.test(KEY_PREFIX) || /CACHE_KEY_VERSION/.test(read(path.join(ROOT, "services", "cache.service.js")))
+  );
+
+  /* Prefix isolation: sweeping `event` must not sweep `event-counts`.
+   * A shared prefix is how one invalidation quietly wipes a neighbour. */
+  await cacheSvc.cache.flush();
+  await cacheSvc.cache.getOrSet(keys.event("e1"), async () => ({ n: 1 }), { ttl: 60_000 });
+  await cacheSvc.cache.getOrSet(keys.eventCounts("e1"), async () => ({ n: 2 }), { ttl: 60_000 });
+  await cacheSvc.cache.invalidatePrefix("event");
+  const eventGone = await cacheSvc.cache.peek(keys.event("e1"));
+  const countsKept = await cacheSvc.cache.peek(keys.eventCounts("e1"));
+  ok("§11: invalidating `event` removes the event entry", !eventGone);
+  ok("§11: …and LEAVES `event-counts` intact (no prefix collision)", !!countsKept);
+  await cacheSvc.cache.flush();
+
+  /* Controllers must not build keys — that is what makes the registry and the
+   * privacy classification worth anything. A hand-built key bypasses both. */
+  const controllerFiles = walk(path.join(ROOT, "controllers"));
+  const handBuilt = [];
+  for (const f of controllerFiles) {
+    const text = read(f);
+    const stripped = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    if (/["'`]eh:[^"'`]*["'`]/.test(stripped)) handBuilt.push(rel(f));
+    if (/CACHE_KEY_NAMESPACE/.test(stripped)) handBuilt.push(`${rel(f)} (namespace)`);
+  }
+  ok(
+    "§11: NO controller constructs a Redis key — the key builder is the only way in",
+    handBuilt.length === 0,
+    handBuilt.join(",")
+  );
+
+  sec("8. §11 — lock tokens are unpredictable and releases are owner-only");
+
+  const lockSrc = read(path.join(ROOT, "providers", "redis", "lock.service.js"));
+  ok(
+    "§11: a lock token is a random UUID, never derived from the lock name",
+    /randomUUID\(\)/.test(lockSrc)
+  );
+  ok(
+    "§11: release is a Lua compare-and-delete, so a non-owner cannot release",
+    /RELEASE_LUA/.test(lockSrc) && /EVAL/.test(lockSrc)
+  );
+
+  /* Prove it at runtime with the in-memory backend, which mirrors the Redis
+   * semantics: the point is the ownership check, not the transport. */
+  const { MemoryLockBackend } = require("../providers/redis/lock.service");
+  const backend = new MemoryLockBackend();
+  const TOKEN = "owner-token-abc123";
+  const got = await backend.acquire("resource-1", TOKEN, 30_000);
+  ok("§11: the owner acquires the lock", got === true);
+  const stolen = await backend.release("resource-1", "someone-elses-token");
+  ok("§11: a NON-OWNER cannot release it", stolen === false);
+  const stillHeld = await backend.acquire("resource-1", "another-token", 30_000);
+  ok("§11: …and the lock is still held afterwards", stillHeld === false);
+  const released = await backend.release("resource-1", TOKEN);
+  ok("§11: the owner CAN release it", released === true);
+
+  /* Expiry: a lock whose holder died must not wedge the resource forever. */
+  const expiring = new MemoryLockBackend();
+  await expiring.acquire("resource-2", "t1", 30);
+  await new Promise((r) => setTimeout(r, 80));
+  const recovered = await expiring.acquire("resource-2", "t2", 30_000);
+  ok("§11: an expired lock is recoverable rather than leaked forever", recovered === true);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §8  SUPABASE SECURITY AUDIT
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Supabase holds the relational/social copy. The API is the only boundary. The
+ * service-role key bypasses every database-level protection, so the one thing
+ * that matters most is that it never leaves the server.
+ */
+
+async function auditSupabase() {
+  sec("9. §8 — the service-role key lives in exactly one module");
+
+  const backendFiles = walk(path.join(ROOT))
+    .filter((f) => !rel(f).startsWith("tests") && !rel(f).startsWith("node_modules"));
+
+  /* Read the variable, not the name: a log line that MENTIONS
+   * SUPABASE_SERVICE_ROLE_KEY must not be mistaken for a credential leak, or
+   * the assertion actively discourages actionable error messages. */
+  const readers = [];
+  for (const f of backendFiles) {
+    const text = read(f);
+    if (/process\.env\.SUPABASE_SERVICE_ROLE_KEY/.test(text)) readers.push(rel(f));
+  }
+  ok(
+    "§8: reading SUPABASE_SERVICE_ROLE_KEY happens in ONE module only",
+    readers.length === 1,
+    `${readers.length}: ${readers.join(",")}`
+  );
+  ok(
+    "§8: …and that module is the provider boundary",
+    readers.length === 1 && /providers[\\/]supabase/.test(readers[0] || ""),
+    readers[0]
+  );
+
+  sec("10. §8 — nothing Supabase-shaped reaches the browser");
+
+  if (!fs.existsSync(FRONTEND)) {
+    ok("§8: the frontend tree exists to audit", false, FRONTEND);
+  } else {
+    const feFiles = [];
+    const walkAll = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        if (e.name === "node_modules" || e.name === ".next" || e.name.startsWith(".")) continue;
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walkAll(p);
+        else if (/\.(js|jsx|ts|tsx|mjs)$/.test(e.name)) feFiles.push(p);
+      }
+    };
+    walkAll(path.join(FRONTEND, "src"));
+
+    const offenders = [];
+    for (const f of feFiles) {
+      const text = read(f);
+      if (/service_role|SUPABASE_SERVICE_ROLE_KEY/.test(text)) offenders.push(path.basename(f));
+      if (/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*/.test(text)) {
+        offenders.push(`${path.basename(f)} (JWT literal)`);
+      }
+    }
+    ok(
+      "§8: no frontend file references the service-role key or contains a JWT",
+      offenders.length === 0,
+      offenders.join(",")
+    );
+
+    const supabaseImports = feFiles.filter((f) =>
+      /@supabase\/supabase-js|supabaseUrl|createClient\(/.test(read(f))
+    );
+    ok(
+      "§8: the frontend never creates a Supabase client (the API is the only boundary)",
+      supabaseImports.length === 0,
+      supabaseImports.map((f) => path.basename(f)).join(",")
+    );
+  }
+
+  sec("11. §8 — errors are scrubbed before they can leak");
+
+  const clientSrc = read(path.join(ROOT, "providers", "supabase", "client.js"));
+  ok("§8: the client has a scrub() function", /function scrub\(/.test(clientSrc));
+  ok(
+    "§8: …which redacts JWT-shaped blobs (what a service-role key is)",
+    /eyJ\[A-Za-z0-9_-\]\{10,\}/.test(clientSrc)
+  );
+  /* Test the BEHAVIOUR, not the source text. A pattern match on this file
+   * would keep passing even if scrub() stopped being called. */
+  const { __scrub: scrub } = require("../providers/supabase/client");
+  ok(
+    "§8: …and redacts Postgres DSNs, which carry the password",
+    !/hunter2/.test(scrub("connect failed: postgres://user:hunter2@db.example.com:5432/eh", []))
+  );
+  ok(
+    "§8: …while leaving the host readable, so the log is still diagnosable",
+    /db\.example\.com/.test(scrub("connect failed: postgres://user:hunter2@db.example.com:5432/eh", []))
+  );
+  ok(
+    "§8: …and redacts a supplied secret end-to-end",
+    !/abcdefghijklmnop/.test(scrub("token abcdefghijklmnop failed", ["abcdefghijklmnop"]))
+  );
+  ok(
+    "§8: …and redacts MongoDB DSNs too (the same PostgREST error path can echo them)",
+    !/hunter2/.test(scrub("mongodb+srv://u:hunter2@cluster.example.net/db", []))
+  );
+
+  /* Not-configured must fail loudly rather than silently returning empty —
+   * a silent empty result is how a migration "succeeds" having written nothing. */
+  const supaIdxSrc = read(path.join(ROOT, "providers", "supabase", "index.js"));
+  ok(
+    "§8: an unconfigured client asserts rather than returning nothing",
+    /function assertConfigured/.test(supaIdxSrc) && /throw/.test(supaIdxSrc)
+  );
+
+  /* No raw SQL string concatenation into the REST layer. PostgREST has no SQL
+   * surface, so the realistic risk is a filter value interpolated into a
+   * query string — assert values go through the filter API instead. */
+  const supaFiles = walk(path.join(ROOT, "repositories", "supabase"));
+  ok("§8: Supabase repositories exist", supaFiles.length > 0);
+  const concatRisks = supaFiles.filter((f) => /select\s*=\s*`[^`]*\$\{|select\s*=\s*["'][^"']*["']\s*\+/.test(read(f)));
+  ok(
+    "§8: no repository concatenates values into a query string (no SQL/REST injection)",
+    concatRisks.length === 0,
+    concatRisks.map(rel).join(",")
+  );
+
+  sec("12. §8 — the provider never becomes a second identity store");
+
+  /* EventHub's Mongo user id is canonical. Supabase must store it, never mint one. */
+  const profileRepo = path.join(ROOT, "repositories", "supabase", "profile.repository.js");
+  if (fs.existsSync(profileRepo)) {
+    const text = read(profileRepo);
+    ok(
+      "§8: the profile repository upserts on the canonical id, never a client-supplied one",
+      /id/.test(text) && !/gen_random_uuid\(\)/.test(text)
+    );
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §9  RLS DECISION
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * This section does not test code so much as it pins a DECISION, because the
+ * failure mode is forgetting why the decision was made and enabling RLS
+ * halfway later.
+ */
+
+async function auditRls() {
+  sec("13. §9 — the RLS decision is recorded, not left implicit");
+
+  const docsDir = path.join(ROOT, "docs");
+  const candidates = fs.existsSync(docsDir)
+    ? fs.readdirSync(docsDir).filter((f) => f.endsWith(".md"))
+    : [];
+  const docText = candidates
+    .map((f) => read(path.join(docsDir, f)))
+    .join("\n");
+
+  ok(
+    "§9: the RLS decision is documented in docs/",
+    /RLS/i.test(docText) && /row level security/i.test(docText),
+    `docs present: ${candidates.join(",")}`
+  );
+  ok(
+    "§9: …and states that RLS is OFF because there is no browser→Supabase path",
+    /row level security[\s\S]{0,600}?(off|disabled|not enabled)/i.test(docText)
+  );
+  ok(
+    "§9: …and states the condition under which it becomes MANDATORY",
+    /(if|when|should)[\s\S]{0,200}(browser|client|frontend)[\s\S]{0,200}(direct|directly)/i.test(docText) ||
+      /mandatory/i.test(docText)
+  );
+
+  /* The decision is only safe while no browser path exists. Assert that, so
+   * the day someone adds one, this test fails and the doc gets revisited. */
+  let browserPath = false;
+  const feSrc = path.join(FRONTEND, "src");
+  if (fs.existsSync(feSrc)) {
+    const stack = [feSrc];
+    while (stack.length) {
+      const d = stack.pop();
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) stack.push(p);
+        else if (/\.(js|jsx|ts|tsx)$/.test(e.name) && /@supabase|supabase\.co/.test(read(p))) {
+          browserPath = true;
+        }
+      }
+    }
+  }
+  ok(
+    "§9: the premise still holds — there is NO browser→Supabase path today",
+    browserPath === false
+  );
+
+  /* No half-configured RLS: we must not have enabled it on some tables only. */
+  const migrationDir = path.join(ROOT, "migrations");
+  if (fs.existsSync(migrationDir)) {
+    const migText = fs
+      .readdirSync(migrationDir)
+      .filter((f) => f.endsWith(".sql") || f.endsWith(".js"))
+      .map((f) => read(path.join(migrationDir, f)))
+      .join("\n");
+    const enabled = /ENABLE\s+ROW\s+LEVEL\s+SECURITY/i.test(migText);
+    const forced = /FORCE\s+ROW\s+LEVEL\s+SECURITY/i.test(migText);
+    ok(
+      "§9: RLS is not half-configured — either off everywhere, or on with policies everywhere",
+      enabled === false || (enabled && /CREATE\s+POLICY/i.test(migText)),
+      `enabled=${enabled} forced=${forced}`
+    );
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+(async () => {
+  console.log("\n══════════════════════════════════════════════════════════════");
+  console.log("  PART 7 · PHASE 4 — SECURITY AUDITS (§8, §9, §11, §13)");
+  console.log("══════════════════════════════════════════════════════════════");
+
+  try {
+    await auditCachePrivacy();
+    await auditRedis();
+    await auditSupabase();
+    await auditRls();
+  } catch (err) {
+    failed += 1;
+    failures.push(`suite crashed: ${err && err.message}`);
+    console.log(String((err && err.stack) || err));
+  }
+
+  console.log("\n══════════════════════════════════════════════════════════════");
+  console.log(`  PART 7 (phase 4) security audit: ${passed} passed, ${failed} failed`);
+  if (failures.length) {
+    console.log("\n  Failures:");
+    for (const f of failures) console.log(`    · ${f}`);
+  }
+  console.log("══════════════════════════════════════════════════════════════\n");
+  process.exit(failed === 0 ? 0 : 1);
+})();

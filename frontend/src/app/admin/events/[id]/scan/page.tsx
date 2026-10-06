@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { BrowserQRCodeReader } from "@zxing/browser";
 import { api } from "@/utils/api";
 import { PageLoader, ErrorState } from "@/components/states";
 import { Button } from "@/components/ui/button";
@@ -95,6 +94,12 @@ export default function EventScanPage() {
   const startCamera = async () => {
     setTicket(null);
     try {
+      /* §18 — the QR decoder is ~120 kB and is only needed the moment the
+       * organizer actually turns the camera on. Statically imported, it was
+       * downloaded on every visit to this screen, including visits that only
+       * used manual token entry. Deferring it to first camera start keeps it
+       * out of the initial route payload entirely. */
+      const { BrowserQRCodeReader } = await import("@zxing/browser");
       const reader = new BrowserQRCodeReader();
       setScanning(true);
       const controls = await reader.decodeFromVideoDevice(undefined, videoRef.current!, (result) => {

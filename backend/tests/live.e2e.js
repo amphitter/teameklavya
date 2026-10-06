@@ -131,7 +131,9 @@ const mint = (user) => jwt.sign({ id: String(user._id), role: "user", purpose: "
   console.log("server up");
 
   /* ── fixtures ── */
-  const organizer = await User.create({ firstName: "Org", lastName: "Runner", email: `org${Date.now()}@test.com`, passwordHash: "x", emailVerified: true });
+  // POST /events is admin-gated, so the organizer needs the admin role —
+  // every other e2e suite (mgmt, quiz, social) grants it for the same reason.
+  const organizer = await User.create({ firstName: "Org", lastName: "Runner", email: `org${Date.now()}@test.com`, passwordHash: "x", role: "admin", emailVerified: true });
   const p1u = await User.create({ firstName: "Anu", lastName: "Rao", email: `p1${Date.now()}@test.com`, passwordHash: "x", emailVerified: true });
   const p2u = await User.create({ firstName: "Dev", lastName: "Mehta", email: `p2${Date.now()}@test.com`, passwordHash: "x", emailVerified: true });
   const p3u = await User.create({ firstName: "Leela", lastName: "Nair", email: `p3${Date.now()}@test.com`, passwordHash: "x", emailVerified: true });
@@ -175,7 +177,13 @@ const mint = (user) => jwt.sign({ id: String(user._id), role: "user", purpose: "
   await Promise.all([org, p1, p2].map((r) => r.waitFor("server:time", { timeout: 4000 }).catch(() => {})));
   console.log("sockets connected");
 
-  /* 1. two participants join */
+  /* 1. organizer + two participants join.
+   * The organizer MUST emit event:join too — the server only calls
+   * socket.join(roomKey(eventId)) inside the join handler, so an organizer
+   * socket that skips it sits outside the room and silently receives none of
+   * the room broadcasts this suite asserts on. */
+  const j0 = await attempt(org, "event:join", { eventId: ev._id });
+  check("organizer joins the room", j0.ack?.ok && j0.ack.role === "organizer");
   const j1 = await attempt(p1, "event:join", { eventId: ev._id });
   const j2 = await attempt(p2, "event:join", { eventId: ev._id });
   check("participant 1 joins", j1.ack?.ok && j1.ack.role === "participant");
@@ -192,7 +200,18 @@ const mint = (user) => jwt.sign({ id: String(user._id), role: "user", purpose: "
   await wait(1300);
   const jbogus = await attempt(p1, "event:join", { eventId: "000000000000000000000000" });
   check("unknown event → VALIDATION_FAILED", errCode(jbogus) === "VALIDATION_FAILED", JSON.stringify(jbogus));
-  const endedEv = await Event.create({ title: "Already over", slug: `over-${Date.now()}`, description: "x", eventType: "offline", createdBy: organizer._id, liveState: "COMPLETED" });
+  // startDate / endDate / venue are required by the Event schema.
+  const endedEv = await Event.create({
+    title: "Already over",
+    slug: `over-${Date.now()}`,
+    description: "x",
+    eventType: "offline",
+    venue: "Old Hall",
+    startDate: new Date(Date.now() - 7200e3),
+    endDate: new Date(Date.now() - 3600e3),
+    createdBy: organizer._id,
+    liveState: "COMPLETED",
+  });
   await wait(1300);
   const jEnded = await attempt(p1, "event:join", { eventId: endedEv._id });
   check("ended event → EVENT_ENDED", errCode(jEnded) === "EVENT_ENDED", JSON.stringify(jEnded));
@@ -383,6 +402,7 @@ const mint = (user) => jwt.sign({ id: String(user._id), role: "user", purpose: "
   check("checkpoint end hides the board", true);
 
   /* 22. end event → final results, snapshot, achievements, certificate, share */
+  await wait(300); // organizer commands are cooled down 250ms apart
   const end = await attempt(org, "event:end", { eventId: ev._id });
   check("event:end ok with 3 participants", end.ack?.ok === true && end.ack.participants === 3, JSON.stringify(end.ack));
   const completed = await p1.waitFor("event:completed", { timeout: 8000 });

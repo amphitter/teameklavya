@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CalendarSearch, Sparkles, UserPlus, Users } from "lucide-react";
@@ -18,6 +18,7 @@ import { RightRail } from "@/components/feed/right-rail";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import type { FeedPostData } from "@/components/feed/types";
 import { cn } from "@/lib/utils";
+import { useInfiniteQuery, useQuery } from "@/lib/query";
 
 type Tab = "for-you" | "following";
 const PAGE_SIZE = 10;
@@ -46,14 +47,17 @@ export function FeedView() {
   const { user, ready } = useSessionUser();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("for-you");
-  const [posts, setPosts] = useState<FeedPostData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
   const [homeQuery, setHomeQuery] = useState("");
-  // Cursor-based pagination (backend returns nextCursor after each page)
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+
+  /* Local overlay: a post the user just composed, and posts they deleted.
+   * Kept separate from the server list so the hook stays the source of truth
+   * and a refetch can never resurrect a deleted post or drop a new one. */
+  const [created, setCreated] = useState<FeedPostData[]>([]);
+  const [removed, setRemoved] = useState<string[]>([]);
+  useEffect(() => {
+    setCreated([]);
+    setRemoved([]);
+  }, [tab]);
 
   // My (registered) events — ongoing ones become live heroes, next ones feed the rail
   const [liveEvents, setLiveEvents] = useState<LiveEventData[]>([]);
@@ -78,17 +82,24 @@ export function FeedView() {
 
   // Load the signed-in user's registered events: ongoing → live heroes,
   // upcoming → right rail; detect a live quiz for "Enter Live Hub" + leaderboard.
+  //
+  // §15 — cached and deduped. Navigating to a post and back used to refetch
+  // this plus the counts batch plus a quiz lookup per ongoing event; now the
+  // whole tree renders instantly from cache and revalidates in the background.
+  const { data: registered } = useQuery<{ events?: any[] }>(
+    ["my-registered-events"],
+    ready && user?._id ? "/registration/user/events" : null,
+    { staleTime: 60_000 }
+  );
+
   useEffect(() => {
-    if (!ready || !user?._id) return;
+    if (!registered) return;
     let cancelled = false;
 
-    api
-      .get("/registration/user/events")
-      .then(async (res) => {
-        if (cancelled) return;
+    void (async () => {
         // Dedupe (a user can register through multiple flows) and keep real docs only
         const seen = new Set<string>();
-        const events: any[] = (res.data?.events || []).filter(
+        const events: any[] = (registered.events || []).filter(
           (e: any) => e && e._id && !seen.has(e._id) && seen.add(e._id)
         );
         const now = Date.now();
@@ -166,61 +177,46 @@ export function FeedView() {
             })
             .catch(() => {});
         }
-      })
-      .catch(() => {
-        // Registrations are a nice-to-have here; the feed itself still loads
-      });
+    })().catch(() => {
+      // Registrations are a nice-to-have here; the feed itself still loads
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [ready, user?._id]);
+  }, [registered]);
 
-  const load = useCallback(
-    (which: Tab, append = false) => {
-      const page = append ? Math.ceil(posts.length / PAGE_SIZE) + 1 : 1;
-      if (!append) setLoading(true);
-      else setLoadingMore(true);
-      setError(false);
-      api
-        .get("/posts/feed", {
-          params: {
-            tab: which,
-            page,
-            limit: PAGE_SIZE,
-            // stable cursor from the previous page (falls back to page offset)
-            ...(append && nextCursor ? { cursor: nextCursor } : {}),
-          },
-        })
-        .then((res) => {
-          const list: FeedPostData[] = res.data?.posts || [];
-          setPosts((p) => (append ? [...p, ...list] : list));
-          setHasMore(Boolean(res.data?.hasMore));
-          setNextCursor(res.data?.nextCursor || null);
-        })
-        .catch(() => {
-          if (!append) setError(true);
-        })
-        .finally(() => {
-          setLoading(false);
-          setLoadingMore(false);
-        });
+  /* §7 cursor pagination + §39 request cancellation + §15 dedup.
+   * Switching tabs changes the query key, which restarts pagination — the
+   * manual `nextCursor` reset this replaced is now structural. */
+  const feed = useInfiniteQuery<FeedPostData>(
+    ["feed", tab],
+    (cursor) => {
+      const p = new URLSearchParams({ tab, limit: String(PAGE_SIZE) });
+      if (cursor) p.set("cursor", cursor);
+      return `/posts/feed?${p.toString()}`;
     },
-    [posts.length, nextCursor]
+    {
+      // The feed speaks `{ posts, hasMore, nextCursor }`, not `{ items }`.
+      mapPage: (raw) => ({
+        items: (raw?.posts ?? []) as FeedPostData[],
+        nextCursor: raw?.nextCursor ?? null,
+        hasMore: Boolean(raw?.hasMore),
+      }),
+    }
   );
 
-  useEffect(() => {
-    setNextCursor(null); // fresh cursor per tab
-    load(tab);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  const posts = useMemo(() => {
+    const gone = new Set(removed);
+    return [...created, ...feed.items.filter((p) => !gone.has(p._id))];
+  }, [created, removed, feed.items]);
 
   const onCreated = (post: FeedPostData) => {
-    setPosts((p) => [post, ...p]);
+    setCreated((c) => [post, ...c]);
     window.scrollTo({ top: topOfFeed.current, behavior: "smooth" });
   };
 
-  const onDeleted = (id: string) => setPosts((p) => p.filter((x) => x._id !== id));
+  const onDeleted = (id: string) => setRemoved((r) => [...r, id]);
 
   // Real search — routes to event discovery with the query
   const submitHomeSearch = (e: React.FormEvent) => {
@@ -330,16 +326,16 @@ export function FeedView() {
           <CreatePost onCreated={onCreated} composerRef={composerRef} />
 
           {/* Feed */}
-          {loading ? (
+          {feed.isLoading ? (
             <div className="space-y-5">
               <PostSkeleton />
               <PostSkeleton />
             </div>
-          ) : error ? (
+          ) : feed.error ? (
             <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-6 py-12 text-center">
               <p className="text-base font-semibold text-foreground">Something went wrong</p>
               <p className="mt-1 text-sm text-muted-foreground">The feed couldn&apos;t load. Give it another try.</p>
-              <Button size="sm" variant="outline" className="mt-4" onClick={() => load(tab)}>
+              <Button size="sm" variant="outline" className="mt-4" onClick={() => feed.refetch()}>
                 Retry
               </Button>
             </div>
@@ -372,14 +368,14 @@ export function FeedView() {
               {posts.map((p) => (
                 <FeedPost key={p._id} post={p} onDeleted={onDeleted} />
               ))}
-              {hasMore && (
+              {feed.hasMore && (
                 <div className="pt-1 text-center">
-                  <Button variant="outline" onClick={() => load(tab, true)} disabled={loadingMore}>
-                    {loadingMore ? "Loading…" : "Load more posts"}
+                  <Button variant="outline" onClick={() => feed.fetchNextPage()} disabled={feed.isFetchingMore}>
+                    {feed.isFetchingMore ? "Loading…" : "Load more posts"}
                   </Button>
                 </div>
               )}
-              {!hasMore && (
+              {!feed.hasMore && (
                 <p className="flex items-center justify-center gap-1.5 pt-2 pb-4 text-xs text-muted-foreground">
                   <Users className="h-3.5 w-3.5" /> You&apos;re all caught up
                 </p>

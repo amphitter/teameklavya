@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { EventCard, type EventCardData } from "@/components/event-card";
 import { EmptyState, ErrorState, EventCardSkeleton, PageLoader } from "@/components/states";
 import { fetchEventsWithCounts } from "@/lib/events";
-import { api } from "@/utils/api";
+import { useQuery } from "@/lib/query";
 import { cn } from "@/lib/utils";
 
 const EVENT_TYPES = [
@@ -67,13 +67,17 @@ function DiscoverContent() {
     load();
   }, [load]);
 
-  // Real categories from the backend (no hard-coded lists)
+  // Real categories from the backend (no hard-coded lists).
+  // §15 — this barely ever changes, so it is cached for 5 minutes and shared
+  // with any other surface that asks for the same key.
+  const { data: meta } = useQuery<{ categories?: string[] }>(
+    ["event-categories"],
+    "/events/meta/categories",
+    { staleTime: 5 * 60_000 }
+  );
   useEffect(() => {
-    api
-      .get("/events/meta/categories")
-      .then((r) => setCategories(r.data?.categories ?? []))
-      .catch(() => {});
-  }, []);
+    if (meta?.categories) setCategories(meta.categories);
+  }, [meta]);
 
   // Reset page when filters change
   useEffect(() => {

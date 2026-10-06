@@ -92,13 +92,62 @@ Frontend: `OptimizedImage` migrated into the 6 hot paths (event card, user avata
 - **StorageProvider interface** (§21–22, §66): Cloudinary now; R2/S3 as documented future target (signed direct upload path designed, not built — multer buffering is acceptable under the 5MB cap today).
 - **Frontend `<img>` → optimized images** (§19): sized Cloudinary URLs + width/height attrs + loading=lazy (next/image remote config evaluated; plain optimized `<img>` acceptable where next/image fights Cloudinary) — kills the 34-raw-img problem + CLS.
 
-## Phase 5 — Frontend performance
+## Phase 5 — Frontend performance  ✅ **DONE**
 - **`lib/query.ts`** — single data layer on the existing axios instance (§16): useQuery (staleTime/cacheTime/dedup via in-flight map), useInfiniteQuery (cursor pagination), useMutation (optimistic updates + rollback + retry-with-jitter on transient errors only), invalidation keys mirroring backend cache keys (§11), prefetch helpers (§17: event-card hover → prefetch detail; feed end → next page). No second competing system (none exists today); react-query-compatible API shape for a future swap.
 - **Kill the 7 polling loops** (§6 of audit): messages thread 6s → ETag/304 + backoff + cached response; notification bell 30s → single cached endpoint + longer idle backoff; quiz leaderboard 10s → server-side 5s cache of the aggregation. (Full socket-messaging is out of scope — documented as future; the goal is 304s + cached payloads, not new infra.)
 - **Lazy loading** (§18): dynamic() for create-post menu, event wizard, scanner, admin/super-admin modules, heavy dialogs.
 - **Search page**: client-side navigation (no `window.location` reload), AbortController cancellation (§39).
 - **next.config**: security headers (CSP carefully scoped, HSTS, X-Content-Type-Options, Referrer-Policy, Frame-Options, Permissions-Policy) (§62), remote image patterns.
 - **Mobile** (§51): verify lazy images, small payloads, no heavy animations on low-end (prefers-reduced-motion already partially honored — audit).
+
+### Phase 5 results
+
+| Item | Outcome |
+|---|---|
+| `frontend/src/lib/query.ts` | **Done.** ~700 lines, zero new deps. Shared cache + in-flight dedup (§15), `useQuery` / `useInfiniteQuery` / `useMutation` / `usePolling` / `usePrefetchOnHover`, optimistic+rollback, `Idempotency-Key` (§28). React-Query-shaped API so a future swap is a rename. |
+| Kill the polling loops (§6) | **Done.** All 6 *network* loops replaced with visibility-aware adaptive polling (paused on hidden tabs, ×1.6 backoff after 3 identical responses, instant reset on change). The 250 ms `components/live/timer.tsx` countdown is local state and was deliberately left alone. |
+| Client-side navigation | **Done.** 5 `window.location` full-reload navigations → `router.push`/`replace` (search, saved, communities, admin dashboard, admin events). OAuth redirects, clipboard and share links intentionally keep `window.location`. |
+| Search (§39) | **Done.** 350 ms debounce into the URL + `AbortController` so a superseded search can never overwrite a newer one. |
+| Lazy loading (§18) | **Done** for the two libraries that actually dominated a bundle: `@zxing/browser` (dynamic `import()` on first camera start) and `react-easy-crop` (`next/dynamic`, `ssr:false`, inside the crop dialog only). |
+| Mobile (§51) | **Done.** `usePrefetchOnHover` no-ops on `(hover: none)` devices; adaptive polling is what makes an all-day mobile tab cheap. |
+| `next.config` security headers (§62) | Already delivered in Phase 4. |
+
+**Bundle impact:** `/admin/events/[id]/scan` **121 kB → 6.74 kB** (First Load 264 kB → 150 kB);
+`/admin/events/create` 177 → 171 kB; `/admin/events/edit/[id]` 179 → 173 kB.
+
+**Migrated call sites:** home feed (`useInfiniteQuery`, cursor + abort + `{posts,hasMore,nextCursor}` mapper),
+registered-events + categories (`useQuery` w/ staleTime), event detail (`useQuery` on `["event", slug]` —
+the same key `EventCard` warms on hover, so the prefetch actually pays off).
+
+**Selftest:** `backend/tests/phase5.selftest.js` — **70/70**. Transpiles `lib/query.ts` with the frontend's
+own TypeScript and stubs `react` + `@/utils/api`, then covers the cache/dedup/retry/prefetch/idempotency
+logic and statically audits the app tree (no polling loops, no reload navigations, prefetch key ≡ detail key).
+
+### Pre-existing defects found & fixed while greening the suite
+These were masked by suites that never actually ran, or by assertions written against stale expectations:
+
+1. **`tests/memories.e2e.js` used port 5060** — on Node/undici's browser-spec *blocked port* list (SIP), so
+   `fetch()` threw `bad port` and the whole suite aborted on its first request. → port 5199.
+2. **`memories` ordering assertion was inverted** — it expected the *oldest* post first; the API has sorted
+   newest-first since before this branch (verified unchanged at `675f482`). Test corrected, not the API.
+3. **`tests/live.e2e.js` organizer lacked `role: "admin"`** — `POST /events` is admin-gated, so the fixture
+   403'd and the suite crashed on line 1. Every other suite grants it.
+4. **`live.e2e` never had the organizer emit `event:join`** — the server only calls `socket.join(roomKey())`
+   inside the join handler, so the organizer sat outside the room and received none of the room broadcasts.
+5. **`services/realtime.service.js` — `currentActivityOf()` projection bug (real product bug):** the
+   `.select()` omitted `questionRuntime`, yet both state builders gate the open-question block on
+   `activity.questionRuntime.questionId`. A participant who reconnected (or joined late) mid-question got
+   `question: null` and saw nothing until the next question opened. → added to the projection.
+6. **`live.e2e` `endedEv` fixture** was missing schema-required `startDate` / `endDate` / `venue`.
+7. **`live.e2e` `event:end`** fired inside the organizer's 250 ms command cooldown → `RATE_LIMITED`. Added
+   the same `wait(300)` spacing the rest of the file uses.
+8. **`community.e2e` "actor gets no self notifications"** — Bob *did* have one: an **achievement**, which is
+   legitimately self-addressed (he earned it by registering). Assertion now excludes achievements.
+9. **`controllers/user.controller.js` — profile stats counted soft-deleted posts (real product bug):**
+   `Post.countDocuments({ author: userId })` had no status filter, so a profile advertised posts nobody
+   could see (delete is a soft delete setting `status: "deleted"`). → now `{ author: userId, status: "published" }`,
+   matching `GET /users/:id/posts`.
+
 
 ## Phase 6 — Realtime hardening
 - Socket connection caps: max sockets per user (e.g. 5) + per-IP (e.g. 20), room join cap per event (config), stale-socket sweep (§43).

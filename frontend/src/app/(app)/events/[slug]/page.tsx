@@ -48,6 +48,7 @@ import { ReportDialog } from "@/components/moderation/report-dialog";
 import { Memories } from "@/components/events/memories";
 import { ErrorState, PageLoader } from "@/components/states";
 import { cn } from "@/lib/utils";
+import { useQuery } from "@/lib/query";
 
 // ─── Types ─────────────────────────────────────────────────
 interface Speaker {
@@ -141,7 +142,6 @@ export default function EventDetailPage() {
   const router = useRouter();
 
   const [event, setEvent] = useState<EventData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -165,30 +165,33 @@ export default function EventDetailPage() {
     setIsAuthenticated(Boolean(token));
   }, []);
 
-  // Fetch event
+  /* Fetch event — §15 dedup + §17 prefetch payoff.
+   * This reads the SAME cache key that EventCard warms on hover, so a card
+   * hover turns the next navigation into an instant paint instead of a
+   * spinner. The 60s staleTime keeps back-and-forth navigation free. */
+  const {
+    data: eventRes,
+    error: eventErr,
+    isLoading: eventLoading,
+  } = useQuery<{ success?: boolean; event?: any; message?: string }>(
+    ["event", slug],
+    slug ? `/events/slug/${slug}` : null,
+    { staleTime: 60_000 }
+  );
+
   useEffect(() => {
-    if (!slug) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        setLoading(true);
-        const res = await api.get(`/events/slug/${slug}`);
-        if (cancelled) return;
-        if (res.data?.success) {
-          setEvent(res.data.event);
-        } else {
-          setError(res.data?.message || "Event not found");
-        }
-      } catch (err: any) {
-        if (!cancelled) setError(err.response?.data?.message || "Failed to load event");
-      } finally {
-        if (!cancelled) setLoading(false);
+    if (eventRes) {
+      if (eventRes.success && eventRes.event) {
+        setEvent(eventRes.event);
+        setError(null);
+      } else {
+        setError(eventRes.message || "Event not found");
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [slug]);
+    } else if (eventErr) {
+      // §61 — surface the server's own message, never a stack or provider error
+      setError((eventErr as any)?.response?.data?.message || "Failed to load event");
+    }
+  }, [eventRes, eventErr]);
 
   // Registration count (public, counts only)
   useEffect(() => {
@@ -355,7 +358,7 @@ export default function EventDetailPage() {
   };
 
   // ─── States ─────────────────────────────────────────────
-  if (loading) return <PageLoader label="Loading event…" />;
+  if (eventLoading) return <PageLoader label="Loading event…" />;
 
   if (error || !event) {
     return (

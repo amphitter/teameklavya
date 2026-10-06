@@ -85,9 +85,13 @@ const check = (name, ok, extra = "") => {
   check("actor populated", notifs.every((n) => n.actor?.firstName === "Bob"));
   check("event ref populated", notifs.find((n) => n.type === "event_registration")?.event?.title === "Phase F Event");
 
-  // Bob should have NO notifications (self-notify skipped; he's the actor)
+  // Bob's notifications:
+  // Bob should have NO notifications from his own actions (self-notify is
+  // skipped; he is the actor). Achievements are excluded on purpose — they are
+  // legitimately self-addressed, and registering for his first event earned one.
   r = await j("/notifications", { token: b });
-  check("actor gets no self notifications", (r.data.notifications || []).length === 0);
+  const bobNotifs = (r.data.notifications || []).filter((n) => n.type !== "achievement");
+  check("actor gets no self notifications", bobNotifs.length === 0, JSON.stringify(bobNotifs.map((n) => n.type)));
 
   // Mark one read
   r = await j(`/notifications/${notifs[0]._id}/read`, { method: "POST", token: a });

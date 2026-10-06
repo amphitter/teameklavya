@@ -302,7 +302,10 @@ exports.getPublicProfile = async (req, res) => {
     const objectId =
       mongoose.Types.ObjectId.isValid(String(userId)) ? new mongoose.Types.ObjectId(String(userId)) : userId;
     const [posts, responses, attendedAgg, checkIns, eventsCreated] = await Promise.all([
-      Post.countDocuments({ author: userId }),
+      // Soft-deleted posts (status: "deleted") must not inflate the count —
+      // this has to agree with GET /users/:id/posts, which only returns
+      // published posts. Otherwise a profile advertises posts nobody can see.
+      Post.countDocuments({ author: userId, status: "published" }),
       RegistrationResponse.countDocuments({ userId }),
       RegistrationResponse.aggregate([
         { $match: { userId: objectId } },

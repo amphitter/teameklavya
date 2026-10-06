@@ -3,7 +3,9 @@
  * Run: node tests/memories.e2e.js   (expects 12/12)
  */
 process.env.NODE_ENV = "test";
-process.env.PORT = 5060;
+// 5060 is on Node/undici's browser-spec BLOCKED PORT list (SIP), so fetch()
+// rejects it outright with "bad port". Any ordinary port works.
+process.env.PORT = 5199;
 process.env.FRONTEND_URL = "http://localhost:3100";
 process.env.JWT_SECRET = "test-secret";
 process.env.GOOGLE_CLIENT_ID = "x"; process.env.GOOGLE_CLIENT_SECRET = "y"; process.env.GOOGLE_CALLBACK_URL = "http://localhost/callback";
@@ -67,9 +69,11 @@ const check = (name, ok, extra = "") => {
   /* ═══ event posts endpoint ═══ */
   r = await j(`/posts/event/${event._id}`);
   check("event posts listed (no auth needed)", r.status === 200 && r.data.posts.length === 2 && r.data.hasMore === false);
-  check("photo memory first (newest)", r.data.posts[0].content.includes("night"));
+  // Newest first: Bob's memory is created after Alice's, so it leads.
+  check("newest memory first", r.data.posts[0].content.includes("closing set"));
   check("event populated on posts", r.data.posts[0].event?.title === "Memory Fest");
-  check("author populated", r.data.posts[0].author?.firstName === "Alice");
+  check("author populated", r.data.posts[0].author?.firstName === "Bob");
+  check("photo memory keeps both images", r.data.posts[1]?.images?.length === 2);
   check("counts attached", r.data.posts[0].likeCount === 0 && r.data.posts[0].commentCount === 0);
   check("viewer flags present", r.data.posts[0].likedByMe === false && r.data.posts[0].savedByMe === false);
   r = await j(`/posts/event/${otherEvent._id}`);

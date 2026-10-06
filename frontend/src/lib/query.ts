@@ -548,16 +548,23 @@ export interface UseInfiniteQueryResult<T> {
 }
 
 /**
- * Cursor pagination over the backend's `{ items, nextCursor, hasMore }`
- * envelope (§7). Pages accumulate in component state; the cursor is the only
- * thing carried between requests.
+ * Cursor pagination over a cursor-paged endpoint (§7). Pages accumulate in
+ * component state; the cursor is the only thing carried between requests.
+ *
+ * `mapPage` adapts endpoints that don't speak the `{ items, nextCursor }`
+ * envelope natively — e.g. `/posts/feed` returns `{ posts, hasMore, nextCursor }`.
  */
 export function useInfiniteQuery<T>(
   key: QueryKey,
   buildUrl: (cursor: string | null) => string,
-  options: { enabled?: boolean; pageSize?: number } = {}
+  options: {
+    enabled?: boolean;
+    pageSize?: number;
+    /** Shape the raw response into an `InfinitePage<T>`. */
+    mapPage?: (raw: any) => InfinitePage<T>;
+  } = {}
 ): UseInfiniteQueryResult<T> {
-  const { enabled = true } = options;
+  const { enabled = true, mapPage } = options;
   const [pages, setPages] = useState<InfinitePage<T>[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -566,6 +573,9 @@ export function useInfiniteQuery<T>(
   const [reloadToken, setReloadToken] = useState(0);
 
   const abortRef = useRef<AbortController | null>(null);
+  // Mirrors `pages` so `load` can merge without depending on it — depending on
+  // `pages` would recreate the loader after every fetch and re-run the effect.
+  const pagesRef = useRef<InfinitePage<T>[]>([]);
   const cacheKey = keyToString(key);
 
   const load = useCallback(
@@ -580,14 +590,17 @@ export function useInfiniteQuery<T>(
       else setIsFetchingMore(true);
 
       try {
-        const data = await fetchWithRetry<InfinitePage<T>>(buildUrl(nextCursor), {
+        const raw = await fetchWithRetry<any>(buildUrl(nextCursor), {
           signal: controller.signal,
         });
-        const items = data.items ?? [];
-        setPages((prev) => (replace ? [{ items, nextCursor: data.nextCursor }] : [...prev, { items, nextCursor: data.nextCursor }]));
-        setCursor(data.nextCursor ?? null);
+        const page: InfinitePage<T> = mapPage ? mapPage(raw) : (raw as InfinitePage<T>);
+        const merged = replace ? [page] : [...pagesRef.current, page];
+        pagesRef.current = merged;
+
+        setPages(merged);
+        setCursor(page.nextCursor ?? null);
         setError(undefined);
-        queryCache.setData(cacheKey, { pages, ts: Date.now() });
+        queryCache.setData(cacheKey, { pages: merged, ts: Date.now() });
       } catch (err) {
         if (!isCancelled(err)) setError(err);
       } finally {
@@ -607,7 +620,7 @@ export function useInfiniteQuery<T>(
 
   const items = pages.flatMap((p) => p.items ?? []);
   const lastPage = pages[pages.length - 1];
-  const hasMore = lastPage?.hasMore ?? Boolean(cursor);
+  const hasMore = lastPage?.hasMore ?? Boolean(lastPage?.nextCursor);
 
   return {
     items,

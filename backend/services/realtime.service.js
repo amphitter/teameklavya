@@ -64,8 +64,13 @@ function activityRoomKey(eventId, activityId) {
 
 /** Current (LIVE or PAUSED) activity of an event — DB is the source of truth. */
 async function currentActivityOf(eventId) {
+  // `questionRuntime` MUST be in the projection: both state builders
+  // (stateForParticipant and stateForOrganizer) gate the open-question block
+  // on `activity.questionRuntime.questionId`. Without it the field came back
+  // undefined, so a participant who reconnected (or joined late) mid-question
+  // received `question: null` and saw no question until the next one opened.
   return Activity.findOne({ event: eventId, state: { $in: ["LIVE", "PAUSED"] } })
-    .select("type title state order startedAt")
+    .select("type title state order startedAt questionRuntime")
     .lean();
 }
 

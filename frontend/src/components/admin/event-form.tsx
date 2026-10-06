@@ -2,7 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Cropper from "react-easy-crop";
+import dynamic from "next/dynamic";
+
+/* §18 — the cropper is only ever mounted inside the crop dialog, but a static
+ * import pulled it into the bundle of every page that renders this form,
+ * including organizers who never touch an image. Loaded on demand instead.
+ * `ssr: false` because it measures the DOM on mount. */
+const Cropper = dynamic(() => import("react-easy-crop"), {
+  ssr: false,
+  loading: () => <div className="h-full w-full animate-pulse bg-muted" />,
+}) as React.ComponentType<any>; // react-easy-crop's own props are all required in its .d.ts, though the
+                                // component defaults them at runtime; dynamic() cannot infer that.
 import { toast } from "sonner";
 import { api } from "@/utils/api";
 import { compressFor } from "@/utils/compress-image";
@@ -1176,7 +1186,7 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
                 aspect={16 / 10}
                 onCropChange={setCrop}
                 onZoomChange={setZoom}
-                onCropComplete={(_area, px) => setCroppedArea(px)}
+                onCropComplete={(_area: any, px: any) => setCroppedArea(px)}
               />
             )}
           </div>

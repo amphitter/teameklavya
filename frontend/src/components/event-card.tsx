@@ -5,6 +5,7 @@ import { CalendarDays, Clock, MapPin, Users, Video, Wifi } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getImageUrl } from "@/utils/image";
 import { OptimizedImage } from "@/components/ui/optimized-image";
+import { usePrefetchOnHover } from "@/lib/query";
 
 export interface EventCardData {
   _id: string;
@@ -82,10 +83,28 @@ function Poster({ event }: { event: EventCardData }) {
 }
 
 /**
+ * Prefetch handler for one event slug. Always called (hooks can't be
+ * conditional) but inert when there is no slug to prefetch.
+ */
+function usePrefetchOnHookSafe(slug?: string) {
+  const handlers = usePrefetchOnHover<unknown>(
+    ["event", slug || "none"],
+    slug ? `/events/slug/${slug}` : ""
+  );
+  return slug ? handlers : {};
+}
+
+/**
  * EventCard — the core visual primitive of EventHub.
  * Used across Home, Discover, related events and organization surfaces.
  */
 export function EventCard({ event, className }: { event: EventCardData; className?: string }) {
+  /* §17 — warm the event detail query the moment a pointer or keyboard focus
+   * lands on the card. By the time the click navigates, the data is usually
+   * already in cache and the detail screen paints without a spinner.
+   * Skipped on touch devices (no hover) so we never spend bandwidth there. */
+  const prefetch = usePrefetchOnHookSafe(event.slug);
+
   const date = formatDate(event.startDate);
   const isOnline = event.eventType === "online";
   const isFree = !event.price || event.price === 0;
@@ -98,6 +117,7 @@ export function EventCard({ event, className }: { event: EventCardData; classNam
   return (
     <Link
       href={`/events/${event.slug}`}
+      {...prefetch}
       className={cn(
         "group flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-[0_8px_24px_-8px_rgba(16,32,48,0.12)]",
         isPast && "opacity-80",

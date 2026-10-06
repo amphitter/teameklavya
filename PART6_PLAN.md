@@ -441,6 +441,38 @@ assertions across 10 suites, 0 failed**; e2e unchanged and green.
   submission — not just posts and registrations.
 - Memory fallback when Redis is down (degraded but still dedupes per instance).
 
+### Phase 3 — RESULT: ✅ **DONE** (149 assertions in phase10)
+
+**`providers/redis/idempotency.store.js`** — the atomic claim. Redis
+implements it with one command, `SET key value NX PX ttl`: `NX` makes the
+write conditional and Redis executes it atomically, so two instances racing
+for the same key cannot both win. There is no read-then-write window, hence
+no version of the duplicate bug where both servers admit the request.
+
+**The brief's scenario, verified literally:** Server A claims `abc123`, then
+Server B (a separate store object over the same backend) attempts the same
+key and is refused. The same test against two *isolated* memory stores shows
+each accepting it — the divergence this phase removes.
+
+**Failure policy deliberately differs from rate limiting.** Phase 2 fails
+open; idempotency must not. The worst case for rate limiting is temporarily
+weaker abuse protection; the worst case here is a duplicate registration, a
+double payment, or two tickets for one seat. So on a Redis outage it degrades
+to per-instance memory dedup — weaker, but not absent — and if even that
+fails the write is **refused** rather than allowed to duplicate.
+
+**Coverage gap closed (found in the audit).** The middleware was mounted on
+only two routes. It now also protects ticket generation, bulk generation,
+pending-ticket approval, ticket send, quiz answer submission and event
+creation — each asserted by a test so the list cannot silently shrink again.
+
+Only **keys** are stored, never response bodies: caching responses would put
+user payloads in Redis and widen the blast radius of a compromised cache for
+no functional gain, since the 409 already tells the client the write landed.
+
+**Results:** phase10 **149 passed, 0 failed**. Full regression: **710
+assertions across 10 suites, 0 failed**; e2e unchanged and green.
+
 ### Phase 4 — Distributed locking (brief §6)
 - `DistributedLockService`: `acquire` / `release` / `withLock`, unique owner
   token, TTL, safe release (token check — never delete another owner's lock),

@@ -279,8 +279,12 @@ class Query {
       prefer.push("resolution=merge-duplicates");
       if (onConflict) prefer.push(`on_conflict=${onConflict}`);
     }
+    // on_conflict is sent in BOTH the query string and the Prefer header:
+    // real PostgREST accepts either, and sending both keeps the request
+    // self-describing for proxies and for the test double.
+    const conflict = onConflict ? `on_conflict=${onConflict}` : "";
     return this.client._request("POST", `/${this.table}`, {
-      query: onConflict && !upsert ? `on_conflict=${onConflict}` : "",
+      query: conflict,
       body: rows,
       prefer: prefer.join(","),
     });

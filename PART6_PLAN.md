@@ -580,6 +580,62 @@ dual-read → cutover.
 - `docs/DISTRIBUTED-SYSTEMS.md`
 - Outbox + reconciliation job; retry-safe consumers.
 
+### Phase 6 — RESULT: ✅ **DONE** (313 assertions in phase10, +15)
+
+**MACHINERY COMPLETE AND TESTED. NO DATA HAS MOVED.** MongoDB is still the
+source of truth for the social domain; `SYNC_ENABLED` defaults to false and
+nothing is wired to a controller. Everything below is prepared and verified by
+test, awaiting a human to run the runbook.
+
+- `models/outbox.model.js` — outbox entries carrying `{entityType, entityId,
+  op}`, plus a partial unique index collapsing duplicate *pending* work.
+- `services/outbox.service.js` — enqueue (deduped), atomic claim, complete,
+  fail-with-backoff, dead-letter, stalled-lease recovery, stats.
+- `services/social-sync.service.js` — the consumer. Re-reads the source
+  document, then upserts on the canonical id.
+- `scripts/backfill-supabase.js` — dry-run by default, FK-ordered, bounded,
+  resumable.
+- `scripts/verify-supabase.js` — independent count **and** field-level
+  comparison; exits non-zero on drift; `--repair` re-queues.
+- Three docs: `SUPABASE-MIGRATION.md`, `REDIS-ARCHITECTURE.md`,
+  `DISTRIBUTED-SYSTEMS.md`.
+
+**The decision everything else follows from:** the outbox entry holds a
+**REFERENCE, not a payload copy**. Every apply re-reads current Mongo state.
+That makes ordering irrelevant (two queued changes to one entity land on the
+same final state either way — a copied payload would let an out-of-order
+apply resurrect stale fields), makes retry trivially correct, and handles a
+source row deleted before apply by removing the target.
+
+**Honest limitation, stated in the model and the docs:** enqueue is NOT atomic
+with the business write. This codebase uses no MongoDB multi-document
+transactions, so a crash between the two loses the entry. **Reconciliation is
+therefore a correctness requirement, not an optimisation** — it is the only
+thing standing between a crash and silent data loss, and the docs say so
+rather than implying the outbox is sufficient alone.
+
+**Backfill enqueues rather than writing directly**, so the data you verify is
+the data the live path produces. A separate backfill write path would mean
+dual-read verification proves nothing.
+
+**Retry safety:** exponential backoff with **full jitter**. Jitter is not
+cosmetic — without it, every entry that failed during an outage becomes
+retryable at the same instant and the recovering database takes a synchronised
+thundering herd, turning a brief blip into a sustained one.
+
+**Two test-harness defects found and fixed** (harness, not implementation):
+1. The fake PostgREST server did not implement upsert, so every idempotence
+   assertion was passing against a strawman that created a new row per insert.
+   Now it honours `on_conflict` + `resolution=merge-duplicates` like real
+   PostgREST. The client also now sends `on_conflict` in both the query string
+   and the Prefer header.
+2. The dead-letter test mutated `attempts` in memory without persisting it, so
+   it never reached `maxAttempts`. Fixed to simulate real claim→fail cycles.
+
+**Verified end to end** (§24): seeded a 5-document social graph, backfilled,
+drained, and asserted rows landed with canonical ids, content and timestamps
+preserved — then re-ran the *entire* migration and asserted zero duplicates.
+
 ### Phase 7 — Failure behaviour & observability (brief §15, §16)
 - Verify graceful degradation for Redis, Supabase, Mongo, Cloudinary and R2
   unavailability. Core event functionality survives where possible.

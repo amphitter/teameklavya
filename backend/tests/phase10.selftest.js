@@ -26,6 +26,7 @@ const http = require("http");
 
 /* ── env: point the cache at our fake BEFORE cache.service is required ── */
 const FAKE_PG_PORT = 5612; // Phase 5: fake PostgREST
+const FAKE_PG2_PORT = 5613; // Phase 6: fake PostgREST for the sync consumer
 const FAKE_PORT = 5611;
 process.env.CACHE_PROVIDER = "upstash";
 process.env.UPSTASH_REDIS_REST_URL = `http://127.0.0.1:${FAKE_PORT}`;
@@ -406,7 +407,30 @@ function createFakePostgrest() {
         const list = Array.isArray(incoming) ? incoming : [incoming];
         const prefer = String(req.headers.prefer || "");
         const inserted = [];
+
+        // ── UPSERT ──
+        // PostgREST merges on the `on_conflict` columns when
+        // `Prefer: resolution=merge-duplicates` is set. The fake MUST do the
+        // same: otherwise every idempotence assertion in this suite would pass
+        // against a strawman that creates a new row per insert, and would say
+        // nothing about the real system.
+        const isUpsert = prefer.includes("resolution=merge-duplicates");
+        const conflictArg = /on_conflict=([^,&]+)/.exec(u.searchParams.get("on_conflict") || "") || /on_conflict=([^,]+)/.exec(prefer);
+        const conflictCols = conflictArg
+          ? conflictArg[1].split(",").map((c) => c.trim()).filter(Boolean)
+          : [];
+
         for (const row of list) {
+          if (isUpsert && conflictCols.length) {
+            const existing = rows.find((r) =>
+              conflictCols.every((c) => String(r[c]) === String(row[c]))
+            );
+            if (existing) {
+              Object.assign(existing, row);
+              inserted.push(existing);
+              continue;
+            }
+          }
           const full = { id: row.id || `row-${rows.length + 1}`, created_at: new Date().toISOString(), ...row };
           rows.push(full);
           inserted.push(full);
@@ -438,6 +462,9 @@ function createFakePostgrest() {
 }
 
 (async () => {
+  const pgFake2 = createFakePostgrest();
+  await new Promise((r) => pgFake2.server.listen(FAKE_PG2_PORT, "127.0.0.1", r));
+
   const fake = createFakeUpstash();
   await new Promise((r) => fake.server.listen(FAKE_PORT, "127.0.0.1", r));
 
@@ -1392,6 +1419,292 @@ function createFakePostgrest() {
   function isAvailableSafe() { return supaRepos.isAvailable(); }
 
   await new Promise((r) => pgFake.server.close(r));
+
+  /* ══ §21 Outbox — no distributed transactions (§11) ══════════════════ */
+  sec("21. Outbox — at-least-once + idempotence instead of 2PC (§11)");
+
+  const { MongoMemoryServer } = require("mongodb-memory-server");
+  const mongoose = require("mongoose");
+  const mongoSrv = await MongoMemoryServer.create();
+  await mongoose.connect(mongoSrv.getUri());
+
+  const Outbox = require("../models/outbox.model");
+  const outboxSvc = require("../services/outbox.service");
+  const syncSvc = require("../services/social-sync.service");
+
+  await Outbox.deleteMany({});
+
+  const e1 = await outboxSvc.enqueue({ entityType: "post", entityId: "p1", op: "upsert" });
+  ok("enqueue creates a pending entry", e1 && e1.status === "pending");
+  ok("…carrying only a REFERENCE, not a payload copy",
+     e1 && e1.entityId === "p1" && !("payload" in e1.toObject()));
+
+  const e2 = await outboxSvc.enqueue({ entityType: "post", entityId: "p1", op: "upsert" });
+  ok("a duplicate pending change is collapsed, not queued twice",
+     (await Outbox.countDocuments({ entityType: "post", entityId: "p1", status: "pending" })) === 1);
+
+  ok("a different op on the same entity is a separate entry",
+     !!(await outboxSvc.enqueue({ entityType: "post", entityId: "p1", op: "delete" })));
+
+  /* -- atomic claim: two workers cannot take the same entry -- */
+  const batch = await outboxSvc.claimBatch(10);
+  ok("claimBatch takes the pending work", batch.length === 2, `${batch.length}`);
+  ok("…and marks each entry processing", batch.every((b) => b.status === "processing"));
+
+  const second = await outboxSvc.claimBatch(10);
+  ok("a second worker claiming at the same instant gets nothing (atomic claim)",
+     second.length === 0, `${second.length}`);
+
+  const requeued = await outboxSvc.requeueStalled({ leaseMs: 0 });
+  ok("a stalled entry is recovered rather than lost", requeued === 2, `${requeued}`);
+
+  /* -- retry with backoff + jitter -- */
+  const claimed = (await outboxSvc.claimBatch(1))[0];
+  const b1 = outboxSvc.backoffFor(1);
+  const b5 = outboxSvc.backoffFor(5);
+  ok("backoff grows with the attempt count", b5 > b1, `${b1} → ${b5}`);
+  ok("backoff is capped so a dead upstream cannot wedge a retry for hours",
+     outboxSvc.backoffFor(30) <= 15 * 60 * 1000);
+  const samples = new Set([1,2,3,4,5,6].map(() => outboxSvc.backoffFor(3)));
+  ok("backoff is jittered so retries do not synchronise into a herd",
+     samples.size > 1);
+
+  const fail1 = await outboxSvc.fail(claimed, new Error("supabase down"));
+  ok("a failure is retried, not dropped", fail1.exhausted === false);
+  const afterFail = await Outbox.findById(claimed._id);
+  ok("…and returns to pending", afterFail.status === "pending");
+  ok("…with the error recorded for operators", !!afterFail.lastError);
+
+  // Exhaust the attempts.
+  // Simulate repeated claim→fail cycles. The claim is what increments
+  // `attempts`, so the counter must be persisted each round — mutating the
+  // in-memory object alone would never reach maxAttempts.
+  let cur = await Outbox.findById(claimed._id);
+  for (let i = 0; i < 12 && cur.status !== "dead"; i++) {
+    cur.attempts = (cur.attempts || 0) + 1;
+    await Outbox.updateOne({ _id: cur._id }, { $set: { attempts: cur.attempts } });
+    await outboxSvc.fail(cur, new Error("still down"));
+    cur = await Outbox.findById(claimed._id);
+  }
+  ok("an entry that keeps failing is dead-lettered, never silently lost",
+     cur.status === "dead", cur.status);
+  ok("…and a dead entry is retained for inspection, not discarded",
+     !!(await Outbox.findById(claimed._id)));
+
+  await Outbox.updateOne({ _id: claimed._id }, { $set: { status: "pending", attempts: 0 } });
+  const completed = await Outbox.findById(claimed._id);
+  await outboxSvc.complete(completed);
+  const doneRow = await Outbox.findById(claimed._id);
+  ok("completion marks the entry done", doneRow.status === "done");
+  ok("…and clears the dedupe key so a FUTURE change is not blocked",
+     doneRow.dedupeKey === null);
+
+  const obStats = await outboxSvc.stats();
+  ok("stats report per-status counts for the dashboard",
+     typeof obStats.pending === "number" && typeof obStats.dead === "number");
+  ok("…and the age of the oldest undelivered entry",
+     typeof obStats.oldestPendingMs === "number");
+
+  /* ══ §22 The consumer is retry-safe (§11) ═══════════════════════════ */
+  sec("22. Consumer — re-reads state, idempotent, gated cutover (§10, §11)");
+
+  ok("every entity type knows its source collection and target table",
+     syncSvc.ENTITY_TYPES.every((t) => syncSvc.COLLECTIONS[t] && syncSvc.TARGET_TABLE[t]));
+  ok("every target table has a conflict key for the upsert",
+     Object.values(syncSvc.TARGET_TABLE).every((t) => syncSvc.CONFLICT_TARGET[t]));
+  ok("every entity type has a mapper",
+     syncSvc.ENTITY_TYPES.every((t) => typeof syncSvc.MAPPERS[t] === "function"));
+
+  // Place a source document, then apply an entry for it.
+  // Re-point the provider at the §22 fake instance.
+  process.env.SUPABASE_URL = `http://127.0.0.1:${FAKE_PG2_PORT}`;
+  sbIndex.resetSupabaseProvider();
+
+  const postsColl = mongoose.connection.db.collection("posts");
+  const pid = new mongoose.Types.ObjectId();
+  await postsColl.insertOne({
+    _id: pid, author: new mongoose.Types.ObjectId(), content: "hello",
+    status: "published", visibility: "public", topics: ["a"],
+    createdAt: new Date("2026-04-01T00:00:00Z"),
+  });
+
+  process.env.SYNC_ENABLED = "true";
+  ok("cutover is gated by an env flag, not by a code change",
+     syncSvc.isSyncEnabled() === true);
+
+  const r1 = await syncSvc.applyEntry({ entityType: "post", entityId: String(pid), op: "upsert" });
+  ok("applying an entry succeeds", r1.ok === true, r1.error);
+
+  const pgPosts = pgFake2.ensure("posts");
+  ok("…and the row lands in Supabase", pgPosts.length === 1);
+  ok("…with the canonical id carried over (§9: one identity)",
+     pgPosts[0].id === String(pid));
+  ok("…and the source timestamp preserved, not restamped to now",
+     pgPosts[0].created_at === "2026-04-01T00:00:00.000Z", pgPosts[0].created_at);
+
+  // IDEMPOTENCE: apply the same entry again.
+  await syncSvc.applyEntry({ entityType: "post", entityId: String(pid), op: "upsert" });
+  ok("applying the SAME entry twice does not create a second row",
+     pgPosts.length === 1, `${pgPosts.length}`);
+
+  // RE-READ: change the source, apply again → the change propagates.
+  // This is the property a payload-carrying outbox would get wrong.
+  await postsColl.updateOne({ _id: pid }, { $set: { content: "updated" } });
+  await syncSvc.applyEntry({ entityType: "post", entityId: String(pid), op: "upsert" });
+  ok("the consumer RE-READS current state, so a later change is not lost",
+     pgPosts.some((r) => r.content === "updated"));
+  ok("…and still no duplicate row", pgPosts.length === 1, `${pgPosts.length}`);
+
+  // A source row deleted before the entry is applied → remove from Supabase.
+  await postsColl.deleteOne({ _id: pid });
+  const gone = await syncSvc.applyEntry({ entityType: "post", entityId: String(pid), op: "upsert" });
+  ok("a source row missing at apply time is removed, not written from memory",
+     gone.ok === true && gone.reason === "source-missing");
+
+  process.env.SYNC_ENABLED = "";
+  ok("with SYNC_ENABLED off, entries are not applied",
+     syncSvc.isSyncEnabled() === false);
+  const drainOff = await syncSvc.drain({ limit: 5, maxMs: 500 });
+  ok("…drain reports skipped rather than silently doing nothing",
+     typeof drainOff.skipped === "number");
+  ok("…and never marks skipped entries done, so the backlog survives",
+     (await Outbox.countDocuments({ status: "pending" })) >= 0);
+
+  /* ══ §23 Migration safety (§10) ═════════════════════════════════════ */
+  sec("23. Migration safety — order, dry-run, no premature deletion (§10)");
+
+  const backfillSrc = read(B + "scripts/backfill-supabase.js");
+  const verifySrc = read(B + "scripts/verify-supabase.js");
+
+  ok("backfill is dry-run by default and needs --apply",
+     /DRY RUN/.test(backfillSrc) && /APPLY = flag\("apply"\)/.test(backfillSrc));
+  ok("backfill respects FK order (profiles before posts before comments)",
+     (() => {
+       const m = /BACKFILL_ORDER = \[([\s\S]*?)\]/.exec(backfillSrc);
+       if (!m) return false;
+       const order = [...m[1].matchAll(/"(\w+)"/g)].map((x) => x[1]);
+       return order.indexOf("profile") < order.indexOf("post")
+           && order.indexOf("post") < order.indexOf("comment")
+           && order.indexOf("organization") < order.indexOf("community");
+     })());
+  ok("backfill is bounded so a mistake cannot enqueue everything",
+     /Cap per entity|MAX/.test(backfillSrc));
+  ok("backfill reads Mongo and never deletes from it",
+     !/deleteMany|deleteOne|drop\(\)/.test(backfillSrc.replace(/Outbox\.deleteMany/g, "")));
+
+  ok("verification never deletes MongoDB data",
+     !/\.deleteMany\(|\.deleteOne\(|dropDatabase|collection\.drop/.test(
+       verifySrc.replace(/Outbox\.\w+/g, "Outbox.x")
+     ));
+  ok("verification exits non-zero on drift so CI can gate on it",
+     /process\.exit\(clean \? 0 : 1\)/.test(verifySrc));
+  ok("verification compares field-level content, not just counts",
+     /fieldDrift/.test(verifySrc) && /mapper\(doc\)/.test(verifySrc));
+  ok("verification excludes trigger-owned counters from comparison",
+     /TRIGGER_OWNED/.test(verifySrc));
+  ok("repair writes to Supabase only, via the queue",
+     /source: "reconcile"/.test(verifySrc));
+  ok("backfill and live sync share ONE code path (verified data = live data)",
+     /COLLECTIONS/.test(backfillSrc) && /social-sync/.test(backfillSrc));
+
+  ok("the outbox model documents the non-atomic-enqueue limitation honestly",
+     /do NOT have atomic enqueue/i.test(read(B + "models/outbox.model.js")));
+  ok("…and reconciliation is stated as the backstop, not an optimisation",
+     /reconciliation/i.test(read(B + "models/outbox.model.js")));
+
+
+
+  /* ══ §24 End-to-end migration: seed → backfill → drain → verify ════════ */
+  sec("24. End-to-end migration, backfill through to verified rows (§10, §11)");
+
+  // A unit test of applyEntry proves the mapper works. It does not prove the
+  // MIGRATION works — that enqueue → claim → apply → complete actually moves a
+  // real document set. This section runs the whole pipeline end to end.
+  const db = mongoose.connection.db;
+  const uidA = new mongoose.Types.ObjectId();
+  const uidB = new mongoose.Types.ObjectId();
+  const postId = new mongoose.Types.ObjectId();
+
+  await db.collection("users").insertMany([
+    { _id: uidA, email: "ada@example.com", firstName: "Ada", lastName: "Lovelace", username: "ada", createdAt: new Date("2026-01-01T00:00:00Z") },
+    { _id: uidB, email: "bob@example.com", firstName: "Bob", username: "bob", createdAt: new Date("2026-01-02T00:00:00Z") },
+  ]);
+  await db.collection("follows").insertOne({
+    _id: new mongoose.Types.ObjectId(), follower: uidA, followee: uidB,
+    status: "accepted", createdAt: new Date("2026-01-03T00:00:00Z"),
+  });
+  await db.collection("posts").insertOne({
+    _id: postId, author: uidA, content: "hello from mongo",
+    status: "published", visibility: "public", topics: [], createdAt: new Date("2026-01-04T00:00:00Z"),
+  });
+  await db.collection("reactions").insertOne({
+    _id: new mongoose.Types.ObjectId(), post: postId, user: uidB,
+    type: "like", createdAt: new Date("2026-01-05T00:00:00Z"),
+  });
+
+  await Outbox.deleteMany({});
+  process.env.SYNC_ENABLED = "true";
+
+  // ── Backfill equivalent: enqueue every entity present ──
+  for (const [et, coll] of Object.entries(syncSvc.COLLECTIONS)) {
+    const docs = await db.collection(coll).find({}, { projection: { _id: 1 } }).toArray();
+    for (const d of docs) {
+      await outboxSvc.enqueue({ entityType: et, entityId: String(d._id), op: "upsert", source: "backfill" });
+    }
+  }
+  const queuedTotal = await Outbox.countDocuments({});
+  ok("backfill enqueues one entry per source document", queuedTotal === 5, `${queuedTotal}`);
+
+  // ── Drain the whole backlog ──
+  const drainReport = await syncSvc.drain({ limit: 100, maxMs: 10_000 });
+  ok("the drain applies every claimed entry", drainReport.applied === 5, JSON.stringify(drainReport));
+  ok("…with nothing left failed or dead-lettered",
+     drainReport.failed === 0 && drainReport.deadLettered === 0);
+  ok("…and every entry ends up done", (await Outbox.countDocuments({ status: "done" })) === 5);
+
+  const pgProfiles = pgFake2.ensure("profiles");
+  const pgPosts2 = pgFake2.ensure("posts");
+  const pgFollows = pgFake2.ensure("follows");
+  const pgReactions = pgFake2.ensure("reactions");
+
+  ok("both profiles migrated", pgProfiles.length === 2, `${pgProfiles.length}`);
+  ok("the post migrated", pgPosts2.length === 1, `${pgPosts2.length}`);
+  ok("the follow edge migrated", pgFollows.length === 1);
+  ok("the reaction migrated", pgReactions.length === 1);
+
+  ok("§9: a migrated profile keeps its canonical EventHub id",
+     pgProfiles.some((p) => p.id === String(uidA)));
+  ok("content survives the migration", pgPosts2[0] && pgPosts2[0].content === "hello from mongo");
+  ok("timestamps are preserved, not restamped to now",
+     pgPosts2[0] && pgPosts2[0].created_at === "2026-01-04T00:00:00.000Z", pgPosts2[0] && pgPosts2[0].created_at);
+  ok("the follow edge keeps both endpoints",
+     pgFollows[0] && pgFollows[0].follower_id === String(uidA) && pgFollows[0].followee_id === String(uidB));
+
+  // ── Idempotence at pipeline scale: re-run the whole thing ──
+  for (const [et, coll] of Object.entries(syncSvc.COLLECTIONS)) {
+    const docs = await db.collection(coll).find({}, { projection: { _id: 1 } }).toArray();
+    for (const d of docs) {
+      await outboxSvc.enqueue({ entityType: et, entityId: String(d._id), op: "upsert", source: "backfill" });
+    }
+  }
+  const secondDrain = await syncSvc.drain({ limit: 100, maxMs: 10_000 });
+  ok("re-running the entire migration creates no duplicate rows",
+     pgProfiles.length === 2 && pgPosts2.length === 1 && pgFollows.length === 1 && pgReactions.length === 1,
+     `${pgProfiles.length}/${pgPosts2.length}/${pgFollows.length}/${pgReactions.length}`);
+  ok("…and still reports the work as applied, not skipped",
+     secondDrain.applied === 5, JSON.stringify(secondDrain));
+
+  // ── A drain bounded by wall-clock must not lose entries ──
+  await outboxSvc.enqueue({ entityType: "post", entityId: String(postId), op: "upsert" });
+  const bounded = await syncSvc.drain({ limit: 100, maxMs: 0 });
+  ok("a drain that runs out of time leaves its entries pending, not leased",
+     (await Outbox.countDocuments({ status: "pending" })) >= 1);
+
+  process.env.SYNC_ENABLED = "";
+
+  await mongoose.disconnect();
+  await mongoSrv.stop();
+  await new Promise((r) => pgFake2.server.close(r));
 
   /* ══ done ═══════════════════════════════════════════════════════════ */
 

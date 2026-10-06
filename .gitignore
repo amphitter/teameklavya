@@ -24,3 +24,6 @@ Thumbs.db
 
 # Dist
 dist/
+
+# scratch commit-message file (never commit)
+.commitmsg.tmp

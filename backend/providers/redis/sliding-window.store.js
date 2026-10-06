@@ -147,7 +147,19 @@ class RedisSlidingWindow {
       ]);
       if (!res.ok) throw new Error(res.error);
 
-      const [totalHits, resetMs, allowed] = res.result || [];
+      /* §12 "malformed": a 200 carrying a body we did not expect. The Lua
+       * script answers with [totalHits, resetMs, allowed]; destructuring
+       * anything else silently produced allowed=false, which BLOCKED traffic
+       * — the opposite of fail-open, and a whole-site outage caused by
+       * garbage from upstream. Validate the shape and treat a surprise as a
+       * failure so the catch below degrades correctly. */
+      if (!Array.isArray(res.result) || res.result.length < 3) {
+        throw new Error(`malformed sliding-window result: ${String(res.result).slice(0, 60)}`);
+      }
+      const [totalHits, resetMs, allowed] = res.result;
+      if (allowed !== 0 && allowed !== 1 && Number.isNaN(Number(allowed))) {
+        throw new Error(`malformed sliding-window verdict: ${String(allowed).slice(0, 60)}`);
+      }
       return {
         allowed: Number(allowed) === 1,
         totalHits: Number(totalHits) || 0,

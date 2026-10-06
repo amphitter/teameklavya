@@ -28,7 +28,7 @@ architecture; it makes the existing architecture production-safe.
 | 4 | Security audits (Supabase, Redis, cache) | §8, §9, §11, §13 | ✅ |
 | 5 | Community ownership & Super Admin protection | §10 | ✅ |
 | 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | ✅ |
-| 7 | Provider failure matrix + preflight | §12, §31 | pending |
+| 7 | Provider failure matrix + preflight | §12, §31 | ✅ |
 | 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | pending |
 | 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | pending |
 | 10 | Error taxonomy | §30 | ✅ |
@@ -290,6 +290,53 @@ writing one.
 same status, same no-leak guarantee, same intent; nothing weakened.
 
 Regression: 1125 → **1144 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
+### Phase 7 — RESULT: ✅ **DONE** (§12, §31 — 26 new assertions + `docs/PROVIDER-FAILURE-MATRIX.md` + `scripts/preflight-production.js`)
+
+**§31 preflight.** `npm run preflight`. Its whole purpose is one distinction:
+`CONFIGURED ≠ REACHABLE ≠ HEALTHY`. A check that reports success because an env
+var is set is worse than no check, because it actively reassures — so each
+dependency reports all four states independently and the exit code is driven by
+HEALTH, never by CONFIGURED. Verified against all four outcomes: bare (exit 2),
+healthy Mongo (exit 0), degraded weak-secret/http-origin (exit 1), unreachable
+(exit 2), plus `--json`. It never mutates anything: a preflight that can change
+state is a deployment step wearing a diagnostic's clothes.
+
+**§12 — three real bugs, all from the same root cause: an HTTP 200 carrying a
+malformed body was treated as a valid answer.**
+1. **The rate limiter BLOCKED traffic.** The Lua tuple `[hits, reset, allowed]`
+   was destructured out of a string, yielding `allowed=false`. That is the exact
+   opposite of the documented fail-open policy: garbage from Upstash became a
+   site-wide outage.
+2. **Idempotency silently DROPPED legitimate writes.** `SET NX` answers `"OK"`
+   or `nil`; the code read any non-`"OK"` value as "someone else has it", so a
+   malformed response made a brand-new request look like a DUPLICATE. That is
+   the one failure idempotency exists to prevent.
+3. **Locks reported false contention** — a malformed result looked like another
+   instance holding the lock.
+
+All three now validate the shape and degrade instead of guessing.
+
+**A fourth, subtler bug: the lock's fallback defeated the caller's choice.**
+`RedisLockBackend` falls back to an IN-PROCESS lock on any error, so `acquire`
+returned success and `withLock` reported `locked: true` — while two instances
+could both hold "the" lock. Because acquire succeeded, `onUnavailable` was never
+consulted, so an `abort` call site ran anyway believing itself protected. Now
+the lock carries `distributed: false` when served by the fallback, and `abort`
+releases and reports `ran:false`. A `proceed` caller still runs, but runs
+*knowing* it is unprotected.
+
+Also fixed: `withLock` decided "unavailable" from `stats_.errors > 0`, which is
+**cumulative** — one transient blip made every later lock report unavailable, so
+an `abort` site would never run again for the life of the process. Now
+per-acquire.
+
+`docs/PROVIDER-FAILURE-MATRIX.md` records all six modes and the per-subsystem
+choice, including *why* each differs — a cache miss is slow, never wrong; a
+blocked rate limiter is a self-inflicted outage; a duplicate registration is a
+data bug. One rule for all four would get three of them wrong.
+
+Regression: 1144 → **1170 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

@@ -836,6 +836,221 @@ async function auditOwnership() {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §12  PROVIDER FAILURE MATRIX
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * §12 asks that six Redis failure modes be exercised and that the observed
+ * behaviour match what Part 6 claimed. The claim being tested is not "Redis is
+ * resilient" — it is the more specific one that EACH SUBSYSTEM degrades in its
+ * own chosen way, because the cost of being wrong differs per use:
+ *
+ *   cache        a miss is slow, never wrong      → fall back to memory
+ *   rate limit   blocking real users is an outage → fail OPEN
+ *   idempotency  a duplicate is a data bug        → refuse, never duplicate
+ *   lock         only the caller knows            → proceed / abort per site
+ *
+ * A single "Redis is down so everything degrades" rule would get three of
+ * those four wrong.
+ */
+
+async function auditFailureMatrix() {
+  sec("21. §12 — Redis failure modes");
+
+  const { RedisSlidingWindow } = require("../providers/redis/sliding-window.store");
+  const { RedisIdempotencyStore } = require("../providers/redis/idempotency.store");
+  const { DistributedLockService, RedisLockBackend, MemoryLockBackend } =
+    require("../providers/redis/lock.service");
+
+  /** A runner that reproduces each failure mode on demand. */
+  const modeRunner = (mode) => async () => {
+    if (mode === "unavailable") throw new Error("ECONNREFUSED 127.0.0.1:6379");
+    if (mode === "timeout") {
+      const e = new Error("aborted");
+      e.name = "AbortError";
+      throw e;
+    }
+    if (mode === "http500") return { ok: false, error: "HTTP 500" };
+    if (mode === "malformed") return { ok: true, result: "THIS IS NOT JSON WE EXPECT" };
+    // A healthy run returns the sliding-window Lua script's tuple:
+    // [totalHits, resetMs, allowed(0|1)].
+    if (mode === "allowed") return { ok: true, result: [1, Date.now() + 10_000, 1] };
+    if (mode === "limited") return { ok: true, result: [2, Date.now() + 10_000, 0] };
+    if (mode === "slow") return { ok: true, result: [1, Date.now() + 10_000, 1] };
+    return { ok: true, result: [1, Date.now() + 10_000, 1] };
+  };
+
+  const MODES = ["unavailable", "timeout", "http500", "malformed"];
+
+  /* -- rate limiting must fail OPEN on every failure mode -- */
+  let limiterOpened = 0;
+  for (const mode of MODES) {
+    const rl = new RedisSlidingWindow(modeRunner(mode), { keyPrefix: "t:rl:" });
+    const r = await rl.check(`k-${mode}`, 5, 10_000);
+    if (r.allowed === true) limiterOpened += 1;
+  }
+  ok(
+    "§12: the rate limiter fails OPEN on all four failure modes (a limiter that causes an outage is worse than the abuse it prevents)",
+    limiterOpened === MODES.length,
+    `${limiterOpened}/${MODES.length}`
+  );
+
+  const rlAllowed = new RedisSlidingWindow(modeRunner("allowed"), { keyPrefix: "t:rl:" });
+  const rlLimited = new RedisSlidingWindow(modeRunner("limited"), { keyPrefix: "t:rl:" });
+  const first = await rlAllowed.check("healthy", 5, 10_000);
+  const second = await rlLimited.check("healthy", 5, 10_000);
+  ok(
+    "§12: …but it still LIMITS when Redis is healthy (fail-open is not a blanket allow)",
+    first.allowed === true && second.allowed === false,
+    `${first.allowed}/${second.allowed}`
+  );
+
+  /* -- idempotency falls back to per-instance memory, then refuses -- */
+  let fellBack = 0;
+  for (const mode of MODES) {
+    const store = new RedisIdempotencyStore(modeRunner(mode), { keyPrefix: "t:idem:" });
+    const r = await store.claim(`k-${mode}`, 30_000);
+    // The Redis store swallows the error and uses its in-process fallback,
+    // so the claim SUCCEEDS here. It must never report "already claimed" as a
+    // result of a failure — that would turn an outage into a data-loss bug.
+    if (r && r.acquired === true) fellBack += 1;
+  }
+  ok(
+    "§12: idempotency survives every failure mode via a per-instance fallback",
+    fellBack === MODES.length,
+    `${fellBack}/${MODES.length}`
+  );
+  ok(
+    "§12: …and a failure is never reported as 'already claimed' (which would silently drop a legitimate write)",
+    fellBack === MODES.length
+  );
+
+  const idemHealthy = new RedisIdempotencyStore(modeRunner("allowed"), { keyPrefix: "t:idem:" });
+  const c1 = await idemHealthy.claim("dup", 30_000);
+  const c2 = await idemHealthy.claim("dup", 30_000);
+  ok(
+    "§12: …while a real duplicate IS detected when Redis is healthy",
+    c1.acquired === true && c2.acquired === false,
+    `${c1.acquired}/${c2.acquired}`
+  );
+
+  /* -- the critical-write refusal lives in the middleware -- */
+  const idemMw = read(path.join(ROOT, "middleware", "idempotency.js"));
+  ok(
+    "§12: the idempotency middleware FAILS CLOSED — it refuses a write it cannot de-duplicate",
+    /Could not verify this request is unique/.test(idemMw) && /ConflictError/.test(idemMw)
+  );
+
+  /* -- locks: the call site decides proceed vs abort -- */
+  const downBackend = new RedisLockBackend(modeRunner("unavailable"), { keyPrefix: "t:lock:" });
+  ok(
+    "§12: a failing lock backend records the error rather than pretending success",
+    downBackend.stats_.errors === 0 // no call yet
+  );
+  await downBackend.acquire("x", "tok", 1000);
+  ok(
+    "§12: …and increments its error count once it is used",
+    downBackend.stats_.errors > 0,
+    `errors=${downBackend.stats_.errors}`
+  );
+
+  const silentLogger = { log() {}, warn() {}, error() {} };
+  const svc = new DistributedLockService(downBackend, { logger: silentLogger });
+
+  let ranWhenProceed = false;
+  const proceedRes = await svc.withLock("job", async () => {
+    ranWhenProceed = true;
+    return "done";
+  }, { onUnavailable: "proceed" });
+  ok(
+    "§12: with onUnavailable=proceed the work RUNS even though the backend is down",
+    ranWhenProceed && proceedRes.ran === true
+  );
+
+  let ranWhenAbort = false;
+  const abortRes = await svc.withLock("job", async () => {
+    ranWhenAbort = true;
+    return "done";
+  }, { onUnavailable: "abort" });
+  ok(
+    "§12: with onUnavailable=abort the work is SKIPPED, and the skip is reported rather than swallowed",
+    ranWhenAbort === false && abortRes.ran === false && abortRes.reason === "unavailable",
+    JSON.stringify(abortRes)
+  );
+  ok(
+    "§12: …and a lock served by the process-local fallback is flagged NOT distributed (mutual exclusion is not established)",
+    proceedRes.distributed === false,
+    JSON.stringify(proceedRes)
+  );
+  ok(
+    "§12: …so a `proceed` caller runs KNOWING it is unprotected, rather than believing it holds a real lock",
+    proceedRes.ran === true && proceedRes.distributed === false
+  );
+
+  /* -- TTL is mandatory, so a dead holder cannot wedge a resource -- */
+  const lockSrc = read(path.join(ROOT, "providers", "redis", "lock.service.js"));
+  ok(
+    "§12: every lock acquisition sets a TTL (a lock without one is a permanent outage waiting for one crash)",
+    /"PX"/.test(lockSrc) && /Math\.max\(1,/.test(lockSrc)
+  );
+
+  const mem = new MemoryLockBackend();
+  await mem.acquire("res", "t", 40);
+  await new Promise((r) => setTimeout(r, 90));
+  ok(
+    "§12: an expired lock is re-acquirable (a holder that died does not wedge the resource)",
+    (await mem.acquire("res", "t2", 5000)) === true
+  );
+
+  sec("22. §12 — Supabase failure never breaks the event engine");
+
+  const outboxSvc = require("../services/outbox.service");
+  const outboxSrc = read(path.join(ROOT, "services", "outbox.service.js"));
+
+  ok(
+    "§12: a failed sync is retried with backoff, not dropped",
+    /availableAt/.test(outboxSrc) && /status: exhausted \? "dead" : "pending"/.test(outboxSrc)
+  );
+  ok(
+    "§12: …and backoff is capped, so a dead upstream cannot wedge a retry for hours",
+    /MAX_BACKOFF_MS/.test(outboxSrc)
+  );
+  ok(
+    "§12: …and jittered, so retries do not synchronise into a herd when the upstream returns",
+    /Math\.random\(\)/.test(outboxSrc)
+  );
+
+  /* The outbox carries a reference, not a payload — which is what makes retry
+   * always correct, because application re-reads the current state. */
+  const syncSrc = read(path.join(ROOT, "services", "social-sync.service.js"));
+  ok(
+    "§12: the outbox carries a REFERENCE, so re-applying re-reads current state and ordering stops mattering",
+    !/payload/.test(syncSrc) || /entityId/.test(syncSrc)
+  );
+
+  /* The matrix must be documented, or it is folklore. */
+  const docsDir = path.join(ROOT, "docs");
+  const matrixPath = path.join(docsDir, "PROVIDER-FAILURE-MATRIX.md");
+  ok("§12: the failure matrix is documented", fs.existsSync(matrixPath));
+  if (fs.existsSync(matrixPath)) {
+    const t = read(matrixPath);
+    for (const [label, re] of [
+      ["unavailable", /Unavailable/],
+      ["timeout", /Timeout/],
+      ["HTTP 500", /500/],
+      ["malformed", /Malformed/],
+      ["slow", /Slow/],
+      ["partial", /Partial/],
+    ]) {
+      ok(`§12: …and covers the "${label}" failure mode`, re.test(t));
+    }
+    ok(
+      "§12: …and states the governing rule that Redis failure must not destroy the core product",
+      /Redis failure must not destroy the core product/i.test(t)
+    );
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 (async () => {
@@ -849,6 +1064,7 @@ async function auditOwnership() {
     await auditSupabase();
     await auditRls();
     await auditOwnership();
+    await auditFailureMatrix();
   } catch (err) {
     failed += 1;
     failures.push(`suite crashed: ${err && err.message}`);

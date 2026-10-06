@@ -98,6 +98,16 @@ class RedisIdempotencyStore {
       const res = await this.runner(["SET", this.keyFor(key), String(now), "NX", "PX", Math.max(1, Math.round(ttlMs))]);
       if (!res.ok) throw new Error(res.error);
 
+      /* §12 "malformed": SET NX answers "OK" (claimed) or nil (already
+       * claimed) — anything else means we did not get an answer we can trust.
+       * The old code treated any non-"OK" value as "someone else has it",
+       * so a malformed response made a brand-new request look like a DUPLICATE
+       * and the write was silently dropped. That is the one failure idempotency
+       * exists to prevent. Validate, and let the catch degrade to the
+       * per-instance store instead. */
+      if (res.result !== "OK" && res.result !== true && res.result !== null && res.result !== undefined) {
+        throw new Error(`malformed idempotency result: ${String(res.result).slice(0, 60)}`);
+      }
       // "OK" = we claimed it. nil = someone else already had it.
       const acquired = res.result === "OK" || res.result === true;
       if (acquired) this.stats_.acquired += 1;

@@ -96,6 +96,11 @@ class RedisLockBackend {
     this.keyPrefix = keyPrefix || "eh:v1:lock:";
     this.fallback = fallback || new MemoryLockBackend();
     this.stats_ = { acquires: 0, acquired: 0, contended: 0, releases: 0, errors: 0, fallbacks: 0, lastError: null };
+    /* Set on every acquire. TRUE means "the last acquire was served by the
+     * in-process fallback", i.e. this lock is NOT mutually exclusive across
+     * instances. It is per-acquire rather than cumulative because a single
+     * transient blip must not condemn every future lock forever. */
+    this.degraded = false;
   }
 
   keyFor(name) {
@@ -115,7 +120,14 @@ class RedisLockBackend {
         Math.max(1, Math.round(ttlMs)),
       ]);
       if (!res.ok) throw new Error(res.error);
+      /* SET NX answers "OK" (taken) or nil (contended). Anything else is not an
+       * answer — reporting it as "contended" would make the caller believe
+       * another instance holds the lock when in fact we could not tell. */
+      if (res.result !== "OK" && res.result !== true && res.result !== null && res.result !== undefined) {
+        throw new Error(`malformed lock result: ${String(res.result).slice(0, 60)}`);
+      }
       const got = res.result === "OK" || res.result === true;
+      this.degraded = false;
       if (got) this.stats_.acquired += 1;
       else this.stats_.contended += 1;
       return got;
@@ -123,6 +135,13 @@ class RedisLockBackend {
       this.stats_.errors += 1;
       this.stats_.fallbacks += 1;
       this.stats_.lastError = String(err?.message || err).slice(0, 200);
+      /* The fallback is process-local. Serving from it means two instances can
+       * both hold "the" lock at once, which is the one thing a lock exists to
+       * prevent. We still use it — refusing outright would break every
+       * `proceed` call site — but we MARK it, so the caller can tell the
+       * difference between "I hold a distributed lock" and "I hold a local
+       * one and must assume I do not have mutual exclusion". */
+      this.degraded = true;
       return this.fallback.acquire(name, token, ttlMs);
     }
   }
@@ -173,6 +192,9 @@ class DistributedLockService {
     return {
       name,
       token,
+      /* FALSE means the backend served this from a process-local fallback:
+       * treat mutual exclusion as NOT established. */
+      distributed: this.backend.degraded === true ? false : true,
       release: () => this.backend.release(name, token),
       extend: (ms) => this.backend.extend(name, token, ms),
     };
@@ -214,7 +236,10 @@ class DistributedLockService {
 
     if (!lock) {
       // Distinguish "someone else has it" from "we could not tell".
-      const unavailable = this.backend.stats_ && this.backend.stats_.errors > 0;
+      // NOTE: this used to read `stats_.errors > 0`, which is cumulative — one
+      // transient blip made EVERY later lock report unavailable, so an `abort`
+      // call site would never run again for the life of the process.
+      const unavailable = this.backend.degraded === true;
       const mode = unavailable ? onUnavailable : onContended;
       if (mode === "proceed") {
         this.logger.warn(`[lock] "${name}" unavailable — proceeding without it`);
@@ -224,9 +249,32 @@ class DistributedLockService {
       return { ran: false, locked: false, reason: unavailable ? "unavailable" : "contended" };
     }
 
+    /* We got a lock, but it may be process-local. An `abort` caller asked for
+     * "do not run unless you really hold it", and a fallback lock does not
+     * satisfy that — two instances would both be running. Release and report.
+     * This is the case the previous code missed: because the fallback made
+     * acquire() SUCCEED, onUnavailable never got consulted at all. */
+    if (lock.distributed === false && onUnavailable === "abort") {
+      try {
+        await lock.release();
+      } catch {
+        /* releasing a fallback lock that is already gone is not an error */
+      }
+      return { ran: false, locked: false, distributed: false, reason: "unavailable" };
+    }
+
     try {
-      const result = await fn({ held: true, name, token: lock.token, extend: lock.extend });
-      return { ran: true, locked: true, result };
+      const result = await fn({
+        held: true,
+        /* The whole point: `held` is true but `distributed` may be false. A
+         * caller that cannot tolerate running without real mutual exclusion
+         * must be able to see that. */
+        distributed: lock.distributed,
+        name,
+        token: lock.token,
+        extend: lock.extend,
+      });
+      return { ran: true, locked: true, distributed: lock.distributed, result };
     } finally {
       // Always release, even if fn threw — and only ever our own lock.
       try {

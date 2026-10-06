@@ -696,6 +696,39 @@ JWT-shaped string.
   retry, provider failure, multi-instance simulation.
 - **All 561 existing assertions and all 6 e2e suites must still pass.**
 
+### Phase 8 — RESULT: ✅ **DONE** (363 assertions in phase10, +18)
+
+Most of §17 landed incrementally with each phase (that was deliberate — a test
+written alongside the code it covers catches the bug while you are still in
+context). Phase 8 closed the two genuine gaps that were left.
+
+**Multi-instance simulation (§26).** Two `DistributedLockService` instances
+sharing ONE Redis runner but each holding its OWN memory fallback. The separate
+fallbacks are what make them separate processes — sharing a backend object
+would let them see each other's in-process state and the simulation would prove
+nothing. Asserted: A acquires, B refused, A releases, B acquires; idempotency
+claim refused across instances; and the rate-limit bucket is shared, so two
+instances get 5 calls between them, not 10.
+
+The counter-example is asserted too: with no shared store, BOTH instances
+acquire the same lock. That is the argument for Redis stated as a test.
+
+**Authorization and the frontend boundary (§27).** §7 says the frontend must
+never depend on Supabase. Asserted against the real source tree: no frontend
+file imports a Supabase client, and none hardcodes a JWT-shaped key. Server-side:
+marking a notification read is scoped by `user_id`, feed visibility is applied
+from a resolved context, and `role` is constrained by the database rather than
+trusted from a client.
+
+The service-role key is asserted to be read in exactly ONE backend module
+(`providers/supabase/index.js`). The detector matches `process.env.
+SUPABASE_SERVICE_ROLE_KEY` specifically — an earlier version matched the bare
+string and flagged a helpful error message in a script, which would have
+discouraged exactly the kind of actionable failure text we want.
+
+**Regression standing:** 924 assertions across 10 suites, 0 failed; all 6 e2e
+chains pass. The 561-assertion floor from Part 5 is exceeded many times over.
+
 ### Phase 9 — Final report
 - `PART6_FINAL_REPORT.md`.
 

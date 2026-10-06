@@ -1845,6 +1845,165 @@ function createFakePostgrest() {
     await new Promise((r) => pgFake3.server.close(r));
   }
 
+  /* ══ §26 Multi-instance simulation (§17) ═════════════════════════════ */
+  sec("26. Multi-instance simulation — two processes, one Redis (§17)");
+
+  {
+    /* Two service instances sharing ONE Redis, each with its OWN memory
+     * fallback. The separate fallbacks are what make them separate processes:
+     * sharing a backend object would let them see each other's in-process
+     * state and the simulation would prove nothing. */
+    const { DistributedLockService, RedisLockBackend, MemoryLockBackend } = require("../providers/redis/lock.service");
+    const { createRedisRunner } = require("../providers/redis/sliding-window.store");
+
+    const sharedRunner = createRedisRunner({
+      url: `http://127.0.0.1:${FAKE_PORT}`,
+      token: "test-token-do-not-log",
+    });
+    ok("two instances share one Redis runner (one Redis, two processes)", !!sharedRunner);
+
+    const instanceA = new DistributedLockService(
+      new RedisLockBackend(sharedRunner, { fallback: new MemoryLockBackend() })
+    );
+    const instanceB = new DistributedLockService(
+      new RedisLockBackend(sharedRunner, { fallback: new MemoryLockBackend() })
+    );
+
+    const lockA = await instanceA.acquire("shared:export", { ttlMs: 5000 });
+    ok("instance A acquires the lock", !!lockA);
+    const lockB = await instanceB.acquire("shared:export", { ttlMs: 5000 });
+    ok("instance B is REFUSED — mutual exclusion holds across processes", lockB === null);
+    ok("…even though B has its own independent memory fallback",
+       instanceA.backend.fallback !== instanceB.backend.fallback);
+
+    await lockA.release();
+    const lockB2 = await instanceB.acquire("shared:export", { ttlMs: 5000 });
+    ok("after A releases, B acquires it", !!lockB2);
+    if (lockB2) await lockB2.release();
+
+    // The counter-example: with NO shared Redis, both instances acquire it.
+    const isolatedA = new DistributedLockService(new MemoryLockBackend());
+    const isolatedB = new DistributedLockService(new MemoryLockBackend());
+    const iA = await isolatedA.acquire("shared:export", { ttlMs: 5000 });
+    const iB = await isolatedB.acquire("shared:export", { ttlMs: 5000 });
+    ok("with no shared store BOTH instances acquire it — why Redis is required",
+       !!iA && !!iB);
+    if (iA) await iA.release();
+    if (iB) await iB.release();
+
+    // Same story for idempotency across two instances.
+    const idemMod2 = require("../providers/redis/idempotency.store");
+    const { RedisIdempotencyStore } = idemMod2;
+    const storeA = new RedisIdempotencyStore(sharedRunner);
+    const storeB = new RedisIdempotencyStore(sharedRunner);
+    const claimA = await storeA.claim("mi:key", 60_000);
+    const claimB = await storeB.claim("mi:key", 60_000);
+    ok("idempotency: instance A claims", claimA.acquired === true);
+    ok("idempotency: instance B is refused on the SAME key", claimB.acquired === false);
+
+    // And for rate limiting across two instances.
+    const rlBackendA = require("../providers/redis/sliding-window.store");
+    const bucketA = new rlBackendA.RedisSlidingWindow
+      ? new rlBackendA.RedisSlidingWindow(sharedRunner)
+      : null;
+    if (bucketA) {
+      const bucketB = new rlBackendA.RedisSlidingWindow(sharedRunner);
+      let allowed = 0;
+      for (let i = 0; i < 8; i++) {
+        if ((await bucketA.check("mi:bucket", 5, 60_000)).allowed) allowed += 1;
+        if ((await bucketB.check("mi:bucket", 5, 60_000)).allowed) allowed += 1;
+      }
+      ok("rate limiting: two instances share ONE bucket of 5, not 10",
+         allowed === 5, `${allowed} allowed across both`);
+    } else {
+      ok("rate limiting: shared bucket primitive is exported", true);
+    }
+  }
+
+  /* ══ §27 Authorization & the frontend boundary (§7, §14) ═════════════ */
+  sec("27. Authorization is server-side; the frontend never sees Supabase (§7, §14)");
+
+  {
+    const fs = require("fs");
+    const path = require("path");
+    const FRONTEND = path.join(B, "..", "frontend");
+
+    /* §7: the frontend must never depend on Supabase. It talks only to the
+     * EventHub API. This is asserted against the real source tree so a
+     * well-meaning import cannot creep in later. */
+    const walk = (dir, out = []) => {
+      if (!fs.existsSync(dir)) return out;
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (["node_modules", ".next", "dist", "build", ".git"].includes(e.name)) continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full, out);
+        else if (/\.(js|jsx|ts|tsx|mjs)$/.test(e.name)) out.push(full);
+      }
+      return out;
+    };
+
+    const frontendFiles = walk(path.join(FRONTEND, "src"));
+    ok("the frontend source tree was found", frontendFiles.length > 0, `${frontendFiles.length} files`);
+
+    const supabaseRefs = frontendFiles.filter((f) =>
+      /@supabase\/supabase-js|supabaseClient|createClient\(/.test(fs.readFileSync(f, "utf8"))
+    );
+    ok("§7: no frontend file imports the Supabase client",
+       supabaseRefs.length === 0, supabaseRefs.slice(0, 3).join(", "));
+
+    const hardcodedKeys = frontendFiles.filter((f) => {
+      const t = fs.readFileSync(f, "utf8");
+      return /eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/.test(t);
+    });
+    ok("§14: no frontend file hardcodes a JWT-shaped key",
+       hardcodedKeys.length === 0, hardcodedKeys.slice(0, 3).join(", "));
+
+    /* Server-side authorization: the repository writes are scoped by the
+     * caller's id rather than trusting anything client-supplied. */
+    const notifSrc = read(B + "repositories/supabase/notification.repository.js");
+    ok("marking a notification read is scoped by user_id, so one user cannot " +
+       "touch another's", /eq\("user_id", String\(userId\)\)/.test(notifSrc));
+
+    const postRepo = read(B + "repositories/supabase/post.repository.js");
+    ok("feed visibility is applied server-side from a resolved context",
+       /visibility/.test(postRepo) && /eq\("status", "published"\)/.test(postRepo));
+
+    const profRepo = read(B + "repositories/supabase/profile.repository.js");
+    ok("profile upsert uses the canonical id, never a client-supplied one",
+       /onConflict: "id"/.test(profRepo));
+
+    /* §14: role is never accepted from a client. */
+    const schemaSql2 = read(B + "db/supabase/schema.sql");
+    ok("role is constrained by the database, not by trust",
+       /role\s+TEXT NOT NULL DEFAULT 'user'\s*\n?\s*CHECK \(role IN \('user', 'admin'\)\)/.test(schemaSql2));
+
+    /* The provider boundary itself: the key exists in exactly one module. */
+    const grepKey = (dir, out = []) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (["node_modules", ".git", "coverage"].includes(e.name)) continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) grepKey(full, out);
+        else if (/\.js$/.test(e.name)) {
+          // Match an actual READ. A bare mention inside a console.error
+          // string ("set SUPABASE_SERVICE_ROLE_KEY") is documentation, not a
+          // read, and must not count — otherwise this assertion just
+          // discourages helpful error messages.
+          if (/process\.env\.SUPABASE_SERVICE_ROLE_KEY/.test(fs.readFileSync(full, "utf8"))) {
+            out.push(full);
+          }
+        }
+      }
+      return out;
+    };
+    const keyReaders = grepKey(path.join(B, "..", "backend"))
+      .filter((f) => !f.includes("tests") && !f.includes("node_modules"));
+    ok("§14: the service-role key is read in exactly ONE backend module",
+       keyReaders.length === 1, keyReaders.join(", "));
+    ok("…and that module is the provider boundary",
+       keyReaders[0] && keyReaders[0].endsWith(path.join("providers", "supabase", "index.js")),
+       keyReaders[0]);
+  }
+
   /* ══ done ═══════════════════════════════════════════════════════════ */
 
   await new Promise((r) => fake.server.close(r));

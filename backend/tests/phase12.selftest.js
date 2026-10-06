@@ -1051,6 +1051,101 @@ async function auditFailureMatrix() {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §32  DOCUMENTATION SET
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Documentation that is not asserted tends to quietly stop being true. These
+ * checks do not test prose quality — they test that each required document
+ * exists, and that the specific decisions the brief asked to be RECORDED are
+ * still recorded. If someone deletes a section, this fails and the decision
+ * has to be made again rather than forgotten.
+ */
+
+async function auditDocs() {
+  sec("23. §32 — the documentation set exists and still records its decisions");
+
+  const docsDir = path.join(ROOT, "docs");
+  const REQUIRED_DOCS = {
+    "PRODUCTION-HARDENING.md": [/preflight/i, /dead letter/i],
+    "SECURITY-MODEL.md": [/row level security/i, /bearer-token/i],
+    "DATA-CONSISTENCY.md": [/reconcil/i, /dead.letter/i],
+    "INCIDENT-RUNBOOK.md": [/CRITICAL/i, /WARNING/i, /HIGH/],
+    "RESTORE-DRILL.md": [/mongodump/, /pg_dump/],
+    "LOAD-TESTING.md": [/p95/, /p99/],
+    "PROVIDER-FAILURE-MATRIX.md": [/fail.?open/i, /Redis failure must not destroy/i],
+  };
+
+  for (const [name, patterns] of Object.entries(REQUIRED_DOCS)) {
+    const file = path.join(docsDir, name);
+    if (!fs.existsSync(file)) {
+      ok(`§32: docs/${name} exists`, false);
+      continue;
+    }
+    const text = read(file);
+    ok(`§32: docs/${name} exists and is substantial`, text.length > 1500, `${text.length} chars`);
+    for (const re of patterns) {
+      ok(`§32: …${name} still documents /${re.source}/`, re.test(text));
+    }
+  }
+
+  sec("24. §32 — the decisions that must not be silently reversed");
+
+  const secDoc = read(path.join(docsDir, "SECURITY-MODEL.md"));
+  ok(
+    "§32: the RLS decision states the condition under which RLS becomes mandatory",
+    /mandatory/i.test(secDoc) && /browser/i.test(secDoc)
+  );
+  ok(
+    "§32: …and warns against half-configured RLS",
+    /half-configured/i.test(secDoc)
+  );
+  ok(
+    "§32: the auth model is recorded as bearer-token, matching the code",
+    /bearer-token/i.test(secDoc)
+  );
+
+  const consistDoc = read(path.join(docsDir, "DATA-CONSISTENCY.md"));
+  ok(
+    "§32: consistency docs state that the outbox enqueue is NOT atomic with the business write",
+    /NOT atomic/i.test(consistDoc)
+  );
+  ok(
+    "§32: …and that ambiguous conflicts are never auto-repaired",
+    /never auto-repaired/i.test(consistDoc)
+  );
+  ok(
+    "§32: …and that reconciliation never deletes Mongo source data",
+    /NO SOURCE DELETION FROM MONGO/i.test(consistDoc)
+  );
+
+  const drill = read(path.join(docsDir, "RESTORE-DRILL.md"));
+  ok(
+    "§32: the restore drill is honest that it has not been executed end to end",
+    /not complete until someone has run it/i.test(drill) || /unproven/i.test(drill)
+  );
+  ok(
+    "§32: …and requires an ISOLATED restore target",
+    /isolated/i.test(drill)
+  );
+
+  const load = read(path.join(docsDir, "LOAD-TESTING.md"));
+  ok(
+    "§32: the Socket.IO adapter is documented as NOT deployed, with an explicit trigger",
+    /Do NOT deploy the adapter|Do NOT deploy/i.test(load) && /replicas > 1/i.test(load)
+  );
+
+  const runbook = read(path.join(docsDir, "INCIDENT-RUNBOOK.md"));
+  ok(
+    "§32: the runbook escalates any suspected data loss to CRITICAL regardless of scope",
+    /data loss/i.test(runbook) && /CRITICAL/i.test(runbook)
+  );
+  ok(
+    "§32: …and forbids raising a rate limit to stop 429s",
+    /Raise a rate limit|rate limit to stop 429/i.test(runbook)
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 (async () => {
@@ -1065,6 +1160,7 @@ async function auditFailureMatrix() {
     await auditRls();
     await auditOwnership();
     await auditFailureMatrix();
+    await auditDocs();
   } catch (err) {
     failed += 1;
     failures.push(`suite crashed: ${err && err.message}`);

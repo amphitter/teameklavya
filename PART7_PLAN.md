@@ -34,7 +34,7 @@ architecture; it makes the existing architecture production-safe.
 | 10 | Error taxonomy | §30 | ✅ |
 | 11 | Frontend + upload + rate-limit review | §27, §28, §29 | pending |
 | 12 | Restore drill, backups, secret separation | §18, §19 | pending |
-| 13 | Documentation set | §32 | pending |
+| 13 | Documentation set | §32 | ✅ |
 | 14 | Final report | §33 | pending |
 
 ### Phase 3 — RESULT: ✅ **DONE** (`tests/real-providers.selftest.js`)
@@ -337,6 +337,35 @@ blocked rate limiter is a self-inflicted outage; a duplicate registration is a
 data bug. One rule for all four would get three of them wrong.
 
 Regression: 1144 → **1170 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
+### Phase 13 — RESULT: ✅ **DONE** (§32 — 7 documents, 33 new assertions)
+
+| Document | Covers |
+|---|---|
+| `PRODUCTION-HARDENING.md` | Index to the set; the five invariants; deploy checklist; what Part 7 found; **known limitations** |
+| `SECURITY-MODEL.md` | Boundary · credentials · **§9 RLS decision** · §11 Redis · §13 cache privacy · **§15 real auth model** |
+| `DATA-CONSISTENCY.md` | Outbox · dead letters · reconciliation · §6 normalisation · §7 migration safety · guarantees stated honestly |
+| `PROVIDER-FAILURE-MATRIX.md` | Six Redis modes · per-subsystem degradation and **why each differs** · Supabase modes |
+| `INCIDENT-RUNBOOK.md` | §24 severity ladder · alert→first-action · what never to do during an incident |
+| `RESTORE-DRILL.md` | §18 real commands · §19 encryption & secret separation · result table |
+| `LOAD-TESTING.md` | §20 profiles A–H · metrics · §25 budgets · §21 scale criteria · **§22 adapter trigger** |
+
+**Documentation is asserted, not merely written.** 33 assertions check each
+document exists, is substantial, and still records the specific decisions the
+brief asked to be recorded — the RLS condition, "never auto-repaired", "no
+source deletion from Mongo", "not deployed" for the Socket.IO adapter. If a
+section is deleted, the build fails and the decision has to be made again
+rather than silently forgotten. Documentation nobody maintains is worse than
+none, because it is believed.
+
+**Honesty about what is unproven.** `RESTORE-DRILL.md` states plainly that it
+has not been executed end to end, and `PRODUCTION-HARDENING.md` carries a
+limitations table: real-provider tests, the restore drill, load profiles and
+the horizontal scale test are all **built but not yet run** against real
+infrastructure. A hardening report that claims completeness is not
+trustworthy.
+
+Regression: 1170 → **1203 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

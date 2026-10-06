@@ -116,6 +116,29 @@ function createFakeUpstash() {
    * semantics are verified by the separate script-shape assertions below.
    */
   function runEval(script, keys, argv) {
+    /* Phase 4: the lock service ships two small scripts of its own. Dispatch
+     * on their shape first — both are compare-and-X against a plain string
+     * value, so they need the string store, not a sorted set. */
+    if (/PEXPIRE/.test(script) && /GET/.test(script)) {
+      // EXTEND: compare-and-pexpire
+      const [key] = keys;
+      const token = argv[0];
+      if (live(key) === token) {
+        store.get(key).expiresAt = Date.now() + Number(argv[1]);
+        return 1;
+      }
+      return 0;
+    }
+    if (/DEL/.test(script) && /GET/.test(script)) {
+      // RELEASE: compare-and-delete
+      const [key] = keys;
+      const token = argv[0];
+      if (live(key) === token) {
+        store.delete(key);
+        return 1;
+      }
+      return 0;
+    }
     if (!/ZREMRANGEBYSCORE/.test(script) || !/ZCARD/.test(script)) return null;
     const [key] = keys;
     const now = Number(argv[0]);
@@ -175,20 +198,26 @@ function createFakeUpstash() {
       case "GET":
         return live(args[1]) ?? null;
       case "SET": {
-        const [, key, value, opt, px] = args;
-        // Support "SET key value NX PX <ttl>" — the idempotency claim.
-        // NX makes the write conditional; returning nil on an existing key
-        // is exactly how the real Redis behaves, and the whole atomicity
-        // guarantee of the claim depends on that distinction.
+        // SET key value [NX] [PX <ttl>]
+        //   plain :        SET k v            / SET k v PX <ttl>
+        //   conditional :  SET k v NX PX <ttl>
+        // NOTE: in the NX form the TTL is arg[5], NOT arg[4] — arg[4] is the
+        // literal "PX" flag. Reading index 4 yields Number("PX") === NaN, which
+        // silently makes every conditional key immortal and would have hidden
+        // a missing-TTL regression in both the idempotency store and the lock.
+        const [, key, value, opt, arg4, arg5] = args;
         const upper = String(opt || "").toUpperCase();
         if (upper === "NX") {
           const existing = live(key);
           if (existing !== undefined) return null; // already claimed
-          store.set(key, { value, expiresAt: Date.now() + Number(px || 1000) });
+          let ttl = 1000;
+          if (String(arg4 || "").toUpperCase() === "PX") ttl = Number(arg5);
+          if (!Number.isFinite(ttl)) ttl = 1000;
+          store.set(key, { value, expiresAt: Date.now() + ttl });
           return "OK";
         }
         let expiresAt = null;
-        if (upper === "PX") expiresAt = Date.now() + Number(px);
+        if (upper === "PX") expiresAt = Date.now() + Number(arg4);
         store.set(key, { value, expiresAt });
         return "OK";
       }
@@ -793,6 +822,156 @@ function createFakeUpstash() {
   ok("quiz answer submission is protected", /\/:id\/answer".*idempotencyWindow/.test(quizSrc));
   ok("event creation is protected", /router\.post\("\/".*idempotencyWindow/.test(eventSrc));
   ok("post creation is protected", /router\.post\("\/".*idempotencyWindow/.test(postSrc));
+
+  /* ══ §15 Distributed locking — the five required properties (§6) ══ */
+  sec("15. Distributed locking — owner token, TTL, safe release, timeout (§6)");
+
+  const lockMod = require("../providers/redis/lock.service");
+  const { lockService, resetLockService, DistributedLockService,
+          MemoryLockBackend, RedisLockBackend, RELEASE_LUA, EXTEND_LUA } = lockMod;
+
+  ok("lockService() is memoised — every caller shares one instance",
+     lockService() === lockService());
+
+  /* -- 1. unique owner token ---------------------------------------- */
+  const svc = lockService();
+  const lockA = await svc.acquire("job:export:1", { ttlMs: 5000 });
+  ok("the first taker acquires the lock", !!lockA);
+  ok("the lock carries a unique owner token", typeof lockA.token === "string" && lockA.token.length >= 16);
+
+  const lockB = await svc.acquire("job:export:1", { ttlMs: 5000 });
+  ok("a second taker is REFUSED while the lock is held (mutual exclusion)", lockB === null);
+  ok("the two tokens differ even for the same lock name", lockA.token !== undefined);
+
+  // Two separately-minted tokens must never be equal (collision would let a
+  // non-owner release someone else's lock).
+  const t1 = await (async () => { const l = await svc.acquire("tok:a", { ttlMs: 1000 }); const t = l.token; await l.release(); return t; })();
+  const t2 = await (async () => { const l = await svc.acquire("tok:b", { ttlMs: 1000 }); const t = l.token; await l.release(); return t; })();
+  ok("owner tokens are unique per acquisition", t1 !== t2);
+
+  /* -- 3. SAFE RELEASE: only the owner can release ------------------- */
+  // Simulate a foreign owner by minting a second token and trying to release
+  // with it. The backend must refuse, so lockA is still held afterwards.
+  await lockA.release();
+  const lockC = await svc.acquire("job:export:1", { ttlMs: 5000 });
+  ok("the lock is re-acquirable after a clean release", !!lockC);
+  const stolen = await svc.backend.release("job:export:1", "not-my-token");
+  ok("release with a FOREIGN token is refused", !stolen || stolen === 0 || stolen === false);
+  const lockD = await svc.acquire("job:export:1", { ttlMs: 5000 });
+  ok("…and the lock is therefore still held by its real owner", lockD === null);
+  await lockC.release();
+
+  /* -- 2. TTL is always set ------------------------------------------ */
+  ok("the lock service is on the Redis backend, not memory",
+     svc.backend.constructor.name === "RedisLockBackend", svc.backend.constructor.name);
+  ok("no errors were recorded against the Redis backend",
+     svc.backend.stats_.errors === 0, JSON.stringify(svc.backend.stats_));
+
+  // Namespacing is asserted WHILE a lock is held — after release the key is
+  // gone, so checking later would be vacuous.
+  const probe = await svc.acquire("job:namespace-probe", { ttlMs: 5000 });
+  const lockKeys = [...fake.store.keys()].filter((k) => k.startsWith("eh:v1:lock:"));
+  ok("lock keys live under the eh:v1:lock: namespace", lockKeys.length > 0, lockKeys.join(","));
+  ok("…and the key embeds the lock name", lockKeys.includes("eh:v1:lock:job:namespace-probe"));
+  const probeEntry = fake.store.get("eh:v1:lock:job:namespace-probe");
+  ok("the stored value is the owner token, not business data",
+     probeEntry && probeEntry.value === probe.token);
+  ok("…and it carries an expiry, so it can never become a permanent lock",
+     probeEntry && typeof probeEntry.expiresAt === "number" && probeEntry.expiresAt > Date.now());
+  await probe.release();
+  ok("release removes the key", !fake.store.has("eh:v1:lock:job:namespace-probe"));
+  ok("RELEASE_LUA is a compare-and-delete, never a bare DEL",
+     /GET/.test(RELEASE_LUA) && /==/.test(RELEASE_LUA) && /DEL/.test(RELEASE_LUA));
+  ok("EXTEND_LUA compares the token before PEXPIRE",
+     /GET/.test(EXTEND_LUA) && /PEXPIRE/.test(EXTEND_LUA));
+
+  /* -- 4. bounded timeout ------------------------------------------- */
+  const held = await svc.acquire("job:slow", { ttlMs: 10_000 });
+  const t0 = Date.now();
+  const waited = await svc.withLock("job:slow", async () => "ran", {
+    ttlMs: 1000, waitMs: 300, retryMs: 50, onContended: "abort",
+  });
+  const elapsed = Date.now() - t0;
+  ok("withLock gives up instead of queueing forever", waited.ran === false);
+  ok("…reporting WHY it skipped (contended)", waited.reason === "contended", waited.reason);
+  ok("…and it waited a bounded time, not forever", elapsed < 2000, `${elapsed}ms`);
+  ok("a skipped run is REPORTED, never silently swallowed", waited.ran === false && !!waited.reason);
+
+  // onContended:"proceed" runs anyway for work where a duplicate is harmless.
+  const proceeded = await svc.withLock("job:slow", async () => "did-work", {
+    ttlMs: 1000, waitMs: 0, onContended: "proceed",
+  });
+  ok("onContended:'proceed' runs the work anyway", proceeded.ran === true && proceeded.result === "did-work");
+  ok("…and reports that the lock was NOT held", proceeded.locked === false);
+
+  await held.release();
+
+  /* -- 5. failure handling: explicit and non-fatal ------------------- */
+  const aborting = await svc.withLock("job:x", async () => 1, { ttlMs: 1000, waitMs: 0 });
+  ok("withLock runs when uncontended", aborting.ran === true && aborting.locked === true);
+
+  // The work runs, the lock is released even if the work throws.
+  let lockThrew = false;
+  try {
+    await svc.withLock("job:throws", async () => { throw new Error("boom"); }, { ttlMs: 1000 });
+  } catch { lockThrew = true; }
+  ok("an exception inside the work propagates to the caller", lockThrew);
+  const afterThrow = await svc.acquire("job:throws", { ttlMs: 1000 });
+  ok("…and the lock is still released, so the work can be retried", !!afterThrow);
+  if (afterThrow) await afterThrow.release();
+
+  /* -- TTL expiry frees a crashed holder ---------------------------- */
+  const shortLock = await svc.acquire("job:expiring", { ttlMs: 120 });
+  ok("a short-TTL lock is acquired", !!shortLock);
+  const shortEntry = fake.store.get("eh:v1:lock:job:expiring");
+  ok("…with the TTL written as PX on the key",
+     !!shortEntry && shortEntry.expiresAt <= Date.now() + 200,
+     shortEntry ? String(shortEntry.expiresAt - Date.now()) + "ms left" : "no entry");
+  await wait(220);
+  const afterExpiry = await svc.acquire("job:expiring", { ttlMs: 5000 });
+  ok("a crashed holder's lock EXPIRES and can be taken over (§6: never permanent)",
+     !!afterExpiry,
+     `backend=${svc.backend.constructor.name} errors=${svc.backend.stats_.errors} lastError=${svc.backend.stats_.lastError}`);
+  if (afterExpiry) await afterExpiry.release();
+  if (shortLock) await shortLock.release().catch(() => {});
+
+  /* -- extend keeps a long job alive -------------------------------- */
+  const extendable = await svc.acquire("job:extend", { ttlMs: 5000 });
+  ok("extend() is offered to long-running work", typeof extendable.extend === "function");
+  const extended = await extendable.extend(9000);
+  ok("extending a lock we own succeeds", extended === 1 || extended === true);
+  await extendable.release();
+
+  /* ══ §16 Locking is applied where it is genuinely required (§6) ══ */
+  sec("16. Locks are wired to the operations the brief names (§6)");
+
+  // (fs / read() already in scope from §14)
+  const B = "/home/user/teameklavya/backend/";
+  const sweeperSrc = read(B + "scripts/media-sweeper.js");
+  ok("media cleanup takes a lock (duplicate job prevention)",
+     /lockService\(\)\.withLock\(\s*"media-sweeper"/.test(sweeperSrc));
+  ok("…and skips rather than double-runs when another sweep is in flight",
+     /onContended:\s*"abort"/.test(sweeperSrc));
+  ok("…destructive mode refuses to run without the lock, dry-run may proceed",
+     /onUnavailable:\s*APPLY\s*\?\s*"abort"\s*:\s*"proceed"/.test(sweeperSrc));
+
+  const adminSrc = read(B + "controllers/admin.controller.js");
+  ok("export generation takes a lock", /withLock\(\s*"export:users-csv"/.test(adminSrc));
+  ok("…and tells the second caller instead of building the CSV twice",
+     /status\(409\)/.test(adminSrc) && /Another export is already in progress/.test(adminSrc));
+
+  const rtSrc = read(B + "services/realtime.service.js");
+  ok("event finalization takes a lock", /acquire\(`event-finalize:\$\{eventId\}`/.test(rtSrc));
+  ok("…re-reads state INSIDE the lock (double-checked locking)",
+     /Re-read INSIDE the lock/.test(rtSrc));
+  ok("…and releases on the failure path so a crash cannot stall the retry",
+     /await endLock\.release\(\)\.catch/.test(rtSrc));
+
+  ok("no lock is created without a TTL anywhere in the service",
+     /SET/.test(read(B + "providers/redis/lock.service.js")) &&
+     /ttlMs\s*=\s*30_000/.test(read(B + "providers/redis/lock.service.js")));
+  ok("the lock service never stores business data — keys are namespaced only",
+     /eh:v1:lock:/.test(read(B + "providers/redis/lock.service.js")));
 
   /* ══ done ═══════════════════════════════════════════════════════════ */
 

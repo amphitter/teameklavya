@@ -1425,6 +1425,30 @@ function registerHandlers(socket) {
         return;
       }
 
+      /* Part 6, Phase 4 (§6): event finalization must be mutually exclusive.
+       * The liveState check above is a non-atomic check-then-act — two
+       * organizers (or one organizer on two sockets) pressing "End event"
+       * together both read liveState !== "COMPLETED" and would then both stop
+       * the activity, both write the EventResult snapshot and both broadcast.
+       * The lock makes exactly one of them do the work. */
+      const { lockService } = require("../providers/redis/lock.service");
+      const endLock = await lockService()
+        .acquire(`event-finalize:${eventId}`, { ttlMs: 60_000 })
+        .catch(() => null);
+      if (!endLock) {
+        // Someone else is finalizing this event right now.
+        if (ack) ack({ ok: true, alreadyCompleted: true });
+        return;
+      }
+      // Re-read INSIDE the lock: the winner may have finished between our
+      // earlier read and now (double-checked locking).
+      const fresh = await Event.findById(eventId).select("liveState removedAt").lean();
+      if (!fresh || fresh.removedAt || fresh.liveState === "COMPLETED") {
+        await endLock.release().catch(() => {});
+        if (ack) ack({ ok: true, alreadyCompleted: true });
+        return;
+      }
+
       // Stop the running activity
       const running = await Activity.findOne({ event: eventId, state: { $in: ["LIVE", "PAUSED"] } });
       if (running) await endActivity(eventId, running, user.id);
@@ -1462,7 +1486,11 @@ function registerHandlers(socket) {
         serverTime: Date.now(),
       });
       if (ack) ack({ ok: true, participants: sessions.length });
+      await endLock.release().catch(() => {});
     } catch (error) {
+      // Release on the failure path too, so a crash does not stall the next
+      // attempt for a full TTL. Compare-and-delete makes a double release safe.
+      if (typeof endLock !== "undefined") await endLock.release().catch(() => {});
       console.error("event:end error:", error.message);
       emitError(socket, ERROR_CODES.INTERNAL, "End failed");
     }

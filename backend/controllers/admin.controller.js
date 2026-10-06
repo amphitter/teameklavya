@@ -54,33 +54,56 @@ exports.getAllUsers = async (req, res) => {
 
 exports.exportUsersCSV = async (req, res) => {
   try {
-    const users = await User.find()
-      .select("-passwordHash -resetOtp -passwordResetToken -oauthProviders")
-      .sort({ createdAt: -1 });
-
-    const jsonData = users.map(u => ({
-      firstName: u.firstName,
-      lastName: u.lastName,
-      email: u.email,
-      role: u.role,
-      institution: u.profile?.institution || "",
-      course: u.profile?.course || "",
-      year: u.profile?.year || "",
-      emailVerified: u.emailVerified,
-      eventsAttended: u.pastEventsAttended?.length || 0,
-      createdAt: u.createdAt,
-    }));
-
-    const json2csvParser = new Parser();
-    const csv = json2csvParser.parse(jsonData);
-    res.header("Content-Type", "text/csv");
-    res.attachment(`users-export-${new Date().toISOString().split('T')[0]}.csv`);
-    res.send(csv);
+    // Part 6, Phase 4 (§6): a full-table CSV build is slow and memory-heavy.
+    // Two admins clicking "export" together would run it twice for identical
+    // output, so the first wins and the second is told to wait.
+    const { lockService } = require("../providers/redis/lock.service");
+    // withLock invokes fn({held,name,token,extend}) — bind req/res explicitly.
+    const outcome = await lockService().withLock(
+      "export:users-csv",
+      () => buildUsersCsv(req, res),
+      {
+        ttlMs: 5 * 60 * 1000,
+        onContended: "abort",
+      }
+    );
+    if (!outcome.ran) {
+      return res.status(409).json({
+        success: false,
+        message: "Another export is already in progress. Try again shortly.",
+      });
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };
+
+/** The actual CSV build — kept separate so the lock wraps it without re-indent. */
+async function buildUsersCsv(req, res) {
+  const users = await User.find()
+    .select("-passwordHash -resetOtp -passwordResetToken -oauthProviders")
+    .sort({ createdAt: -1 });
+
+  const jsonData = users.map(u => ({
+    firstName: u.firstName,
+    lastName: u.lastName,
+    email: u.email,
+    role: u.role,
+    institution: u.profile?.institution || "",
+    course: u.profile?.course || "",
+    year: u.profile?.year || "",
+    emailVerified: u.emailVerified,
+    eventsAttended: u.pastEventsAttended?.length || 0,
+    createdAt: u.createdAt,
+  }));
+
+  const json2csvParser = new Parser();
+  const csv = json2csvParser.parse(jsonData);
+  res.header("Content-Type", "text/csv");
+  res.attachment(`users-export-${new Date().toISOString().split('T')[0]}.csv`);
+  res.send(csv);
+}
 
 exports.getAdminEvents = async (req, res) => {
   try {

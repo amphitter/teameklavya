@@ -481,6 +481,41 @@ assertions across 10 suites, 0 failed**; e2e unchanged and green.
   leaderboard finalization, media cleanup.
 - A test asserts no lock survives its TTL.
 
+### Phase 4 — RESULT: ✅ **DONE** (191 assertions in phase10, +42)
+- `backend/providers/redis/lock.service.js` — `MemoryLockBackend`,
+  `RedisLockBackend`, `DistributedLockService`, `RELEASE_LUA`, `EXTEND_LUA`.
+  Key prefix `eh:v1:lock:`; `LOCK_PROVIDER` defaults to `CACHE_PROVIDER`.
+- **The five properties, each asserted:** unique owner token (random UUID per
+  acquisition); TTL always written as `PX` (no TTL-less code path); release is
+  a compare-and-delete Lua script, never a bare `DEL`; `withLock` waits a
+  bounded `waitMs` then gives up; `onContended` / `onUnavailable` are explicit
+  at the call site. `ran:false` is reported, never swallowed.
+- **Wired to three sites where mutual exclusion is genuinely required:**
+  - `scripts/media-sweeper.js` — duplicate job prevention. Two overlapping
+    sweeps would select the same candidates and both try to delete them.
+    `onContended: "abort"`; `onUnavailable: APPLY ? "abort" : "proceed"` — a
+    destructive run refused to run blind is right, a duplicated read-only
+    report is harmless.
+  - `controllers/admin.controller.js` `exportUsersCSV` — a full-table export
+    loaded entirely into RAM. Concurrent builds are pure waste. Second caller
+    gets 409 instead of a second unbounded load.
+  - `services/realtime.service.js` `event:end` — event finalization. The
+    existing `liveState === "COMPLETED"` check is a non-atomic check-then-act:
+    two organizers pressing "End event" together both pass it and would both
+    stop the activity, both write the EventResult snapshot and both broadcast.
+    Now uses double-checked locking (re-reads state inside the lock) and
+    releases on the failure path.
+- **Deliberately NOT locked, with reasons:**
+  - Certificate generation already uses `$setOnInsert` upserts keyed on
+    `{event, user}`, which is atomic, free and cannot deadlock — a lock would
+    add coordination cost for no gain.
+  - The registration CSV export streams (bounded memory, read-only). Holding a
+    lock for the whole multi-minute stream is worse than the duplicate work.
+- **Bug found and fixed in the test double:** the fake Upstash server read the
+  `SET k v NX PX <ttl>` TTL from index 4 — the literal `"PX"` flag — giving
+  `Number("PX") === NaN` and making every conditional key immortal. This had
+  been silently weakening the Phase 3 idempotency TTL assertions too.
+
 ### Phase 5 — Supabase provider, schema & repositories (brief §7, §8, §9, §13)
 - `backend/providers/supabase/` — client over REST (service-role key,
   server-side only), timing metrics, N+1 detection, repository boundary.

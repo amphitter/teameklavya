@@ -50,10 +50,17 @@ const OLDER_THAN_HOURS = Math.max(1, Number(value("--older-than", 24)) || 24);
 
   const MediaAsset = require("../models/mediaAsset.model");
   const media = require("../services/media.service");
+  // Part 6, Phase 4 (§6): two sweeper runs overlapping (a cron firing twice,
+  // or a manual run during a scheduled one) would both select the SAME
+  // candidates and both try to delete them. Hold a lock for the whole run.
+  const { lockService } = require("../providers/redis/lock.service");
 
   const startedAt = Date.now();
   const cutoff = new Date(Date.now() - OLDER_THAN_HOURS * 60 * 60 * 1000);
 
+  const outcome = await lockService().withLock(
+    "media-sweeper",
+    async () => {
   // Only assets whose grace window has elapsed AND that are not in use.
   const candidates = await MediaAsset.find({
     status: { $in: ["pending", "cleanup_pending"] },
@@ -112,6 +119,22 @@ const OLDER_THAN_HOURS = Math.max(1, Number(value("--older-than", 24)) || 24);
     })
   );
   console.log("─".repeat(60));
+    },
+    {
+      ttlMs: 15 * 60 * 1000, // a long sweep must not have its lock expire mid-run
+      // Another sweeper is already running — skip entirely, do not queue.
+      onContended: "abort",
+      // Destructive mode refuses to run blind; a dry run is read-only, so a
+      // duplicated report is harmless and better than no report at all.
+      onUnavailable: APPLY ? "abort" : "proceed",
+    }
+  );
+
+  if (!outcome.ran) {
+    console.log(
+      `Media sweeper skipped — ${outcome.reason === "contended" ? "another sweep is already running" : "lock backend unavailable"}`
+    );
+  }
 
   await mongoose.disconnect();
 })().catch(async (err) => {

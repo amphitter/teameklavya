@@ -740,7 +740,7 @@ without distributed transactions, failure behaviour & observability, testing,
 bugs found and fixed, configuration surface, known limitations, delivery
 inventory, build status.
 
-Final state: **12 Part 6 commits, 27 new files, 924 assertions across 10
+Final state: **14 Part 6 commits, 27 new files, 924 assertions across 10
 suites (0 failed), 6/6 e2e, zero new dependencies.**
 
 The §17 regression floor is held exactly: the 9 pre-existing suites still total

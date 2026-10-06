@@ -2,7 +2,7 @@
 
 **Upstash Redis as shared infrastructure + Supabase PostgreSQL for the
 relational/social domain**
-Date: 2026-10-07 · 13 commits · 9 phases
+Date: 2026-10-07 · 14 commits · 9 phases
 
 ---
 
@@ -31,7 +31,7 @@ transactions.
 
 | | |
 |---|---|
-| Commits | 13 |
+| Commits | 14 (10 phase commits + 4 doc/plan) |
 | New files | 27 |
 | New assertions | **363** (phase10 selftest) |
 | Pre-existing assertions | **561 — unchanged** (§17 floor: all pass) |

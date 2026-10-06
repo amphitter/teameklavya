@@ -327,6 +327,54 @@ test may be removed or weakened.
   referenced anywhere in `frontend/`.
 - Selftest: `tests/phase10.selftest.js` §1–§3.
 
+### Phase 1 — RESULT: ✅ **DONE** (89/89 selftest)
+
+**`backend/providers/redis/upstash.provider.js`** — Upstash REST client
+implementing the existing `CacheProvider` interface. **No vendor SDK, no new
+dependencies**: Upstash speaks HTTP, so this is plain `fetch` sending commands
+as a JSON array in the POST body rather than URL-encoded in the path (our keys
+contain colons, slashes and braces). Commands batch through `/pipeline` so the
+live key and its SWR shadow are written as an atomic pair.
+
+Three decisions worth recording:
+- **The provider throws; it does not swallow.** Deciding what to do when Redis
+  is broken belongs to the resilient wrapper, not the transport — that
+  separation is what makes the fallback independently testable.
+- **SWR is emulated with a `::stale` shadow key.** Redis cannot return a value
+  that has already expired, which is exactly what stale-while-revalidate
+  needs. Every `set` writes both, in one pipeline.
+- **`delPrefix` reports LOGICAL entries, not physical keys.** Counting shadow
+  keys would make Redis report double the memory provider's number for
+  identical work, so the two providers would disagree for no caller-visible
+  reason.
+
+**`services/cache.service.js`**
+- `CACHE_PROVIDER=memory` (default) | `upstash`. Verified to boot and serve
+  with Redis absent, unconfigured, **and** pointed at a dead endpoint.
+- `ResilientCacheProvider` wraps Redis with memory behind a **circuit
+  breaker**. The breaker is not decoration: a per-operation `try/catch` would
+  pay the full network timeout on every cache read during an outage — a
+  latency cliff across the whole app — whereas the breaker fails fast and
+  probes periodically to notice recovery. Every degradation increments a
+  counter for the dashboard.
+- Key format `eh:v1:cache:event:{id}`. Bumping the version invalidates the
+  entire cache via one env change.
+- Registry now declares **owner + ttl + invalidatedBy + privacy**, asserted
+  complete for every entry. The numeric `TTL` map is **derived** from the
+  registry so the two cannot drift — it stays numeric because repositories
+  pass `TTL.X` straight into `getOrSet`.
+
+**Compatibility work (the real cost of this phase).** The facade became async
+because Redis makes every cache operation a network round-trip. 19 src call
+sites updated to `await`; invalidators made **awaitable but non-rejecting** so
+the ~20 existing fire-and-forget invalidation calls stay valid without adding
+a Redis round-trip to write paths. 4 existing tests updated to await the
+now-async facade — **no assertion removed or weakened**.
+
+**Results:** phase10 **89 passed, 0 failed**. Full regression: **650
+assertions across 10 suites, 0 failed**; e2e quiz 32 · memories 15 · mgmt ✅ ·
+live 65 · social ✅ · community 38.
+
 ### Phase 2 — Distributed rate limiting (brief §4)
 - `RateLimitStore` interface with memory + Redis implementations; Redis uses a
   Lua sliding window (atomic, one round-trip).

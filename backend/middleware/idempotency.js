@@ -12,39 +12,58 @@
  *   • Mark-on-receipt semantics: a key identifies one attempt; a retried
  *     validation failure should use a fresh key.
  *
- * The frontend starts sending the header in Phase 5; until then this is
- * dormant infrastructure with zero behavior change.
+ * Part 6, Phase 3 (§5): the key store is now SHARED. Previously `seen` was a
+ * process-local Map, so with two instances the same Idempotency-Key arriving
+ * at Server B was invisible to Server A — the exact duplicate the middleware
+ * exists to prevent. Claims now go through providers/redis/idempotency.store.js
+ * which uses `SET NX PX` in Redis when configured and degrades to the
+ * per-instance map when it is not.
+ *
+ * This middleware is now ASYNC. It always was conceptually — the claim is an
+ * atomic remote operation — and Express supports an async handler as long as
+ * errors are forwarded to next().
  */
 const { ConflictError } = require("../utils/app-error");
+const { idempotencyStore } = require("../providers/redis/idempotency.store");
 
 const WINDOW_MS = 2 * 60 * 1000; // dedup window
-const MAX_KEYS = 10_000;
-const seen = new Map(); // scopedKey -> expiresAt (ms epoch)
 
-function prune(now) {
-  if (seen.size < MAX_KEYS / 2) return; // cheap skip while small
-  for (const [key, expiresAt] of seen) {
-    if (expiresAt <= now) seen.delete(key);
-  }
-  if (seen.size > MAX_KEYS) seen.clear(); // safety valve
-}
-
-function idempotencyWindow(req, _res, next) {
-  const raw = String(req.get("idempotency-key") || (req.body && req.body.clientRequestId) || "").trim();
-  if (!raw) return next();
-
+/**
+ * Build the scoped key. Identity is part of the key, so one user's key can
+ * never consume another's — a collision there would let one user's retry
+ * block a different user's legitimate request.
+ */
+function scopedKey(req, raw) {
   const id = req.user && (req.user._id || req.user.id);
   const scope = id ? `u:${id}` : `ip:${req.ip || "unknown"}`;
-  const key = `${scope}:${raw.slice(0, 128)}`;
-
-  const now = Date.now();
-  prune(now);
-  const expiresAt = seen.get(key);
-  if (expiresAt && expiresAt > now) {
-    return next(new ConflictError("Duplicate request — this was already submitted."));
-  }
-  seen.set(key, now + WINDOW_MS);
-  next();
+  return `${scope}:${raw.slice(0, 128)}`;
 }
 
-module.exports = { idempotencyWindow, WINDOW_MS };
+async function idempotencyWindow(req, _res, next) {
+  const raw = String(req.get("idempotency-key") || (req.body && req.body.clientRequestId) || "").trim();
+  // No key → opt-in middleware does nothing. Legacy clients are unaffected.
+  if (!raw) return next();
+
+  const key = scopedKey(req, raw);
+  const store = idempotencyStore();
+
+  try {
+    const result = await store.claim(key, WINDOW_MS);
+    if (!result.acquired) {
+      return next(new ConflictError("Duplicate request — this was already submitted."));
+    }
+    return next();
+  } catch (err) {
+    /**
+     * A store failure must not turn into a duplicate write, and must not turn
+     * into a mysterious 500 either. The store itself already falls back to
+     * per-instance memory on a Redis error; reaching here means even that
+     * failed, so we fail CLOSED for safety — a business-critical mutation
+     * that cannot be de-duplicated is worse than one that is refused.
+     */
+    console.error("[idempotency] claim failed, refusing the write:", err?.message || err);
+    return next(new ConflictError("Could not verify this request is unique. Please retry."));
+  }
+}
+
+module.exports = { idempotencyWindow, WINDOW_MS, scopedKey, idempotencyStore };

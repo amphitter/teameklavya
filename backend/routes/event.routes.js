@@ -1,5 +1,6 @@
 // routes/event.routes.js
 const express = require("express");
+const { idempotencyWindow } = require("../middleware/idempotency");
 // Part 5, Phase 2 — event action bucket (§24)
 const { limiters } = require("../config/rate-limits");
 
@@ -15,7 +16,7 @@ router.get("/slug/:slug", optionalUser, eventController.getEventBySlug);
 // Admin routes - require authentication and admin role
 router.get("/admin/list", requireAuth, requireAdmin, eventController.getAdminEvents);
 router.get("/admin/with-stats", requireAuth, requireAdmin, eventController.getEventsWithTicketStats);
-router.post("/", requireAuth, requireAdmin, eventController.createEvent);
+router.post("/", requireAuth, requireAdmin, idempotencyWindow, eventController.createEvent);
 router.get("/trending", optionalUser, eventController.getTrendingEvents);
 router.get("/for-you", requireAuth, eventController.getEventsForYou);
 router.get("/:id", requireAuth, requireAdmin, eventController.getEventById);

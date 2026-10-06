@@ -12,6 +12,7 @@
  *  GET    /api/quizzes/:id/leaderboard     rankings (optional auth)
  */
 const express = require("express");
+const { idempotencyWindow } = require("../middleware/idempotency");
 const router = express.Router();
 const { requireAuth, optionalUser } = require("../middleware/auth.middleware");
 const quizController = require("../controllers/quiz.controller");
@@ -23,7 +24,7 @@ router.post("/:id/end", requireAuth, quizController.endQuiz);
 router.delete("/:id", requireAuth, quizController.deleteQuiz);
 router.get("/event/:eventId", optionalUser, quizController.getEventQuizzes);
 router.get("/:id/leaderboard", optionalUser, quizController.getLeaderboard);
-router.post("/:id/answer", requireAuth, quizController.submitAnswer);
+router.post("/:id/answer", requireAuth, idempotencyWindow, quizController.submitAnswer);
 router.get("/:id", optionalUser, quizController.getQuizById);
 
 module.exports = router;

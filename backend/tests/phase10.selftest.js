@@ -176,8 +176,19 @@ function createFakeUpstash() {
         return live(args[1]) ?? null;
       case "SET": {
         const [, key, value, opt, px] = args;
+        // Support "SET key value NX PX <ttl>" — the idempotency claim.
+        // NX makes the write conditional; returning nil on an existing key
+        // is exactly how the real Redis behaves, and the whole atomicity
+        // guarantee of the claim depends on that distinction.
+        const upper = String(opt || "").toUpperCase();
+        if (upper === "NX") {
+          const existing = live(key);
+          if (existing !== undefined) return null; // already claimed
+          store.set(key, { value, expiresAt: Date.now() + Number(px || 1000) });
+          return "OK";
+        }
         let expiresAt = null;
-        if (String(opt || "").toUpperCase() === "PX") expiresAt = Date.now() + Number(px);
+        if (upper === "PX") expiresAt = Date.now() + Number(px);
         store.set(key, { value, expiresAt });
         return "OK";
       }
@@ -658,6 +669,130 @@ function createFakeUpstash() {
   ok("the synchronous allow() path still works", syncGuard.allow("s1").allowed === true);
   ok("and still refuses past the limit",
     syncGuard.allow("s1").allowed === true && syncGuard.allow("s1").allowed === false);
+
+  /* ══ §12 Distributed idempotency (brief §5) ══════════════════════ */
+  sec("12. Distributed idempotency (§5)");
+
+  const idem = require("../providers/redis/idempotency.store");
+  const { idempotencyWindow, WINDOW_MS, scopedKey } = require("../middleware/idempotency");
+  const { ConflictError } = require("../utils/app-error");
+
+  const idemRunner = idem.MemoryIdempotencyStore
+    ? require("../providers/redis/sliding-window.store").createRedisRunner({
+        url: `http://127.0.0.1:${FAKE_PORT}`,
+        token: "test-token-do-not-log",
+      })
+    : null;
+  const idemBackend = new idem.RedisIdempotencyStore(idemRunner, { keyPrefix: "eh:v1:idem:" });
+
+  // ── The atomic claim primitive ──
+  const c1 = await idemBackend.claim("claim-a", 60_000);
+  ok("the first claim of a key succeeds", c1.acquired === true);
+  const c2 = await idemBackend.claim("claim-a", 60_000);
+  ok("a second claim of the same key FAILS", c2.acquired === false);
+  const c3 = await idemBackend.claim("claim-b", 60_000);
+  ok("a different key can still be claimed", c3.acquired === true);
+  ok("rejections and acquisitions are counted", idemBackend.stats_.acquired >= 2 && idemBackend.stats_.rejected >= 1,
+    JSON.stringify(idemBackend.stats()));
+
+  // ── The brief's scenario, literally ───────────────────────────────────
+  // Server A processes "abc123"; Server B receives it immediately after.
+  // Two SEPARATE store objects over one shared backend.
+  const serverAStore = new idem.RedisIdempotencyStore(idemRunner, { keyPrefix: "eh:v1:idem:" });
+  const serverBStore = new idem.RedisIdempotencyStore(idemRunner, { keyPrefix: "eh:v1:idem:" });
+  const sharedKey = "u:user-1:abc123";
+  const onA = await serverAStore.claim(sharedKey, WINDOW_MS);
+  const onB = await serverBStore.claim(sharedKey, WINDOW_MS);
+  ok("Server A accepts the key", onA.acquired === true);
+  ok("Server B RECOGNISES the existing key and refuses", onB.acquired === false);
+
+  // Contrast: two isolated MEMORY stores cannot see each other — the bug
+  // this phase exists to remove, stated as a test.
+  const isoA = new idem.MemoryIdempotencyStore();
+  const isoB = new idem.MemoryIdempotencyStore();
+  await isoA.claim(sharedKey, WINDOW_MS);
+  const isoBFirst = await isoB.claim(sharedKey, WINDOW_MS);
+  ok("two isolated memory stores each accept the same key (why Redis is needed)", isoBFirst.acquired === true);
+
+  // ── Middleware behaviour over the shared store ──
+  const fakeReq = (over = {}) => ({
+    headers: {},
+    body: {},
+    user: null,
+    get(h) {
+      return this.headers[String(h).toLowerCase()];
+    },
+    ...over,
+  });
+  const runMw = (req) =>
+    new Promise((resolve) => {
+      idempotencyWindow(req, {}, (e) => resolve(e || null));
+    });
+
+  const reqFor = (userId, key) =>
+    fakeReq({ user: { _id: userId }, headers: { "idempotency-key": key } });
+
+  const mwFirst = await runMw(reqFor("iw-1", "mw-key-1"));
+  ok("middleware: the first request passes", mwFirst === null, String(mwFirst));
+  const mwDup = await runMw(reqFor("iw-1", "mw-key-1"));
+  ok("middleware: the replay is a 409 ConflictError", mwDup instanceof ConflictError, String(mwDup));
+  if (mwDup instanceof ConflictError) eq("...with status 409", mwDup.status, 409);
+
+  const mwOtherUser = await runMw(reqFor("iw-2", "mw-key-1"));
+  ok("middleware: a different user with the same key is NOT blocked (per-user scoping)", mwOtherUser === null);
+
+  const mwNoKey = await runMw(fakeReq({ user: { _id: "iw-3" } }));
+  ok("middleware: a request with no key passes through untouched", mwNoKey === null);
+
+  const mwBody = await runMw(fakeReq({ user: { _id: "iw-4" }, body: { clientRequestId: "body-1" } }));
+  ok("middleware: body.clientRequestId also works", mwBody === null);
+  const mwBodyDup = await runMw(fakeReq({ user: { _id: "iw-4" }, body: { clientRequestId: "body-1" } }));
+  ok("middleware: and is deduped on replay", mwBodyDup instanceof ConflictError);
+
+  // Key scoping must put identity INSIDE the key
+  ok("the scoped key embeds the user identity", scopedKey(reqFor("u-abc", "k"), "k").includes("u-abc"),
+    scopedKey(reqFor("u-abc", "k"), "k"));
+  ok("two users produce different keys for the same idempotency key",
+    scopedKey(reqFor("u1", "k"), "k") !== scopedKey(reqFor("u2", "k"), "k"));
+
+  // ── Failure: Redis down → degrade to memory, never allow silently ──
+  sec("13. Idempotency degrades to memory, never duplicates silently (§5)");
+  fake.state.broken = true;
+  const fbBefore = idemBackend.stats_.fallbacks;
+  let idemThrew = false;
+  let idemClaim = null;
+  try {
+    idemClaim = await idemBackend.claim("outage-key", 60_000);
+  } catch {
+    idemThrew = true;
+  }
+  ok("a Redis outage does not throw from the idempotency store", !idemThrew);
+  ok("the outage is recorded as a fallback", idemBackend.stats_.fallbacks > fbBefore);
+  ok("the store still de-duplicates within the instance (degraded, not absent)",
+    idemClaim && idemClaim.degraded === true, JSON.stringify(idemClaim));
+  const idemClaim2 = await idemBackend.claim("outage-key", 60_000);
+  ok("a replay during the outage is still refused by the memory fallback",
+    idemClaim2.acquired === false, JSON.stringify(idemClaim2));
+  fake.state.broken = false;
+
+  // ── Coverage: business-critical mutations are protected (§5) ──
+  sec("14. Business-critical mutations are protected (§5)");
+  const fs = require("fs");
+  const read = (f) => fs.readFileSync(f, "utf8");
+  const ticketSrc = read("/home/user/teameklavya/backend/routes/ticket.routes.js");
+  const quizSrc = read("/home/user/teameklavya/backend/routes/quiz.routes.js");
+  const regSrc = read("/home/user/teameklavya/backend/routes/registration.routes.js");
+  const postSrc = read("/home/user/teameklavya/backend/routes/post.routes.js");
+  const eventSrc = read("/home/user/teameklavya/backend/routes/event.routes.js");
+
+  ok("registration submission is protected", /\/responses".*idempotencyWindow/.test(regSrc));
+  ok("ticket generation is protected", /\/generate".*idempotencyWindow/.test(ticketSrc));
+  ok("bulk ticket generation is protected", /\/bulk-generate".*idempotencyWindow/.test(ticketSrc));
+  ok("pending-ticket approval is protected", /\/approve-pending".*idempotencyWindow/.test(ticketSrc));
+  ok("ticket send is protected", /\/send-ticket".*idempotencyWindow/.test(ticketSrc));
+  ok("quiz answer submission is protected", /\/:id\/answer".*idempotencyWindow/.test(quizSrc));
+  ok("event creation is protected", /router\.post\("\/".*idempotencyWindow/.test(eventSrc));
+  ok("post creation is protected", /router\.post\("\/".*idempotencyWindow/.test(postSrc));
 
   /* ══ done ═══════════════════════════════════════════════════════════ */
 

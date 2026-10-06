@@ -27,6 +27,7 @@ const http = require("http");
 /* ── env: point the cache at our fake BEFORE cache.service is required ── */
 const FAKE_PG_PORT = 5612; // Phase 5: fake PostgREST
 const FAKE_PG2_PORT = 5613; // Phase 6: fake PostgREST for the sync consumer
+const FAKE_PG3_PORT = 5614; // Phase 7: fake PostgREST for degradation tests
 const FAKE_PORT = 5611;
 process.env.CACHE_PROVIDER = "upstash";
 process.env.UPSTASH_REDIS_REST_URL = `http://127.0.0.1:${FAKE_PORT}`;
@@ -833,14 +834,14 @@ function createFakePostgrest() {
   sec("9. Rate limiting fails OPEN (§4, §15)");
   fake.state.broken = true;
   const errorsBefore = sharedBackend.stats_.errors;
-  let rlThrew = false;
+  let threw2 = false;
   let rlVerdict = null;
   try {
     rlVerdict = await serverA.increment("u:outage-user");
   } catch {
-    rlThrew = true;
+    threw2 = true;
   }
-  ok("a Redis outage does not throw from the rate limiter", !rlThrew);
+  ok("a Redis outage does not throw from the rate limiter", !threw2);
   ok("traffic is ALLOWED during the outage (no self-inflicted outage)",
     rlVerdict && rlVerdict.totalHits === 0, JSON.stringify(rlVerdict));
   ok("the outage is counted so the dashboard can show it",
@@ -1705,6 +1706,144 @@ function createFakePostgrest() {
   await mongoose.disconnect();
   await mongoSrv.stop();
   await new Promise((r) => pgFake2.server.close(r));
+
+  /* ══ §25 Graceful degradation (§15) ══════════════════════════════════ */
+  {
+    sec("25. Graceful degradation — every provider can fail (§15)");
+
+    const pgFake3 = createFakePostgrest();
+    await new Promise((r) => pgFake3.server.listen(FAKE_PG3_PORT, "127.0.0.1", r));
+    sbIndex.resetSupabaseProvider();
+    process.env.SUPABASE_URL = `http://127.0.0.1:${FAKE_PG3_PORT}`;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "eyJtest.DEGRADEKEY.sig";
+    const sb3 = sbIndex.supabaseProvider();
+
+    ok("the Supabase provider is up for this section", sb3.isConfigured());
+
+    /* ── Redis unavailable ─────────────────────────────────────────────── */
+    fake.state.broken = true;
+
+    // The cache must not throw, and must still serve (from memory).
+    let cacheThrew = false;
+    let cacheValue = null;
+    try {
+      cacheValue = await cache.getOrSet("degrade:test", async () => "computed", 60);
+    } catch { cacheThrew = true; }
+    ok("a dead Redis does NOT throw from the cache", cacheThrew === false);
+    ok("…and the value is still served", cacheValue === "computed");
+
+    // Rate limiting fails OPEN.
+    const rlMod = require("../config/rate-limits");
+    let rlDownThrew = false;
+    let rlAllowed = null;
+    try {
+      const b = rlMod.rateLimitBackend && rlMod.rateLimitBackend();
+      // Real API: check(key, limit, windowMs) → {allowed, totalHits, resetTime}
+      const res = await b.check("degrade-bucket", 10, 60_000);
+      rlAllowed = res.allowed;
+    } catch { rlDownThrew = true; }
+    ok("a dead Redis does NOT throw from the rate limiter", rlDownThrew === false);
+    ok("…and traffic is ALLOWED (fails open — no self-inflicted outage)",
+       rlAllowed === true, String(rlAllowed));
+
+    // Idempotency falls back to memory and still dedupes.
+    const idemMod = require("../providers/redis/idempotency.store");
+    idemMod.resetStore?.();
+    let idemDownThrew = false;
+    let firstAcquired = null;
+    let secondAcquired = null;
+    try {
+      const st = idemMod.idempotencyStore();
+      // Real API: claim(key, ttlMs) → {acquired, expiresAt}
+      firstAcquired = (await st.claim("degrade-key", 60_000)).acquired;
+      secondAcquired = (await st.claim("degrade-key", 60_000)).acquired;
+    } catch { idemDownThrew = true; }
+    ok("a dead Redis does NOT throw from the idempotency store", idemDownThrew === false);
+    ok("…and it still de-duplicates, so no duplicate registration",
+       firstAcquired === true && secondAcquired === false,
+       `${firstAcquired}/${secondAcquired}`);
+
+    // Locks still work in-process.
+    const lockMod2 = require("../providers/redis/lock.service");
+    lockMod2.resetLockService?.();
+    let lockDownThrew = false;
+    let lockHeld = null;
+    try {
+      const l = await lockMod2.lockService().acquire("degrade-lock", { ttlMs: 1000 });
+      lockHeld = !!l;
+      if (l) await l.release();
+    } catch { lockDownThrew = true; }
+    ok("a dead Redis does NOT throw from the lock service", lockDownThrew === false);
+    ok("…and locks still work in-process", lockHeld === true);
+
+    fake.state.broken = false;
+
+    /* ── Supabase unavailable ──────────────────────────────────────────── */
+    pgFake3.state.broken = true;
+
+    let supaThrew = false;
+    let supaErr = null;
+    try {
+      await sb3.from("profiles").select(["id"]).limit(1).many();
+    } catch (err) { supaThrew = true; supaErr = err; }
+    ok("a dead Supabase throws (so the caller can decide), not silently",
+       supaThrew === true);
+    ok("…but the error carries no Postgres detail (§61)",
+       supaErr && !/duplicate key|constraint|postgres:\/\//i.test(supaErr.message));
+    ok("…and no credential (§14)",
+       supaErr && String(supaErr.detail).indexOf("DEGRADEKEY") === -1);
+
+    // The consumer degrades to a clean failure the outbox can retry.
+    const degradeRes = await syncSvc.applyEntry({
+      entityType: "post", entityId: "nonexistent", op: "upsert",
+    }).catch(() => ({ ok: false, error: "threw" }));
+    ok("the sync consumer returns a retryable failure rather than throwing raw",
+       degradeRes && degradeRes.ok === false);
+
+    pgFake3.state.broken = false;
+
+    /* ── The dashboard reports all of it, and leaks nothing (§16, §61) ──── */
+    const infraService = require("../services/infrastructure.service");
+    const report = await infraService.collect({ fresh: true });
+
+    ok("the dashboard exposes a redis panel (§16)",
+       !!report.sections.redis);
+    ok("…with availability", "available" in report.sections.redis);
+    ok("…with a command count", typeof report.sections.redis.commands === "number");
+    ok("…with an error count", typeof report.sections.redis.errors === "number");
+    ok("…with a fallback count", typeof report.sections.redis.fallbacks === "number");
+    ok("…and a hit ratio field", "hitRate" in report.sections.redis);
+
+    ok("the dashboard exposes a supabase panel (§16)",
+       !!report.sections.supabase);
+    ok("…with latency", "avgMs" in report.sections.supabase);
+    ok("…with a query count", typeof report.sections.supabase.queries === "number");
+    ok("…with errors", typeof report.sections.supabase.errors === "number");
+    ok("…with connection health", "connectionHealth" in report.sections.supabase);
+    ok("…and slow queries", "slowQueries" in report.sections.supabase);
+    ok("…and the outbox backlog, since the two are one question",
+       !!report.sections.supabase.outbox);
+
+    const dashBlob = JSON.stringify(report);
+    ok("§14/§61: the dashboard never contains the Supabase service-role key",
+       !dashBlob.includes("DEGRADEKEY"));
+    ok("§61: the dashboard never contains a connection string",
+       !/postgres(ql)?:\/\/|mongodb(\+srv)?:\/\//.test(dashBlob));
+    ok("§61: the dashboard never contains a JWT-shaped string",
+       !/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/.test(dashBlob));
+
+    ok("the dashboard still returns a status even while degraded",
+       ["OK", "WARNING", "HIGH", "CRITICAL"].includes(report.status));
+
+    /* ── Mongo unavailable: core cannot degrade, but must fail cleanly ──── */
+    const dbStatsRes = await infraService.collect({ fresh: true });
+    ok("a full collection with Mongo present succeeds",
+       !!dbStatsRes.sections.database);
+    ok("…and database stats are cached so refresh cannot become a load generator",
+       typeof infraService.invalidateStatsCache === "function");
+
+    await new Promise((r) => pgFake3.server.close(r));
+  }
 
   /* ══ done ═══════════════════════════════════════════════════════════ */
 

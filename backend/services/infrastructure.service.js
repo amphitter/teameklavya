@@ -28,8 +28,19 @@
 const mongoose = require("mongoose");
 const metrics = require("./metrics.service");
 const { cache } = require("./cache.service");
+// Also needed as a module: `.provider` is a live getter, and the Redis panel
+// has to read the circuit breaker off the provider itself.
+const cacheService = require("./cache.service");
 const realtime = require("./realtime.service");
 const storage = require("./storage.provider");
+
+/* Part 6, Phase 7 (§16): the Redis and Supabase panels.
+ * Both are required lazily inside their collectors so that a misconfigured
+ * (or absent) provider can never break the admin page — the whole point of
+ * this file is to REPORT on degradation, so it must be the last thing in the
+ * app that degrades. */
+const supabaseIndex = require("../providers/supabase");
+const outboxService = require("./outbox.service");
 
 /* ── Budgets (the free-tier reference points) ─────────────────────────────
  * Overridable so a paid deployment can raise the ceiling without a code
@@ -307,6 +318,243 @@ function collectProcess() {
   };
 }
 
+/**
+ * Redis panel (Part 6, Phase 7 — §16)
+ * ─────────────────────────────────────────────────────────────────────────
+ * Redis is SHARED INFRASTRUCTURE now: the cache, the rate limiter, the
+ * idempotency store and the lock service all sit on it. Reporting only the
+ * cache (as the Part 5 `cache` panel does) would hide an outage that the
+ * other three are already feeling, so this aggregates all four consumers.
+ *
+ * ── Why no ping ──
+ * Consistent with the note at the top of this file: health is inferred from
+ * configuration plus RECENT TRAFFIC. A synthetic PING adds latency to an
+ * admin click, can fail for reasons unrelated to Redis (sandbox egress, DNS),
+ * and — worst — reports OK while every real call is falling back. "Our last
+ * N calls fell back to memory" is the number an admin actually needs.
+ *
+ * ── Availability, precisely ──
+ * `available` is false when the circuit is OPEN or the last call errored.
+ * `configured` false means Redis simply is not in use, which is not a problem
+ * and must not be reported as one.
+ */
+function collectRedis() {
+  const consumers = {};
+
+  /* Each consumer is read defensively: a dashboard that throws because one
+   * subsystem is missing would be useless exactly when you need it. */
+  const read = (name, fn) => {
+    try {
+      const v = fn();
+      if (v) consumers[name] = v;
+    } catch {
+      /* subsystem absent or not initialised */
+    }
+  };
+
+  // Cache — the ResilientCacheProvider carries the circuit breaker.
+  try {
+    const p = cacheService.provider;
+    if (p && typeof p.stats === "object" && p.state !== undefined) {
+      consumers.cache = { ...p.stats, state: p.state };
+    } else if (p) {
+      consumers.cache = { backend: p.name || "memory" };
+    }
+  } catch { /* not initialised */ }
+
+  // Rate limiting (Phase 2)
+  read("rateLimit", () => {
+    const m = require("../config/rate-limits");
+    const b = m.rateLimitBackend && m.rateLimitBackend();
+    return b && typeof b.stats === "function" ? b.stats() : null;
+  });
+
+  // Idempotency (Phase 3)
+  read("idempotency", () => {
+    const m = require("../providers/redis/idempotency.store");
+    return m.idempotencyStore ? m.idempotencyStore().stats() : null;
+  });
+
+  // Locks (Phase 4)
+  read("lock", () => {
+    const m = require("../providers/redis/lock.service");
+    const svc = m.lockService && m.lockService();
+    return svc && svc.backend && typeof svc.backend.stats === "function"
+      ? svc.backend.stats()
+      : null;
+  });
+
+  const configured = String(process.env.CACHE_PROVIDER || "memory").toLowerCase() === "upstash";
+
+  // Aggregate. Every consumer reports errors/fallbacks under the same names,
+  // which is deliberate: it makes summing them a one-liner rather than a
+  // per-subsystem special case that someone has to remember to update.
+  let commands = 0;
+  let errors = 0;
+  let fallbacks = 0;
+  let circuitOpened = 0;
+  for (const c of Object.values(consumers)) {
+    commands += Number(c.primaryCalls || c.calls || c.claims || c.acquires || 0);
+    errors += Number(c.primaryErrors || c.errors || 0);
+    fallbacks += Number(c.fallbackUsed || c.fallbacks || 0);
+    circuitOpened += Number(c.circuitOpened || 0);
+  }
+
+  /* ── Backend reality vs intent ──
+   * `configured` is what the ENV says we intend to use. `backends` is what the
+   * consumers are ACTUALLY on. They can disagree: CACHE_PROVIDER=upstash with
+   * no UPSTASH_REDIS_REST_URL makes every consumer silently boot into memory.
+   *
+   * That mismatch is worth surfacing loudly. The system keeps working, so
+   * nothing errors — but every cache, rate limit, idempotency claim and lock
+   * is now per-instance, which quietly breaks every cross-instance guarantee
+   * Part 6 exists to provide. It is the sort of thing that only shows up as
+   * "why did two instances both issue the same ticket". */
+  const backends = [...new Set(
+    Object.values(consumers).map((c) => c.backend).filter(Boolean)
+  )];
+  const misconfigured =
+    configured && backends.length > 0 && backends.every((b) => b === "memory");
+
+  const state = consumers.cache?.state || (configured ? "closed" : "n/a");
+  const circuitOpen = state === "open";
+  const available = configured ? !circuitOpen : null;
+
+  /* Level. An unconfigured Redis is not a problem, so it reports no level at
+   * all rather than a green "OK" that looks like a health check passed. */
+  let level = null;
+  if (configured) {
+    const errorRate = commands ? (errors / commands) * 100 : 0;
+    const fbRate = commands ? (fallbacks / commands) * 100 : 0;
+    if (circuitOpen) level = "CRITICAL";
+    else level = worstLevel([
+      severity(errorRate, 100).level,
+      severity(fbRate, 100).level,
+      severity(commands, BUDGETS.cacheCommands).level,
+    ]);
+    // A silent fall to memory is at least a WARNING even with zero errors —
+    // there are no errors precisely because nothing is talking to Redis.
+    if (misconfigured) level = worstLevel([level, "WARNING"]);
+  }
+
+  const lastError = Object.values(consumers)
+    .map((c) => c.lastError)
+    .find(Boolean) || null;
+
+  return {
+    level,
+    configured,
+    available,
+    degraded: configured ? Boolean(circuitOpen || fallbacks > 0) : false,
+    state,
+    circuitOpen,
+    circuitOpened,
+    // Intent vs reality, both reported so an admin can see a mismatch.
+    backends,
+    misconfigured,
+    commands,
+    commandsPercent: severity(commands, BUDGETS.cacheCommands).percent,
+    commandBudget: BUDGETS.cacheCommands,
+    errors,
+    fallbacks,
+    // Hit ratio comes from the cache specifically — the other three consumers
+    // are not caches and have no meaningful hit rate.
+    hitRate: cacheHitRate(),
+    consumers,
+    // Scrubbed: an upstream error can echo a URL or a token (§14, §61).
+    lastError: lastError ? String(lastError).slice(0, 160) : null,
+  };
+}
+
+/** Cache hit ratio, sourced from the metrics snapshot (process-lifetime). */
+function cacheHitRate() {
+  try {
+    const snap = metrics.snapshot();
+    return snap?.cache?.hitRate ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Supabase panel (Part 6, Phase 7 — §16)
+ * ─────────────────────────────────────────────────────────────────────────
+ * Reports latency, query count, errors and slow queries — everything the
+ * brief asks for — plus the outbox backlog, because Supabase health and
+ * outbox health are the same question viewed from two ends. A growing backlog
+ * with a healthy Supabase means the consumer is the problem; a healthy
+ * backlog with an erroring Supabase means the store is. Showing only one
+ * would send an admin looking in the wrong place.
+ *
+ * `connectionHealth` is INFERRED, not pinged (see the note at the top of this
+ * file): configured + no recent errors + backlog not growing = healthy.
+ */
+async function collectSupabase() {
+  const configured = supabaseIndex.isConfigured();
+
+  let s = null;
+  try {
+    s = supabaseIndex.supabaseStats();
+  } catch { /* not initialised */ }
+
+  let outbox = null;
+  try {
+    outbox = await outboxService.stats();
+  } catch { /* outbox not available (no Mongo) */ }
+
+  if (!configured) {
+    return {
+      level: null,           // not in use — not a problem, not a green tick
+      configured: false,
+      connectionHealth: "not-configured",
+      queries: 0, errors: 0, timeouts: 0, slowQueries: 0,
+      avgMs: 0, rows: 0,
+      nPlusOneWarnings: s?.nPlusOneWarnings ?? 0,
+      outbox,
+      lastError: null,
+    };
+  }
+
+  const queries = Number(s?.queries || 0);
+  const errors = Number(s?.errors || 0);
+  const errorRate = queries ? (errors / queries) * 100 : 0;
+
+  let level;
+  if (errors > 0 && queries === 0) level = "CRITICAL";
+  else level = worstLevel([
+    severity(errorRate, 100).level,
+    // Slow queries against total queries: 100 slow out of 1M is fine, 100
+    // out of 120 is not.
+    severity(Number(s?.slowQueries || 0), Math.max(queries, 1) * 0.1 || 1).level,
+  ]);
+
+  const backlog = Number(outbox?.pending || 0);
+  const dead = Number(outbox?.dead || 0);
+  if (dead > 0) level = worstLevel([level, "CRITICAL"]);   // silent data loss
+  else if (backlog > 10_000) level = worstLevel([level, "WARNING"]);
+
+  let connectionHealth = "healthy";
+  if (errors > 0) connectionHealth = "degraded";
+  if (Number(s?.timeouts || 0) > 0) connectionHealth = "degraded";
+  if (dead > 0) connectionHealth = "degraded";
+
+  return {
+    level,
+    configured: true,
+    connectionHealth,
+    queries,
+    errors,
+    timeouts: Number(s?.timeouts || 0),
+    slowQueries: Number(s?.slowQueries || 0),
+    avgMs: Number(s?.avgMs || 0),
+    rows: Number(s?.rows || 0),
+    maxRows: s?.maxRows ?? null,
+    nPlusOneWarnings: Number(s?.nPlusOneWarnings || 0),
+    outbox,
+    lastError: s?.lastError ? String(s.lastError).slice(0, 160) : null,
+  };
+}
+
 function collectRateLimits(snap) {
   const buckets = Object.entries(snap.rateLimits || {})
     .map(([bucket, count]) => ({ bucket, count }))
@@ -335,6 +583,9 @@ async function collect({ fresh = false } = {}) {
     providers: collectProviders(snap),
     uploads: collectUploads(snap),
     process: collectProcess(),
+    // Part 6, Phase 7 (§16): the two new panels.
+    redis: collectRedis(),
+    supabase: await collectSupabase(),
   };
 
   const levels = Object.values(sections)
@@ -386,6 +637,13 @@ function alertMessage(name, section) {
       return `${section.connected} concurrent sockets (${section.percent}% of ceiling)`;
     case "uploads":
       return `Upload failure rate ${section.failureRate}%`;
+    case "redis":
+      if (section.circuitOpen) return "Redis circuit is OPEN — all reads are falling back to memory";
+      return `Redis degraded: ${section.errors} errors, ${section.fallbacks} fallbacks across ${section.commands} commands`;
+    case "supabase":
+      if (section.outbox?.dead) return `${section.outbox.dead} outbox entries are dead-lettered — data is not reaching Supabase`;
+      if (section.connectionHealth !== "healthy") return `Supabase degraded: ${section.errors} errors across ${section.queries} queries`;
+      return `Supabase slow queries: ${section.slowQueries}`;
     case "process":
       return `Heap usage at ${section.percent}% of budget`;
     default:

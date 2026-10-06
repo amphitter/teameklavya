@@ -643,6 +643,52 @@ preserved — then re-ran the *entire* migration and asserted zero duplicates.
   ratio, commands, errors, fallback count) and `supabase` (latency, query
   count, errors, connection health, slow queries). Admin-only.
 
+### Phase 7 — RESULT: ✅ **DONE** (345 assertions in phase10, +32)
+
+**Both panels are live on `GET /api/admin/infrastructure`, still admin-gated**
+(`requireAuth, requireAdmin` — unchanged).
+
+- `services/infrastructure.service.js` gained `collectRedis()` and
+  `collectSupabase()`, wired into `collect()` with alert messages.
+
+**The redis panel aggregates all four consumers, not just the cache.** The
+Part 5 `cache` panel reports cache occupancy; it would happily show green
+while the rate limiter, idempotency store and lock service were all silently
+degraded. Redis is shared infrastructure now, so the panel sums commands,
+errors and fallbacks across all four.
+
+**Health is inferred, never pinged** — consistent with the design note already
+at the top of that file. A synthetic PING adds latency to an admin click, can
+fail for reasons unrelated to the provider, and worst of all reports OK while
+every real call is falling back. "Our last N calls fell back to memory" is the
+number an admin actually needs.
+
+**The signal worth calling out — intent vs reality.** `CACHE_PROVIDER=upstash`
+with no `UPSTASH_REDIS_REST_URL` makes every consumer boot into memory. Nothing
+errors, so the system looks healthy, but every cross-instance guarantee Part 6
+exists to provide is silently gone. The panel now reports `configured` (what
+env intends) and `backends` (what consumers are actually on) and raises at
+least a WARNING when they disagree. This is the class of fault that otherwise
+surfaces only as "why did two instances both issue the same ticket".
+
+**The supabase panel includes the outbox backlog**, because Supabase health
+and outbox health are one question from two ends: a growing backlog with a
+healthy Supabase means the consumer is at fault; a healthy backlog with an
+erroring Supabase means the store is. Showing only one sends an admin looking
+in the wrong place. Dead-lettered entries escalate straight to CRITICAL —
+that is silent data loss, the one outcome the outbox exists to prevent.
+
+**Degradation, verified (§25):** with Redis dead — cache still serves (memory),
+rate limiter fails OPEN, idempotency still de-duplicates, locks still work
+in-process, and nothing throws. With Supabase dead — the client throws a
+normalised error the outbox can retry, carrying no Postgres detail and no
+credential, and the sync consumer returns a retryable failure rather than a raw
+exception.
+
+**Leak checks are assertions, not intentions:** the dashboard output is
+asserted to contain no service-role key, no connection string, and no
+JWT-shaped string.
+
 ### Phase 8 — Testing (brief §17)
 - `tests/phase10.selftest.js` — Redis hit/miss, fallback, distributed rate
   limiting, distributed idempotency, lock acquire/release, invalidation,

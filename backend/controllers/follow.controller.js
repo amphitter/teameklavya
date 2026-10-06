@@ -5,6 +5,7 @@ const { notify } = require("../services/notification.service");
 const { isBlockedBetween, severFollows } = require("../services/social.service");
 const { PostRepository } = require("../repositories");
 const mongoose = require("mongoose");
+const { ERROR_CODES } = require("../utils/app-error");
 
 const USER_LIST_FIELDS = "firstName lastName username verified profile.avatar profile.institution";
 
@@ -73,7 +74,7 @@ exports.getFollowStatus = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: "Invalid identifier",
-        error: { code: "VALIDATION_FAILED", message: "Invalid identifier" },
+        error: { code: ERROR_CODES.VALIDATION_ERROR, message: "Invalid identifier" },
       });
     }
 

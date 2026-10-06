@@ -28,6 +28,9 @@
 
 "use strict";
 
+const fs = require("fs");
+const path = require("path");
+
 process.env.JWT_SECRET = "phase13-secret-not-a-real-key";
 process.env.JWT_EXPIRES_IN = "7d";
 process.env.MONGO_URI = "SET-BY-MEMORY-SERVER";
@@ -46,6 +49,22 @@ process.env.RATE_LIMIT_PROVIDER = "memory";
 const PORT = process.env.PORT;
 const BASE = `http://localhost:${PORT}/api`;
 
+const ROOT = path.join(__dirname, "..");
+
+/** Every .js file under `dir`, recursively. */
+function walk(dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else if (e.name.endsWith(".js")) out.push(p);
+  }
+  return out;
+}
+const read = (p) => fs.readFileSync(p, "utf8");
+const rel = (p) => path.relative(ROOT, p);
+
 let passed = 0;
 let failed = 0;
 const failures = [];
@@ -62,6 +81,9 @@ function ok(name, cond, detail = "") {
     failures.push(name);
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
   }
+}
+function eq(name, a, b) {
+  ok(name, a === b, `expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -663,6 +685,129 @@ async function call(path, opts = {}) {
   ok(
     "§14: no JWT is logged",
     !/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/.test(joined)
+  );
+
+  /* ══════════════════════════════════════════════════════════════════════ */
+  sec("5. §30 — one error taxonomy, ten codes, no controller invents one");
+
+  const { ERROR_CODES, errorResponse, canonicalCode, IdempotencyConflictError, ValidationError } =
+    require("../utils/app-error");
+
+  const CANON = Object.keys(ERROR_CODES);
+  eq("§30: there are exactly ten error codes", CANON.length, 10);
+  ok(
+    "§30: …and they are the ones the brief names",
+    [
+      "VALIDATION_ERROR",
+      "AUTH_REQUIRED",
+      "FORBIDDEN",
+      "NOT_FOUND",
+      "CONFLICT",
+      "RATE_LIMITED",
+      "IDEMPOTENCY_CONFLICT",
+      "PROVIDER_UNAVAILABLE",
+      "TIMEOUT",
+      "INTERNAL_ERROR",
+    ].every((c) => CANON.includes(c)),
+    CANON.join(",")
+  );
+
+  /* Every realistic error shape must land on a canonical code. */
+  const SHAPES = [
+    ["mongoose CastError", { name: "CastError", message: "Cast to ObjectId failed" }],
+    ["mongoose ValidationError", { name: "ValidationError", errors: { a: { message: "bad" } } }],
+    ["duplicate key", { name: "MongoServerError", code: 11000, keyValue: { email: "x" } }],
+    ["expired JWT", { name: "TokenExpiredError", message: "jwt expired" }],
+    ["malformed JWT", { name: "JsonWebTokenError", message: "invalid token" }],
+    ["multer limit", { name: "MulterError", code: "LIMIT_FILE_SIZE", message: "too big" }],
+    ["body-parser malformed JSON", { type: "entity.parse.failed", status: 400 }],
+    ["body-parser too large", { type: "entity.too.large", status: 413 }],
+    ["rate limited", { status: 429 }],
+    ["unknown", new Error("something unexpected")],
+    ["nothing at all", undefined],
+  ];
+  const offTaxonomy = [];
+  for (const [label, shape] of SHAPES) {
+    const r = errorResponse(shape);
+    if (!CANON.includes(r.body?.error?.code)) offTaxonomy.push(`${label}→${r.body?.error?.code}`);
+    if (typeof r.status !== "number") offTaxonomy.push(`${label} (no status)`);
+  }
+  ok(
+    "§30: every error shape normalises to a canonical code and a numeric status",
+    offTaxonomy.length === 0,
+    offTaxonomy.join(",")
+  );
+
+  /* A status must be paired with the code it implies, not merely be a 4xx. */
+  eq("§30: a CastError is 400, not 500", errorResponse({ name: "CastError" }).status, 400);
+  eq("§30: a duplicate key is 409", errorResponse({ name: "MongoServerError", code: 11000 }).status, 409);
+  eq("§30: an expired token is 401", errorResponse({ name: "TokenExpiredError" }).status, 401);
+  eq("§30: an oversized body is 413", errorResponse({ type: "entity.too.large" }).status, 413);
+  eq("§30: a rate limit is 429", errorResponse({ status: 429 }).status, 429);
+  eq("§30: the unknown falls to 500", errorResponse(new Error("x")).status, 500);
+
+  /* The distinction §30 draws between the two 409s: a state conflict needs a
+   * re-read, a retry collision needs nothing. */
+  const idem = errorResponse(new IdempotencyConflictError());
+  eq("§30: an idempotency collision is 409", idem.status, 409);
+  eq("§30: …coded IDEMPOTENCY_CONFLICT, not a generic CONFLICT", idem.body.error.code, "IDEMPOTENCY_CONFLICT");
+  const conflict = errorResponse({ name: "MongoServerError", code: 11000 });
+  ok(
+    "§30: …and it is distinguishable from an ordinary CONFLICT",
+    conflict.body.error.code === "CONFLICT" && conflict.status === idem.status
+  );
+
+  /* No invented codes anywhere in the HTTP layer. The Socket.IO protocol has
+   * its own code set, which the live frontend depends on; §30 governs HTTP. */
+  /* §30 governs the HTTP taxonomy. The Socket.IO wire protocol is a SEPARATE
+   * namespace with its own codes (AUTH_FAILED, NOT_AUTHORIZED, …) that the
+   * live-event frontend already branches on. Renaming those would break the
+   * live quiz, so they are excluded — but excluded by name, and asserted
+   * below to still exist, so the exclusion cannot quietly widen. */
+  const SOCKET_FILES = new Set([
+    path.join("config", "socket-protocol.js"),
+    path.join("middleware", "socket-auth.middleware.js"),
+  ]);
+  const invented = [];
+  for (const f of walk(path.join(ROOT, "controllers"))
+    .concat(walk(path.join(ROOT, "middleware")))
+    .concat(walk(path.join(ROOT, "services")))
+    .concat(walk(path.join(ROOT, "utils")))) {
+    if (SOCKET_FILES.has(rel(f))) continue;
+    if (rel(f) === path.join("utils", "app-error.js")) continue; // the taxonomy itself
+    const text = read(f);
+    for (const m of text.matchAll(/code:\s*"([A-Z_]+)"/g)) {
+      if (!CANON.includes(m[1])) invented.push(`${rel(f)}:${m[1]}`);
+    }
+  }
+  ok(
+    "§30: no controller, middleware or service emits a non-canonical error code",
+    invented.length === 0,
+    [...new Set(invented)].slice(0, 8).join(",")
+  );
+
+  ok(
+    "§30: the Socket.IO protocol keeps its own code set deliberately (not renamed out from under the live frontend)",
+    /ERROR_CODES/.test(read(path.join(ROOT, "config", "socket-protocol.js")))
+  );
+
+  /* Legacy Part 5 names must still normalise, so a stale build degrades
+   * rather than turning a handled case into a 500. */
+  eq("§30: the legacy UNAUTHORIZED maps to AUTH_REQUIRED", canonicalCode("UNAUTHORIZED"), "AUTH_REQUIRED");
+  eq("§30: the legacy OPERATION_TIMEOUT maps to TIMEOUT", canonicalCode("OPERATION_TIMEOUT"), "TIMEOUT");
+  eq("§30: the legacy INTERNAL maps to INTERNAL_ERROR", canonicalCode("INTERNAL"), "INTERNAL_ERROR");
+  eq("§30: an unrecognised code falls to INTERNAL_ERROR", canonicalCode("MADE_UP"), "INTERNAL_ERROR");
+
+  /* And the wire contract: a real request must return the canonical shape. */
+  const realErr = await call("/events/not-an-object-id", { method: "GET", headers: auth("SUPER_ADMIN") });
+  ok(
+    "§30: a real 4xx response carries { success, message, error: { code } }",
+    realErr.status >= 400 &&
+      realErr.data &&
+      realErr.data.success === false &&
+      realErr.data.error &&
+      CANON.includes(realErr.data.error.code),
+    JSON.stringify(realErr.data).slice(0, 160)
   );
 
   /* ══════════════════════════════════════════════════════════════════════ */

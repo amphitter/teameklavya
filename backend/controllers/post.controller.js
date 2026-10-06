@@ -17,6 +17,7 @@ const Organization = require("../models/organization.model");
 const User = require("../models/user.model");
 const { PostRepository } = require("../repositories");
 const mongoose = require("mongoose");
+const { ERROR_CODES } = require("../utils/app-error");
 
 const AUTHOR_FIELDS = "firstName lastName username verified email profile.avatar profile.institution";
 const EVENT_FIELDS = "title slug bannerUrl startDate endDate venue eventType category organizer price visibility isLive";
@@ -298,7 +299,7 @@ exports.getPostById = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: "Invalid identifier",
-        error: { code: "VALIDATION_FAILED", message: "Invalid identifier" },
+        error: { code: ERROR_CODES.VALIDATION_ERROR, message: "Invalid identifier" },
       });
     }
 

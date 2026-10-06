@@ -31,7 +31,7 @@ architecture; it makes the existing architecture production-safe.
 | 7 | Provider failure matrix + preflight | §12, §31 | pending |
 | 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | pending |
 | 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | pending |
-| 10 | Error taxonomy | §30 | pending |
+| 10 | Error taxonomy | §30 | ✅ |
 | 11 | Frontend + upload + rate-limit review | §27, §28, §29 | pending |
 | 12 | Restore drill, backups, secret separation | §18, §19 | pending |
 | 13 | Documentation set | §32 | pending |
@@ -235,6 +235,61 @@ address and wrong password) · brute force throttled at 429 with `Retry-After` �
 the attempted password, any OTP and any JWT are absent from server output.
 
 Regression: 1090 → **1125 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
+### Phase 10 — RESULT: ✅ **DONE** (§30, `utils/app-error.js` + 47 new assertions)
+
+**The systemic finding.** Four controllers contained **41 instances** of:
+
+```js
+} catch (error) {
+  console.error(...);
+  res.status(500).json({ success: false, message: error.message });
+}
+```
+
+That is a §61 violation on every line: the raw error text goes straight to the
+client. A malformed ObjectId produced a body reading
+`Cast to ObjectId failed for value "not-an-object-id" (type string) at path
+"_id" for model "Event"` — handing the client the model name, the field path
+and the fact that Mongo is behind the API. It also reported a client mistake as
+a 500, so it inflated error alerting and told the client to retry a request
+that could never succeed.
+
+All 41 now call `next(error)`, so the central taxonomy decides: a CastError is
+400, a duplicate key 409, an outage 503, and nothing leaks.
+
+**The closed code set.** Ten codes, and no others. Finer distinctions ride on
+the HTTP status, not on invented codes — a 413 and a 400 are both
+`VALIDATION_ERROR`, because "your input was wrong" is the whole of what the
+client needs to know. Part 5's vocabulary (`VALIDATION_FAILED`, `UNAUTHORIZED`,
+`OPERATION_TIMEOUT`, `INTERNAL`, `PAYLOAD_TOO_LARGE`, `DATABASE_UNAVAILABLE`,
+`STORAGE_UPLOAD_FAILED`) is folded in, with a `LEGACY_ALIASES` map so a stale
+code string still normalises rather than becoming a 500. The frontend only ever
+branched on `RATE_LIMITED`, which is unchanged.
+
+`IDEMPOTENCY_CONFLICT` was added — Part 5 had no name for it. It matters
+because the recovery differs: a 409 `CONFLICT` means "re-read, someone else
+changed it"; a 409 `IDEMPOTENCY_CONFLICT` means "you already sent this, do
+nothing". Collapsing them makes clients retry work that already succeeded.
+
+**Two scoping decisions, both deliberate:**
+- The **Socket.IO protocol keeps its own code set** (`AUTH_FAILED`,
+  `NOT_AUTHORIZED`, …). The live-event frontend branches on those; §30 governs
+  the HTTP taxonomy, and renaming the socket protocol would have broken live
+  quizzes for no benefit. The exclusion is by explicit filename and asserted,
+  so it cannot quietly widen.
+- `generateQuiz` forwarded two internal sentinels (`NOT_IMPLEMENTED`,
+  `INVALID_INPUT`) verbatim — codes outside the closed set plus the generator's
+  own message. Mapped to `PROVIDER_UNAVAILABLE` and `VALIDATION_ERROR`.
+
+**One bug in my own earlier work:** the three Phase 6 fixes hardcoded the
+legacy `VALIDATION_FAILED` name. Caught by the new scan, which is the point of
+writing one.
+
+`tests/platform.selftest.js` assertions were moved to the canonical names —
+same status, same no-leak guarantee, same intent; nothing weakened.
+
+Regression: 1125 → **1144 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

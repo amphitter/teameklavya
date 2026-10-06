@@ -37,7 +37,7 @@ const { clampQuery } = require("../utils/regex");
 /* ── Registration status ─────────────────────────────────── */
 
 // Check registration status
-exports.getRegistrationStatus = async (req, res) => {
+exports.getRegistrationStatus = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const userId = req.user.id;
@@ -50,14 +50,14 @@ exports.getRegistrationStatus = async (req, res) => {
       response: response || null,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 /* ── Form ────────────────────────────────────────────────── */
 
 // Get form for registration (Public)
-exports.getForm = async (req, res) => {
+exports.getForm = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const event = await Event.findById(eventId);
@@ -121,14 +121,14 @@ exports.getForm = async (req, res) => {
     res.json({ success: true, form: { eventId, fields: defaultFields } });
   } catch (error) {
     console.error("Get form error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 /* ── Submit ──────────────────────────────────────────────── */
 
 // Submit registration
-exports.submitResponse = async (req, res) => {
+exports.submitResponse = async (req, res, next) => {
   try {
     const { eventId, answers } = req.body;
     const userId = req.user.id;
@@ -226,21 +226,21 @@ exports.submitResponse = async (req, res) => {
       message: "Registration successful! Your ticket will be provided by the organizer.",
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 /* ── Statistics ──────────────────────────────────────────── */
 
 // Get registration statistics for analytics (§40 — ONE $facet aggregation)
-exports.getRegistrationStats = async (req, res) => {
+exports.getRegistrationStats = async (req, res, next) => {
   try {
     const { id } = req.params;
     const stats = await RegistrationRepository.statsByEvent(id);
     res.json({ success: true, stats });
   } catch (error) {
     console.error("Get registration stats error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
@@ -257,7 +257,7 @@ exports.getRegistrationStats = async (req, res) => {
  * AFTER: cursor-paginated, hard-capped at 100, server-side search/filter.
  * `responses` is retained as an alias of `items` so existing clients work.
  */
-exports.getEventResponses = async (req, res) => {
+exports.getEventResponses = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     if (!isValidObjectId(eventId)) {
@@ -286,7 +286,7 @@ exports.getEventResponses = async (req, res) => {
     });
   } catch (error) {
     console.error("Get event responses error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
@@ -296,7 +296,7 @@ exports.getEventResponses = async (req, res) => {
  * Streams the CSV batch-by-batch instead of building it in memory (§40).
  * Memory is now O(batch), not O(event size).
  */
-exports.exportRegistrations = async (req, res) => {
+exports.exportRegistrations = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     if (!isValidObjectId(eventId)) {
@@ -353,7 +353,7 @@ exports.exportRegistrations = async (req, res) => {
     console.error("Export registrations error:", error);
     // Headers may already be flushed — only respond if we still can (§68).
     if (!res.headersSent) {
-      res.status(500).json({ success: false, message: error.message });
+      return next(error);
     } else {
       res.end();
     }
@@ -369,7 +369,7 @@ exports.exportRegistrations = async (req, res) => {
  * trips. The admin dashboard passes every event id on every load.
  * AFTER: ONE aggregation for the entire batch.
  */
-exports.getRegistrationCounts = async (req, res) => {
+exports.getRegistrationCounts = async (req, res, next) => {
   try {
     const { eventIds } = req.body;
 
@@ -386,26 +386,26 @@ exports.getRegistrationCounts = async (req, res) => {
     res.json({ success: true, counts });
   } catch (error) {
     console.error("Get registration counts error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get registration count for single event (cached — §37)
-exports.getRegistrationCount = async (req, res) => {
+exports.getRegistrationCount = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const count = await RegistrationRepository.countByEvent(eventId);
     res.json({ success: true, count });
   } catch (error) {
     console.error("Get registration count error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 /* ── Admin form ──────────────────────────────────────────── */
 
 // Admin creates a form for an event
-exports.createForm = async (req, res) => {
+exports.createForm = async (req, res, next) => {
   try {
     const { eventId, fields } = req.body;
 
@@ -421,7 +421,7 @@ exports.createForm = async (req, res) => {
 
     res.status(201).json({ success: true, form });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
@@ -434,7 +434,7 @@ exports.createForm = async (req, res) => {
  * hydrated the COMPLETE event document (schedule, speakers, questions…).
  * AFTER: paginated + projected to the card fields the screen renders.
  */
-exports.getUserEvents = async (req, res) => {
+exports.getUserEvents = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const page = await RegistrationRepository.listUserEvents({
@@ -453,6 +453,6 @@ exports.getUserEvents = async (req, res) => {
     });
   } catch (error) {
     console.error("Get user events error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };

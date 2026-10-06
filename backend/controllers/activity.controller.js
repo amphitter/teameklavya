@@ -25,6 +25,7 @@ const Event = require("../models/event.model");
 const { canManageEvent } = require("../middleware/auth.middleware");
 const { normalizeQuestion, validateActivity } = require("../services/quizValidation.service");
 const quizGenerator = require("../services/quizGenerator.service");
+const { ProviderUnavailableError, ValidationError } = require("../utils/app-error");
 
 async function loadEventOr404(req, res) {
   const event = await Event.findById(req.params.eventId);
@@ -54,7 +55,7 @@ async function loadActivityOr404(req, res) {
 }
 
 // GET /api/events/:eventId/activities — with question counts
-exports.getActivities = async (req, res) => {
+exports.getActivities = async (req, res, next) => {
   try {
     const event = await loadEventOr404(req, res);
     if (!event) return;
@@ -75,7 +76,7 @@ exports.getActivities = async (req, res) => {
 };
 
 // POST /api/events/:eventId/activities { type, title, description?, config? }
-exports.createActivity = async (req, res) => {
+exports.createActivity = async (req, res, next) => {
   try {
     const event = await loadEventOr404(req, res);
     if (!event) return;
@@ -115,7 +116,7 @@ exports.createActivity = async (req, res) => {
 };
 
 // PUT /api/events/:eventId/activities/order { activityIds: [] }
-exports.reorderActivities = async (req, res) => {
+exports.reorderActivities = async (req, res, next) => {
   try {
     const event = await loadEventOr404(req, res);
     if (!event) return;
@@ -133,7 +134,7 @@ exports.reorderActivities = async (req, res) => {
 };
 
 // PUT /api/activities/:id { title?, description?, config? }
-exports.updateActivity = async (req, res) => {
+exports.updateActivity = async (req, res, next) => {
   try {
     const activity = await loadActivityOr404(req, res);
     if (!activity) return;
@@ -150,7 +151,7 @@ exports.updateActivity = async (req, res) => {
 };
 
 // DELETE /api/activities/:id — removes its questions too
-exports.deleteActivity = async (req, res) => {
+exports.deleteActivity = async (req, res, next) => {
   try {
     const activity = await loadActivityOr404(req, res);
     if (!activity) return;
@@ -164,7 +165,7 @@ exports.deleteActivity = async (req, res) => {
 };
 
 // POST /api/activities/:id/validate — full validation report (spec §26)
-exports.validateActivityEndpoint = async (req, res) => {
+exports.validateActivityEndpoint = async (req, res, next) => {
   try {
     const activity = await loadActivityOr404(req, res);
     if (!activity) return;
@@ -178,7 +179,7 @@ exports.validateActivityEndpoint = async (req, res) => {
 };
 
 // POST /api/activities/:id/generate-quiz — AI boundary (spec §25)
-exports.generateQuiz = async (req, res) => {
+exports.generateQuiz = async (req, res, next) => {
   try {
     const activity = await loadActivityOr404(req, res);
     if (!activity) return;
@@ -188,11 +189,16 @@ exports.generateQuiz = async (req, res) => {
     await quizGenerator.generateQuiz(req.body); // throws NOT_IMPLEMENTED until a provider is registered
     res.json({ success: true });
   } catch (error) {
+    /* §30: these two sentinels are ours, but they were being forwarded to the
+     * client verbatim, which puts codes outside the closed set on the wire and
+     * echoes whatever message the generator happened to throw. Map them onto
+     * the taxonomy: "no provider wired up" is PROVIDER_UNAVAILABLE, and a bad
+     * generation request is a VALIDATION_ERROR. */
     if (error.code === "NOT_IMPLEMENTED") {
-      return res.status(501).json({ success: false, message: error.message, code: error.code });
+      return next(new ProviderUnavailableError("AI quiz generation is not available"));
     }
     if (error.code === "INVALID_INPUT") {
-      return res.status(400).json({ success: false, message: error.message, code: error.code });
+      return next(new ValidationError("Invalid quiz generation request"));
     }
     console.error("Generate quiz error:", error.message);
     res.status(500).json({ success: false, message: "Generation failed" });
@@ -200,7 +206,7 @@ exports.generateQuiz = async (req, res) => {
 };
 
 // GET /api/activities/:id/questions — organizer view INCLUDING answer key
-exports.getQuestions = async (req, res) => {
+exports.getQuestions = async (req, res, next) => {
   try {
     const activity = await loadActivityOr404(req, res);
     if (!activity) return;
@@ -216,7 +222,7 @@ exports.getQuestions = async (req, res) => {
 };
 
 // POST /api/activities/:id/questions — validated create (spec §26)
-exports.createQuestion = async (req, res) => {
+exports.createQuestion = async (req, res, next) => {
   try {
     const activity = await loadActivityOr404(req, res);
     if (!activity) return;
@@ -248,7 +254,7 @@ exports.createQuestion = async (req, res) => {
 };
 
 // PUT /api/activities/:id/questions/order { questionIds: [] }
-exports.reorderQuestions = async (req, res) => {
+exports.reorderQuestions = async (req, res, next) => {
   try {
     const activity = await loadActivityOr404(req, res);
     if (!activity) return;
@@ -285,7 +291,7 @@ async function loadQuestionWithActivity(req, res) {
 }
 
 // PUT /api/questions/:id — validated update
-exports.updateQuestion = async (req, res) => {
+exports.updateQuestion = async (req, res, next) => {
   try {
     const loaded = await loadQuestionWithActivity(req, res);
     if (!loaded) return;
@@ -316,7 +322,7 @@ exports.updateQuestion = async (req, res) => {
 };
 
 // POST /api/questions/:id/duplicate — copy to end of same activity
-exports.duplicateQuestion = async (req, res) => {
+exports.duplicateQuestion = async (req, res, next) => {
   try {
     const loaded = await loadQuestionWithActivity(req, res);
     if (!loaded) return;
@@ -343,7 +349,7 @@ exports.duplicateQuestion = async (req, res) => {
 };
 
 // DELETE /api/questions/:id
-exports.deleteQuestion = async (req, res) => {
+exports.deleteQuestion = async (req, res, next) => {
   try {
     const loaded = await loadQuestionWithActivity(req, res);
     if (!loaded) return;

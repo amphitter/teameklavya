@@ -10,7 +10,7 @@ const emailService = require("../services/email.service");
 const templates = require("../services/emailTemplates");
 
 // Generate a new event ticket
-exports.generateTicket = async (req, res) => {
+exports.generateTicket = async (req, res, next) => {
   try {
     const { eventId } = req.body;
     const userId = req.user.id;
@@ -56,12 +56,12 @@ exports.generateTicket = async (req, res) => {
     });
   } catch (error) {
     console.error("Ticket generation error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Generate tickets in bulk (admin only)
-exports.generateBulkTickets = async (req, res) => {
+exports.generateBulkTickets = async (req, res, next) => {
   try {
     const { eventId, userIds, sendEmail = true } = req.body;
 
@@ -152,12 +152,12 @@ exports.generateBulkTickets = async (req, res) => {
     });
   } catch (error) {
     console.error("Bulk ticket generation error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Approve pending tickets (admin only)
-exports.approvePendingTickets = async (req, res) => {
+exports.approvePendingTickets = async (req, res, next) => {
   try {
     const { ticketIds } = req.body;
 
@@ -197,12 +197,12 @@ exports.approvePendingTickets = async (req, res) => {
     });
   } catch (error) {
     console.error("Approve pending tickets error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get pending tickets for an event
-exports.getPendingTickets = async (req, res) => {
+exports.getPendingTickets = async (req, res, next) => {
   try {
     const { eventId } = req.params;
 
@@ -221,12 +221,12 @@ exports.getPendingTickets = async (req, res) => {
     });
   } catch (error) {
     console.error("Get pending tickets error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Send ticket to user manually (admin only)
-exports.sendTicketToUser = async (req, res) => {
+exports.sendTicketToUser = async (req, res, next) => {
   try {
     const { ticketId } = req.body;
 
@@ -250,7 +250,7 @@ exports.sendTicketToUser = async (req, res) => {
     });
   } catch (error) {
     console.error("Send ticket error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
@@ -276,7 +276,7 @@ exports.sendTicketEmail = async (ticket, user, event) => {
   }
 };
 
-exports.generateTicketsForAllRegistered = async (req, res) => {
+exports.generateTicketsForAllRegistered = async (req, res, next) => {
   try {
     const { eventId, sendEmail = true } = req.body;
 
@@ -303,12 +303,12 @@ exports.generateTicketsForAllRegistered = async (req, res) => {
     });
   } catch (error) {
     console.error("Generate tickets for all registered error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get ticket generation statistics for an event
-exports.getTicketGenerationStats = async (req, res) => {
+exports.getTicketGenerationStats = async (req, res, next) => {
   try {
     const { eventId } = req.params;
 
@@ -343,12 +343,12 @@ exports.getTicketGenerationStats = async (req, res) => {
     });
   } catch (error) {
     console.error("Get ticket generation stats error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Scan ticket (admin entry/exit) - ENHANCED
-exports.scanTicket = async (req, res) => {
+exports.scanTicket = async (req, res, next) => {
   try {
     const { token, action } = req.body;
     const scannedBy = req.user.id;
@@ -457,12 +457,12 @@ exports.scanTicket = async (req, res) => {
     });
   } catch (error) {
     console.error("Ticket scan error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get ticket by token (for scan validation)
-exports.getTicketByToken = async (req, res) => {
+exports.getTicketByToken = async (req, res, next) => {
   try {
     const { token } = req.params;
     
@@ -483,12 +483,12 @@ exports.getTicketByToken = async (req, res) => {
     });
   } catch (error) {
     console.error("Get ticket by token error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get scan statistics for an event with time ranges
-exports.getEventScanStats = async (req, res) => {
+exports.getEventScanStats = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const { timeRange = 'all' } = req.query;
@@ -604,12 +604,12 @@ exports.getEventScanStats = async (req, res) => {
     });
   } catch (error) {
     console.error("Get scan stats error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get recent scans for an event
-exports.getRecentScans = async (req, res) => {
+exports.getRecentScans = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const { limit = 10 } = req.query;
@@ -633,12 +633,12 @@ exports.getRecentScans = async (req, res) => {
     });
   } catch (error) {
     console.error("Get recent scans error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get all scanned tickets for an event (admin)
-exports.getEventScannedTickets = async (req, res) => {
+exports.getEventScannedTickets = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const { page = 1, limit = 50, status } = req.query;
@@ -675,12 +675,12 @@ exports.getEventScannedTickets = async (req, res) => {
     });
   } catch (error) {
     console.error("Get event scanned tickets error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get all tickets of current user
-exports.getUserTickets = async (req, res) => {
+exports.getUserTickets = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const tickets = await Ticket.find({ userId })
@@ -690,7 +690,7 @@ exports.getUserTickets = async (req, res) => {
     res.json({ success: true, tickets });
   } catch (error) {
     console.error("Get user tickets error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 

@@ -38,12 +38,12 @@ async function test(name, fn) {
     const e = new ValidationError("Bad input");
     const r = errorResponse(e);
     assert.strictEqual(r.status, 400);
-    assert.strictEqual(r.body.error.code, "VALIDATION_FAILED");
+    assert.strictEqual(r.body.error.code, "VALIDATION_ERROR");
     assert.strictEqual(r.body.message, "Bad input");
     assert.strictEqual(r.body.success, false);
   });
   await test("non-exposed AppError never leaks its message", () => {
-    const e = new AppError("secret internal detail", { status: 500, code: "INTERNAL", expose: false });
+    const e = new AppError("secret internal detail", { status: 500, code: "INTERNAL_ERROR", expose: false });
     const r = errorResponse(e);
     assert.strictEqual(r.status, 500);
     assert.ok(!JSON.stringify(r.body).includes("secret"));
@@ -65,21 +65,21 @@ async function test(name, fn) {
     assert.strictEqual(r.status, 400);
     assert.strictEqual(r.body.message, "Title is required");
   });
-  await test("CastError → 400 VALIDATION_FAILED", () => {
+  await test("CastError → 400 VALIDATION_ERROR", () => {
     const r = errorResponse({ name: "CastError", kind: "ObjectId" });
     assert.strictEqual(r.status, 400);
-    assert.strictEqual(r.body.error.code, "VALIDATION_FAILED");
+    assert.strictEqual(r.body.error.code, "VALIDATION_ERROR");
   });
   await test("JWT error → 401", () => {
     const r = errorResponse({ name: "TokenExpiredError", message: "jwt expired" });
     assert.strictEqual(r.status, 401);
-    assert.strictEqual(r.body.error.code, "UNAUTHORIZED");
+    assert.strictEqual(r.body.error.code, "AUTH_REQUIRED");
   });
   await test("unknown error → 500 with generic message (no leak)", () => {
     const r = errorResponse(new Error("connect ETIMEDOUT 10.0.0.1:27017 super-internal"));
     assert.strictEqual(r.status, 500);
     assert.ok(!JSON.stringify(r.body).includes("ETIMEDOUT"));
-    assert.strictEqual(r.body.error.code, "INTERNAL");
+    assert.strictEqual(r.body.error.code, "INTERNAL_ERROR");
   });
 
   console.log("── 2. CacheService ──");

@@ -8,6 +8,7 @@ const Event = require("../models/event.model");
 const RegistrationResponse = require("../models/registrationResponse.model");
 const AuditLog = require("../models/auditLog.model");
 const { isSuperAdminEmail } = require("../middleware/auth.middleware");
+const { ERROR_CODES } = require("../utils/app-error");
 
 const slugify = (s) =>
   String(s).toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/[\s_]+/g, "-").replace(/-+/g, "-").slice(0, 60);
@@ -49,7 +50,7 @@ exports.createOrganization = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: "Organization name must be 100 characters or fewer",
-        error: { code: "VALIDATION_FAILED", message: "Organization name must be 100 characters or fewer" },
+        error: { code: ERROR_CODES.VALIDATION_ERROR, message: "Organization name must be 100 characters or fewer" },
       });
     }
 

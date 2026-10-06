@@ -45,7 +45,7 @@ const getEventLocationHTML = (event) => {
   }
 };
 
-exports.createEvent = async (req, res) => {
+exports.createEvent = async (req, res, next) => {
   try {
     const body = req.body || {};
     
@@ -161,12 +161,12 @@ exports.createEvent = async (req, res) => {
     res.status(201).json({ success: true, event });
   } catch (error) {
     console.error("Create Event Error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Public: Get all events (paginated optional)
-exports.getEvents = async (req, res) => {
+exports.getEvents = async (req, res, next) => {
   try {
     const { 
       page = 1, 
@@ -261,7 +261,7 @@ exports.getEvents = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Events Error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
@@ -272,12 +272,12 @@ exports.getEventCategories = async (_req, res) => {
     res.json({ success: true, categories: categories.filter(Boolean).sort() });
   } catch (error) {
     console.error("Get categories error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Public: get by slug (unlisted reachable by link; private needs organizer/admin rights)
-exports.getEventBySlug = async (req, res) => {
+exports.getEventBySlug = async (req, res, next) => {
   try {
     // Cache-first public lookup (Part 5, Phase 3 — §9, §14).
     // Public event pages are the hottest read in EventHub and are identical
@@ -299,24 +299,24 @@ exports.getEventBySlug = async (req, res) => {
     res.json({ success: true, event });
   } catch (error) {
     console.error("Get event by slug error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Admin: get by id
-exports.getEventById = async (req, res) => {
+exports.getEventById = async (req, res, next) => {
   try {
     const event = await Event.findById(req.params.id).populate("organization", "name slug logoUrl");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
     res.json({ success: true, event });
   } catch (error) {
     console.error("Get event by id error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Update event (Admin)
-exports.updateEvent = async (req, res) => {
+exports.updateEvent = async (req, res, next) => {
   try {
     const body = req.body || {};
     
@@ -395,12 +395,12 @@ exports.updateEvent = async (req, res) => {
     res.json({ success: true, event });
   } catch (error) {
     console.error("Update event error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get admin events with advanced filtering
-exports.getAdminEvents = async (req, res) => {
+exports.getAdminEvents = async (req, res, next) => {
   try {
     const { search, category, page = 1, limit = 50, status, eventType } = req.query;
     
@@ -468,12 +468,12 @@ exports.getAdminEvents = async (req, res) => {
     });
   } catch (error) {
     console.error("Get admin events error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Delete event (Admin)
-exports.deleteEvent = async (req, res) => {
+exports.deleteEvent = async (req, res, next) => {
   try {
     const event = await Event.findByIdAndDelete(req.params.id);
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
@@ -482,12 +482,12 @@ exports.deleteEvent = async (req, res) => {
     res.json({ success: true, message: "Event deleted" });
   } catch (error) {
     console.error("Delete event error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Send RSVP to selected users (Admin)
-exports.sendRSVP = async (req, res) => {
+exports.sendRSVP = async (req, res, next) => {
   try {
     const { eventId, userIds, rsvpLink } = req.body;
     const event = await Event.findById(eventId);
@@ -517,12 +517,12 @@ exports.sendRSVP = async (req, res) => {
     res.json({ success: true, message: `RSVP process completed: ${successful} sent, ${failed} failed`, results });
   } catch (error) {
     console.error("sendRSVP error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Send event announcement to all users (batched)
-exports.sendEventNotificationToAllUsers = async (req, res) => {
+exports.sendEventNotificationToAllUsers = async (req, res, next) => {
   try {
     const { id } = req.params;
     const event = await Event.findById(id);
@@ -567,7 +567,7 @@ exports.sendEventNotificationToAllUsers = async (req, res) => {
     res.json({ success: true, message: `Notification sent: ${sentCount} sent, ${failedCount} failed`, sentCount, failedCount });
   } catch (error) {
     console.error("sendEventNotificationToAllUsers error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
@@ -577,7 +577,7 @@ const generateRSVPToken = () => {
 
 // Send RSVP to registered students with tickets
 // Send RSVP to registered students with tickets
-exports.sendRSVPWithVerification = async (req, res) => {
+exports.sendRSVPWithVerification = async (req, res, next) => {
   try {
     const { eventId, userIds, customMessage } = req.body;
     const event = await Event.findById(eventId);
@@ -633,11 +633,11 @@ exports.sendRSVPWithVerification = async (req, res) => {
     res.json({ success: true, message: `RSVP process completed: ${successful} sent, ${failed} failed`, results });
   } catch (error) {
     console.error("sendRSVPWithVerification error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
-exports.verifyRSVP = async (req, res) => {
+exports.verifyRSVP = async (req, res, next) => {
   try {
     const { token } = req.params;
     
@@ -706,12 +706,12 @@ exports.verifyRSVP = async (req, res) => {
     });
   } catch (error) {
     console.error("Verify RSVP error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get RSVP analytics
-exports.getRSVPAnalytics = async (req, res) => {
+exports.getRSVPAnalytics = async (req, res, next) => {
   try {
     const { id } = req.params;
     
@@ -760,7 +760,7 @@ exports.getRSVPAnalytics = async (req, res) => {
     res.json({ success: true, analytics });
   } catch (error) {
     console.error("Get RSVP analytics error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
@@ -796,7 +796,7 @@ const getRSVPTimelineData = async (eventId, days) => {
 };
 
 // Get event statistics (Admin)
-exports.getEventStats = async (req, res) => {
+exports.getEventStats = async (req, res, next) => {
   try {
     const { id } = req.params;
     
@@ -845,12 +845,12 @@ exports.getEventStats = async (req, res) => {
     res.json({ success: true, stats });
   } catch (error) {
     console.error("Get event stats error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Update event ticket settings (Admin)
-exports.updateTicketSettings = async (req, res) => {
+exports.updateTicketSettings = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { ticketSettings } = req.body;
@@ -885,12 +885,12 @@ exports.updateTicketSettings = async (req, res) => {
     });
   } catch (error) {
     console.error("Update ticket settings error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get events with ticket generation stats (Admin)
-exports.getEventsWithTicketStats = async (req, res) => {
+exports.getEventsWithTicketStats = async (req, res, next) => {
   try {
     const { page = 1, limit = 50 } = req.query;
     
@@ -937,12 +937,12 @@ exports.getEventsWithTicketStats = async (req, res) => {
     });
   } catch (error) {
     console.error("Get events with ticket stats error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return next(error);
   }
 };
 
 // Get public participants of an event (minimal fields — no emails)
-exports.getEventParticipants = async (req, res) => {
+exports.getEventParticipants = async (req, res, next) => {
   try {
     const { id } = req.params;
     const responses = await RegistrationResponse.find({ eventId: id, status: 'confirmed' })
@@ -974,7 +974,7 @@ exports.getEventParticipants = async (req, res) => {
  *   no ML, no randomization. Pool: public upcoming/ongoing events.
  */
 // GET /api/events/trending?limit=6
-exports.getTrendingEvents = async (req, res) => {
+exports.getTrendingEvents = async (req, res, next) => {
   try {
     const limit = Math.min(12, Math.max(1, parseInt(req.query.limit) || 6));
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
@@ -1034,7 +1034,7 @@ exports.getTrendingEvents = async (req, res) => {
  * from registration. Interested users receive event update notifications.
  */
 // GET /api/events/:id/interest — real state for the CTA (count + mine + preview)
-exports.getEventInterest = async (req, res) => {
+exports.getEventInterest = async (req, res, next) => {
   try {
     const eventId = req.params.id;
     const event = await Event.findById(eventId).select("visibility createdBy").lean();
@@ -1069,7 +1069,7 @@ exports.getEventInterest = async (req, res) => {
 };
 
 // POST /api/events/:id/interest — toggle (requireAuth)
-exports.toggleEventInterest = async (req, res) => {
+exports.toggleEventInterest = async (req, res, next) => {
   try {
     const eventId = req.params.id;
     const event = await Event.findById(eventId).select("visibility removedAt");
@@ -1112,7 +1112,7 @@ exports.toggleEventInterest = async (req, res) => {
  * Tie-break: earliest start date, then id — stable across requests.
  */
 // GET /api/events/for-you?limit=6 (requireAuth)
-exports.getEventsForYou = async (req, res) => {
+exports.getEventsForYou = async (req, res, next) => {
   try {
     const me = req.user.id;
     const limit = Math.min(12, Math.max(1, parseInt(req.query.limit) || 6));
@@ -1187,7 +1187,7 @@ exports.getEventsForYou = async (req, res) => {
 
 // GET /api/events/:id/analytics — registration timeline, interest,
 // check-in summary and top posts (organizer/admin only)
-exports.getEventAnalytics = async (req, res) => {
+exports.getEventAnalytics = async (req, res, next) => {
   try {
     const { id } = req.params;
     const event = await Event.findById(id).select("_id title createdBy startDate registrationsCount");
@@ -1274,7 +1274,7 @@ exports.getEventAnalytics = async (req, res) => {
 /* ── Live engine settings (Part 4, Phase 1 — spec §74) ────── */
 
 // GET /api/events/:id/live-settings (organizer)
-exports.getLiveSettings = async (req, res) => {
+exports.getLiveSettings = async (req, res, next) => {
   try {
     const event = await Event.findById(req.params.id).select("liveSettings joinCode liveState");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
@@ -1289,7 +1289,7 @@ exports.getLiveSettings = async (req, res) => {
 };
 
 // PUT /api/events/:id/live-settings — whitelisted fields only, server-validated
-exports.updateLiveSettings = async (req, res) => {
+exports.updateLiveSettings = async (req, res, next) => {
   try {
     const event = await Event.findById(req.params.id).select("liveSettings joinCode");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
@@ -1330,7 +1330,7 @@ exports.updateLiveSettings = async (req, res) => {
 };
 
 // POST /api/events/:id/join-code/regenerate (organizer)
-exports.regenerateJoinCode = async (req, res) => {
+exports.regenerateJoinCode = async (req, res, next) => {
   try {
     const event = await Event.findById(req.params.id).select("joinCode");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });

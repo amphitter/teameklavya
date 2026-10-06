@@ -162,6 +162,54 @@ function errorResponse(error) {
     };
   }
 
+  /* ── Body-parser request errors (Part 5, Phase 9 — §63 / §71) ─────────
+   * These are CLIENT faults that arrive before any controller runs, and they
+   * were falling through to a 500. That is wrong twice over: it reports a
+   * user mistake as a server fault (so it pollutes error alerting and looks
+   * like an outage), and it tells the client to retry a request that will
+   * never succeed. Both carry a `type` from body-parser, so they are
+   * unambiguous and safe to special-case.
+   *   entity.parse.failed  — malformed JSON             → 400
+   *   entity.too.large     — body over the §63 limit    → 413
+   *   entity.verify.failed / request.aborted            → 400
+   */
+  if (err.type === "entity.parse.failed") {
+    const message = "Malformed JSON body.";
+    return {
+      status: 400,
+      body: { success: false, message, error: { code: "VALIDATION_FAILED", message } },
+    };
+  }
+  if (err.type === "entity.too.large") {
+    const message = "Request body is too large.";
+    return {
+      status: 413,
+      body: { success: false, message, error: { code: "PAYLOAD_TOO_LARGE", message } },
+    };
+  }
+  if (err.type === "entity.verify.failed" || err.type === "request.aborted") {
+    const message = "Invalid request body.";
+    return {
+      status: 400,
+      body: { success: false, message, error: { code: "VALIDATION_FAILED", message } },
+    };
+  }
+
+  /* A well-behaved middleware that has already decided the status (body-parser
+   * sets status 400/413, multer sets 400) must not be downgraded or upgraded
+   * to 500. Only trust 4xx — never let a library's 5xx skip our logging path. */
+  const libStatus = Number(err.status || err.statusCode);
+  // 429 is deliberately excluded here: it has its own contract below
+  // (RATE_LIMITED + Retry-After) and must keep it.
+  if (Number.isInteger(libStatus) && libStatus >= 400 && libStatus < 500 && libStatus !== 429) {
+    const message =
+      libStatus === 413 ? "Request body is too large." : String(err.message || "Invalid request.");
+    return {
+      status: libStatus,
+      body: { success: false, message, error: { code: "VALIDATION_FAILED", message } },
+    };
+  }
+
   // express-rate-limit throws with status/statusCode but no code — keep 429 shape
   if (Number(err.status) === 429 || Number(err.statusCode) === 429) {
     const message = "Too many requests. Please try again shortly.";

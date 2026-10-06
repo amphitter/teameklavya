@@ -318,6 +318,49 @@ e2e quiz 32 · memories 15 · mgmt ✅ · live 65 · social ✅ · community 38.
 - Full static battery in sandbox (node --check sweep, python balance/symbol sweeps) + documented runbook for dev-machine execution (§75).
 - `PART5_FINAL_REPORT.md` — all sections per the Part 5 final-report contract.
 
+### Phase 9 — RESULT: ✅ **DONE**
+
+- **`tests/phase9.selftest.js`** — the cross-phase verification battery,
+  115 assertions in 11 sections. Earlier suites unit-inspect the module that
+  provides a guarantee; this one proves the guarantee over real HTTP on a real
+  server: 429 contract, Cache-Control policy, ETag/304, compression, cursor
+  pagination, idempotency, search guards, export streaming, cache behaviour,
+  realtime caps, and failure simulation (§71).
+- **Load profiles** (§70): `npm run test:load:100` and `npm run test:load:500`,
+  both ALL GREEN. 100 clients → 500/500 answers, answer p50 30 ms / p95 88 ms,
+  100% fan-out, 0 errors. 500 clients → 2,500/2,500 answers, 500/500 fan-out,
+  0 errors. The harness caps and settle windows had to be fixed first (below).
+- **Static battery**: all 137 backend JS files parse; every model/service/lib/
+  middleware/util/config loads. (`config/passport.js` requires OAuth env —
+  pre-existing, env-gated, untouched since `first commit`.)
+- **`PART5_FINAL_REPORT.md`** — the 26-section final report.
+
+**Two real production bugs found and fixed during verification:**
+1. `endActivity()` never closed an open question, so participants never saw the
+   final question's reveal and `room.questionsClosed` lost one. Fixed by
+   revealing before marking COMPLETED; verified `closed=5`, fan-out 500/500.
+2. Body-parser errors surfaced as 500s — malformed JSON (should be 400) and
+   oversized bodies (should be 413). Fixed centrally in `errorResponse()` via
+   `entity.parse.failed` / `entity.too.large` plus a guarded 4xx rule.
+
+**Harness fixes (they were producing false failures, not real ones):**
+- The join phase fired emits without awaiting acks, so at high client counts
+  answer listeners were registered for ZERO clients and the run reported 0
+  answers against a healthy server. Now awaits every ack with a ceiling.
+- Client cap raised 200 → 1000; settle windows now scale with client count.
+- The load organizer needed `role: "admin"` — event creation is admin-gated.
+  This test was never in the `test:all` chain, which is why it had rotted.
+
+**One regression introduced and caught:** the new 4xx rule in the normalizer
+initially swallowed 429 (which lives in 400–499). phase2's 22nd assertion
+caught it; the rule now excludes 429 so RATE_LIMITED + Retry-After survives.
+
+**Results:** phase9 **115 passed, 0 failed**. Full regression after every
+shared-code change: platform 21 · phase2 22 · phase3 44 · phase4 37 · phase5 70 ·
+phase6 87 · phase7 83 · phase8 82 · **phase9 115** → **561 assertions, 0 failed**;
+e2e quiz 32 · memories 15 · mgmt ✅ · live 65 · social ✅ · community 38;
+`npx tsc --noEmit` exit 0 · `npx next build` exit 0.
+
 ## Coverage map (spec § → phase)
 §1→P0 · §2–3→P3 (logical ownership + composition kept) · §4→P3 · §5–7→P3 · §8–15→P1 · §16–18→P5 · §19–20→P4 · §21–23→P4 · §24–27→P2 · §28→P2 · §29–31→P1 · §32→P1 (pool audit) · §33→P3 · §34→N/A (no Postgres — documented in P0 audit) · §35–36→P3/9 · §37–38→P3 · §39→P3/P5 · §40–41→P3 · §42→already ✅ (P4 of Part 4) · §43–44→P6 · §45→already ✅ · §46–49→P1/P5 · §50–52→P5 · §53–55→P4/P8 · §56–61→P1/P7 · §62→P5 · §63→P1/P2 · §64→P2 · §65→P1/P8 (boundaries only) · §66→P1/P4 · §67→P1 · §68→P1 · §69→P8 · §70–71→P9 · §72→standing rule · §73–74→P8 · §75→P9
 

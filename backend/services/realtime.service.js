@@ -1103,6 +1103,24 @@ async function startActivity(socket, activity, event, ack) {
 /** End an activity: state COMPLETED, leave activity room, broadcast. */
 async function endActivity(eventId, activity, endedBy) {
   if (activity.state === "COMPLETED") return;
+
+  /* Part 5, Phase 9 — closing the reveal gap.
+   * If the organizer ends an activity while a question is still open, that
+   * question still has to be closed and revealed. Previously it was not, so
+   * participants never saw the correct answer for the FINAL question, and
+   * room.questionsClosed silently lost one — which also skewed the
+   * leaderboard auto-show checkpoints driven by that counter.
+   * Reveal first, then mark the activity completed. */
+  if (activity.type === "QUIZ" && activity.questionRuntime && !activity.questionRuntime.closed) {
+    try {
+      await closeQuestion(activity, { count: true });
+    } catch (err) {
+      // Never let a failed reveal block the activity from ending (graceful
+      // degradation, §68) — the answers are already persisted.
+      console.warn("endActivity: could not reveal the open question:", err?.message || err);
+    }
+  }
+
   activity.state = "COMPLETED";
   activity.endedAt = new Date();
   await activity.save();

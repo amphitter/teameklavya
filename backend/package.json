@@ -12,9 +12,11 @@
     "test:quiz": "node tests/quiz.e2e.js",
     "test:memories": "node tests/memories.e2e.js",
     "test:mgmt": "node tests/mgmt.e2e.js",
-    "test:all": "node tests/platform.selftest.js && node tests/phase2.selftest.js && node tests/phase3.selftest.js && node tests/phase4.selftest.js && node tests/phase5.selftest.js && node tests/phase6.selftest.js && node tests/phase7.selftest.js && node tests/phase8.selftest.js && node tests/social.e2e.js && node tests/community.e2e.js && node tests/quiz.e2e.js && node tests/memories.e2e.js && node tests/mgmt.e2e.js && node tests/live.e2e.js",
+    "test:all": "node tests/platform.selftest.js && node tests/phase2.selftest.js && node tests/phase3.selftest.js && node tests/phase4.selftest.js && node tests/phase5.selftest.js && node tests/phase6.selftest.js && node tests/phase7.selftest.js && node tests/phase8.selftest.js && node tests/social.e2e.js && node tests/community.e2e.js && node tests/quiz.e2e.js && node tests/memories.e2e.js && node tests/mgmt.e2e.js && node tests/live.e2e.js && npm run test:phase9",
     "test:live": "node tests/live.e2e.js",
     "test:load": "node tests/live.load.js",
+    "test:load:100": "LIVE_LOAD_CLIENTS=100 REALTIME_CAP_SOCKETS_PER_IP=250 RATE_LIMIT_REALTIME_CONNECT_IP_LIMIT=250 node tests/live.load.js",
+    "test:load:500": "LIVE_LOAD_CLIENTS=500 REALTIME_CAP_SOCKETS_PER_IP=700 RATE_LIMIT_REALTIME_CONNECT_IP_LIMIT=700 node tests/live.load.js",
     "seed:demo": "node scripts/seed-demo.js",
     "test:platform": "node tests/platform.selftest.js && node tests/phase2.selftest.js",
     "test:phase3": "node tests/phase3.selftest.js",
@@ -26,7 +28,8 @@
     "test:phase7": "node tests/phase7.selftest.js",
     "retention:sweep": "node scripts/retention-sweeper.js",
     "retention:sweep:apply": "node scripts/retention-sweeper.js --apply",
-    "test:phase8": "node tests/phase8.selftest.js"
+    "test:phase8": "node tests/phase8.selftest.js",
+    "test:phase9": "node tests/phase9.selftest.js"
   },
   "keywords": [],
   "author": "",

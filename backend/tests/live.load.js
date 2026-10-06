@@ -4,8 +4,17 @@
  * drives N concurrent participants through a full live quiz.
  *
  * Run:
- *   LIVE_LOAD_CLIENTS=10  npm run test:load   # 10-client pass  (~35s)
- *   LIVE_LOAD_CLIENTS=50  npm run test:load   # 50-client pass  (~35s)
+ *   npm run test:load:100   # 100-client pass  (~30s)
+ *   npm run test:load:500   # 500-client pass  (~75s)
+ *
+ * RAISING THE CAPS IS MANDATORY ABOVE 20 CLIENTS.
+ * Every client here originates from 127.0.0.1, so the whole run shares ONE
+ * IP bucket. Two separate guards will cap it before the server breaks a
+ * sweat, and both are working as designed:
+ *   REALTIME_CAP_SOCKETS_PER_IP        (default 20) — concurrent sockets per IP
+ *   RATE_LIMIT_REALTIME_CONNECT_IP_LIMIT (default 30/min) — connect rate per IP
+ * The :100 and :500 scripts raise both. If you see 20/100 or 30/100 sockets
+ * "connected", that is not a failure — it is the cap doing its job.
  *
  * What it measures (the numbers that matter under load):
  *   - connect + join success rate, join ack latency p50/p95
@@ -23,7 +32,7 @@ process.env.FRONTEND_URL = "http://localhost:3100";
 process.env.JWT_SECRET = "test-secret";
 process.env.GOOGLE_CLIENT_ID = "x"; process.env.GOOGLE_CLIENT_SECRET = "y"; process.env.GOOGLE_CALLBACK_URL = "http://localhost/callback";
 
-const CLIENTS = Math.max(2, Math.min(200, Number(process.env.LIVE_LOAD_CLIENTS) || 10));
+const CLIENTS = Math.max(2, Math.min(1000, Number(process.env.LIVE_LOAD_CLIENTS) || 10));
 const QUESTIONS = 5;
 const QUESTION_SECONDS = 10;
 const ADVANCE_MS = 4000; // organizer cadence per question
@@ -75,7 +84,8 @@ const pct = (arr, p) => {
 
   /* ── fixtures ── */
   const stamp = Date.now();
-  const organizer = await User.create({ firstName: "Load", lastName: "Runner", email: `load-org${stamp}@test.com`, passwordHash: "x", emailVerified: true });
+  // Event creation is admin-gated, so the load organizer must be an admin.
+  const organizer = await User.create({ firstName: "Load", lastName: "Runner", email: `load-org${stamp}@test.com`, passwordHash: "x", emailVerified: true, role: "admin" });
   const orgTok = jwt.sign({ id: String(organizer._id), role: "user", purpose: "auth" }, process.env.JWT_SECRET, { expiresIn: "7d" });
   const users = await User.insertMany(
     Array.from({ length: CLIENTS }, (_, i) => ({ firstName: `Bot${i}`, lastName: "Loader", email: `load-p${i}-${stamp}@test.com`, passwordHash: "x", emailVerified: true }))
@@ -97,7 +107,9 @@ const pct = (arr, p) => {
       price: 0,
     }),
   });
-  const ev = (await createRes.json()).event;
+  const _cr = await createRes.json();
+  if (!_cr || !_cr.event) { console.error("CREATE FAILED", createRes.status, JSON.stringify(_cr).slice(0,600)); process.exit(1); }
+  const ev = _cr.event;
   await Event.updateOne({ _id: ev._id }, { $set: { liveState: "WAITING" } });
   const quizAct = await Activity.create({ event: ev._id, type: "QUIZ", title: "Load round", order: 0, state: "UPCOMING" });
   for (let i = 0; i < QUESTIONS; i++) {
@@ -142,21 +154,44 @@ const pct = (arr, p) => {
   );
   const connected = clients.filter((c) => c.rec.socket.connected).length;
 
+  /**
+   * AWAIT every join ack. This previously fired the emits and resolved
+   * immediately, so at high client counts no ack had landed yet when the
+   * answer listeners were registered — every client was skipped by
+   * `if (!c.joined) continue` and the run reported 0 answers and 0 fan-out
+   * even though the server was healthy. Wait for the acks, with a ceiling.
+   */
+  const JOIN_ACK_TIMEOUT = 30000;
   await Promise.all(
-    clients.map(async (c) => {
-      if (!c.rec.socket.connected) return;
-      const s = Date.now();
-      c.rec.socket.emit("event:join", { eventId: ev._id }, (ack) => {
-        if (ack?.ok) {
-          c.joined = true;
-          c.joinedMs = Date.now() - s;
-        } else {
-          c.errors += 1;
-        }
-      });
-    })
+    clients.map(
+      (c) =>
+        new Promise((resolve) => {
+          if (!c.rec.socket.connected) return resolve();
+          let settled = false;
+          const fin = () => {
+            if (!settled) {
+              settled = true;
+              resolve();
+            }
+          };
+          const s = Date.now();
+          c.rec.socket.emit("event:join", { eventId: ev._id }, (ack) => {
+            if (ack?.ok) {
+              c.joined = true;
+              c.joinedMs = Date.now() - s;
+            } else {
+              c.errors += 1;
+            }
+            fin();
+          });
+          setTimeout(fin, JOIN_ACK_TIMEOUT);
+        })
+    )
   );
-  await wait(1500); // let all joins land + settle
+  // Settle time must scale with client count — a fixed 1500ms is plenty for
+  // 10 clients but far too short for 500, which produced false failures.
+  const SETTLE = Math.max(1500, CLIENTS * 12);
+  await wait(SETTLE); // let all joins land + settle
 
   const joinLat = clients.filter((c) => c.joinedMs != null).map((c) => c.joinedMs);
 
@@ -216,7 +251,7 @@ const pct = (arr, p) => {
   await orgCmd("activity:end", { activityId: quizAct._id, eventId: ev._id });
   await wait(300);
   await orgCmd("event:end", { eventId: ev._id });
-  await wait(2500); // let completion + snapshot fan out
+  await wait(Math.max(2500, CLIENTS * 12)); // let completion + snapshot fan out
 
   /* ── verification + report ── */
   const answerLat = clients.flatMap((c) => c.answerMs);
@@ -224,6 +259,12 @@ const pct = (arr, p) => {
   const sessions = await ParticipantSession.countDocuments({ event: ev._id });
   const dbAnswers = await LiveAnswer.countDocuments({ event: ev._id });
   const expectedAnswers = connected * QUESTIONS;
+  if (process.env.LOAD_DEBUG) {
+    console.log("DEBUG per-client (first 5):");
+    clients.slice(0, 5).forEach((c, i) =>
+      console.log(`  #${i} joined=${c.joined} opened=${c.opened} closed=${c.closed} completed=${c.completed} answers=${c.answers} errors=${c.errors} connected=${c.rec.socket.connected}`)
+    );
+  }
   const fullFanout = clients.filter((c) => c.joined && c.opened === QUESTIONS && c.closed === QUESTIONS && c.completed).length;
   const errorClients = clients.filter((c) => c.errors > 0).length;
   const runtimeS = Math.round((Date.now() - t0) / 1000);

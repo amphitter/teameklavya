@@ -157,7 +157,7 @@ exports.sendMessage = async (req, res) => {
         if (!recipientMuted) {
           await Notification.deleteMany({ user: otherId, type: "message", read: false, conversation: convo._id });
           const { notify } = require("../services/notification.service");
-          notify({ user: otherId, actor: req.user.id, type: "message", conversation: convo._id });
+          await notify({ user: otherId, actor: req.user.id, type: "message", conversation: convo._id });
         }
       } catch (notifyErr) {
         console.error("Message notify error:", notifyErr.message);

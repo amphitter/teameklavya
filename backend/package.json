@@ -35,7 +35,8 @@
     "test:real-providers": "node tests/real-providers.selftest.js",
     "test:phase12": "node tests/phase12.selftest.js",
     "test:phase13": "node tests/phase13.selftest.js",
-    "preflight": "node scripts/preflight-production.js"
+    "preflight": "node scripts/preflight-production.js",
+    "perf-guard": "node scripts/perf-guard.js"
   },
   "keywords": [],
   "author": "",

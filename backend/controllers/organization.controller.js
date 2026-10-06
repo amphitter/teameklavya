@@ -278,7 +278,7 @@ exports.toggleFollowOrg = async (req, res) => {
     await OrgFollow.create({ user: req.user.id, organization: org._id });
     PostRepository.invalidateFeedContext(req.user.id);
     OrganizationRepository.invalidate(org);
-    notify({ user: org.createdBy, actor: req.user.id, type: "org_follow", organization: org._id });
+    await notify({ user: org.createdBy, actor: req.user.id, type: "org_follow", organization: org._id });
     res.json({ success: true, following: true });
   } catch (error) {
     console.error("Toggle org follow error:", error.message);

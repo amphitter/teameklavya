@@ -436,7 +436,7 @@ exports.resolveJoinRequest = async (req, res) => {
     if (action === "approve") {
       member.status = "active";
       await member.save();
-      notify({ user: member.user, actor: req.user.id, type: "community_invite", community: community._id });
+      await notify({ user: member.user, actor: req.user.id, type: "community_invite", community: community._id });
       return res.json({ success: true, status: "active" });
     }
     await member.deleteOne();
@@ -474,7 +474,7 @@ exports.inviteMember = async (req, res) => {
       await CommunityMember.create({ community: community._id, user: invitee._id, status: "invited", invitedBy: req.user.id });
     }
 
-    notify({ user: invitee._id, actor: req.user.id, type: "community_invite", community: community._id });
+    await notify({ user: invitee._id, actor: req.user.id, type: "community_invite", community: community._id });
     res.json({ success: true, invited: true });
   } catch (error) {
     console.error("Invite member error:", error.message);

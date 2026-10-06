@@ -29,7 +29,7 @@ architecture; it makes the existing architecture production-safe.
 | 5 | Community ownership & Super Admin protection | §10 | ✅ |
 | 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | ✅ |
 | 7 | Provider failure matrix + preflight | §12, §31 | ✅ |
-| 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | pending |
+| 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | ✅ |
 | 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | pending |
 | 10 | Error taxonomy | §30 | ✅ |
 | 11 | Frontend + upload + rate-limit review | §27, §28, §29 | pending |
@@ -366,6 +366,50 @@ infrastructure. A hardening report that claims completeness is not
 trustworthy.
 
 Regression: 1170 → **1203 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
+### Phase 8 — RESULT: ✅ **DONE** (§23–§26 — `services/observability.service.js`, `scripts/perf-guard.js`, 37 new assertions)
+
+**A flaky test turned out to be a real bug.** `tests/community.e2e.js` failed
+intermittently under the full suite with `got=org_follow,comment,like,follow` —
+4 notifications where 5 were expected. Not an ordering problem: the
+`event_registration` notification was **missing**.
+
+Cause: **`notify()` was never awaited** — 12 call sites fired it and forgot it.
+The write raced the response, so a client that read `/notifications` immediately
+after the triggering action could see nothing. `notify()` has its own try/catch
+and never throws, so awaiting is free of risk: the only cost is one small write
+on the request, and the benefit is that a 201 which implies a notification has
+actually recorded it. The two mention loops now fan out with `Promise.all`
+rather than serialising.
+
+This is the kind of bug a green suite hides for years: it passed standalone
+every time, and only lost the race under load.
+
+**§24 — INFO added.** Part 6's ladder started at WARNING, so there was no way to
+record "this happened, it is fine, do not act". Everything notable either became
+a WARNING (and got ignored) or went unsaid.
+
+**§25 — per-endpoint budgets with a CI guard.** `npm run perf-guard`. A global
+p95 is the most misleading number in the system: the aggregate can be perfect
+while one endpoint is unusable, and only the users on that endpoint know.
+Crucially it fails on **MAJOR** regressions only (2× over budget, or 5× over the
+error rate) — a guard that fails on a 1ms overshoot gets deleted within a week.
+`--baseline` also catches slow drift (200→350→500ms is three passes and one
+outage). Verified across healthy, warning, major and drift paths.
+
+**§26 — query budget with documented exceptions.** N+1 and unbounded reads are
+detected separately, because they fail differently: N+1 grows with the result
+set (invisible at 10 rows, fatal at 10 000), while an unbounded read is fine
+until the day the table is big enough. Exceptions are **declared with a reason
+and a bound** — and claiming an undocumented exception is itself a HIGH
+finding, because an informal exception hides the problem instead of explaining
+it.
+
+**§23 — six-domain rollup reporting DARK domains.** A domain nobody is
+measuring is where incidents start, so the rollup says so rather than
+presenting a clean-looking panel with holes in it.
+
+Regression: 1203 → **1240 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

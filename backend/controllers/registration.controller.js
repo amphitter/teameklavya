@@ -173,7 +173,7 @@ exports.submitResponse = async (req, res, next) => {
     PostRepository.invalidateFeedContext(userId);
 
     // Let the organizer know someone signed up
-    notify({ user: event.createdBy, actor: userId, type: "event_registration", event: event._id });
+    await notify({ user: event.createdBy, actor: userId, type: "event_registration", event: event._id });
     // Achievements: event_explorer (first real registration)
     require("../services/achievement.service").checkAchievements(userId);
 

@@ -1146,6 +1146,156 @@ async function auditDocs() {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §23 OBSERVABILITY · §24 ALERTING · §25 PERF BUDGETS · §26 QUERY BUDGET
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
+async function auditObservability() {
+  sec("25. §24 — the severity ladder includes INFO");
+
+  const obs = require("../services/observability.service");
+  const { SEVERITY, worstSeverity, evaluateEndpoint, budgetFor, evaluateQueries,
+          QUERY_BUDGET, QUERY_EXCEPTIONS, snapshot } = obs;
+
+  ok(
+    "§24: there are four severities, including INFO",
+    Object.keys(SEVERITY).length === 4 && SEVERITY.INFO === "INFO",
+    Object.keys(SEVERITY).join(",")
+  );
+  ok(
+    "§24: …named exactly INFO / WARNING / HIGH / CRITICAL",
+    ["INFO", "WARNING", "HIGH", "CRITICAL"].every((s) => SEVERITY[s] === s)
+  );
+  eq(
+    "§24: worstSeverity picks the highest, not the last",
+    worstSeverity("WARNING", "CRITICAL", "INFO"),
+    "CRITICAL"
+  );
+  eq("§24: …and tolerates nulls", worstSeverity(null, "HIGH", "INFO"), "HIGH");
+  eq("§24: …and returns null when nothing is wrong", worstSeverity(null, undefined), null);
+
+  sec("26. §25 — per-endpoint performance budgets");
+
+  ok(
+    "§25: a cached read has a tighter budget than the default",
+    budgetFor("GET", "/api/events").budget.p95 < obs.DEFAULT_BUDGET.p95,
+    `${budgetFor("GET", "/api/events").budget.p95}`
+  );
+  ok(
+    "§25: an endpoint with no override falls back to the default budget",
+    budgetFor("GET", "/api/some/unlisted/thing").budget.p95 === obs.DEFAULT_BUDGET.p95
+  );
+  eq(
+    "§25: a parameterised route matches its budget template",
+    budgetFor("GET", "/api/communities/my-community").key,
+    "GET /api/communities/:slug"
+  );
+  ok(
+    "§25: …and a different id still matches",
+    budgetFor("GET", "/api/communities/another").key === "GET /api/communities/:slug"
+  );
+
+  const healthy = evaluateEndpoint({ method: "GET", path: "/api/events", p95: 100, p99: 200, errorRate: 0.001 });
+  ok("§25: a fast endpoint passes cleanly", healthy.breaches.length === 0 && healthy.severity === null);
+
+  const slight = evaluateEndpoint({ method: "GET", path: "/api/events", p95: 200, p99: 300, errorRate: 0.001 });
+  ok(
+    "§25: a small overshoot is a WARNING, not a build failure (a guard that fails on noise gets disabled)",
+    slight.breaches.length === 1 && slight.severity === SEVERITY.WARNING && !slight.breaches[0].major,
+    JSON.stringify(slight.severity)
+  );
+
+  const bad = evaluateEndpoint({ method: "GET", path: "/api/events", p95: 500, p99: 900, errorRate: 0.001 });
+  ok(
+    "§25: a 2× overshoot is MAJOR — that is what blocks CI",
+    bad.breaches.some((b) => b.metric === "p95" && b.major),
+    JSON.stringify(bad.breaches)
+  );
+
+  const errs = evaluateEndpoint({ method: "GET", path: "/api/events", p95: 100, p99: 200, errorRate: 0.05 });
+  ok(
+    "§25: a high error rate outranks latency (a fast endpoint that fails is worse than a slow one that works)",
+    errs.severity === SEVERITY.CRITICAL,
+    JSON.stringify(errs.severity)
+  );
+
+  sec("27. §26 — database query budget and N+1 detection");
+
+  const clean = evaluateQueries({ queries: 3, maxRows: 50, bounded: true });
+  ok("§26: a normal request is within budget", clean.withinBudget && clean.severity === null);
+
+  const nPlusOne = evaluateQueries({ queries: QUERY_BUDGET.maxQueriesPerRequest + 10, maxRows: 10, bounded: true });
+  ok(
+    "§26: too many queries in one request is flagged as N+1",
+    nPlusOne.findings.some((f) => f.type === "N_PLUS_ONE"),
+    JSON.stringify(nPlusOne.findings)
+  );
+  ok("§26: …at WARNING severity when moderately over", nPlusOne.severity === SEVERITY.WARNING);
+
+  const unbounded = evaluateQueries({ queries: 4, maxRows: 500_000, bounded: true });
+  ok(
+    "§26: a read returning more rows than the budget is flagged UNBOUNDED_READ",
+    unbounded.findings.some((f) => f.type === "UNBOUNDED_READ"),
+    JSON.stringify(unbounded.findings)
+  );
+
+  const noLimit = evaluateQueries({ queries: 4, maxRows: 10, bounded: false });
+  ok(
+    "§26: a read with no limit is flagged at HIGH — it is an outage waiting for a big enough table",
+    noLimit.findings.some((f) => f.type === "UNBOUNDED_QUERY") && noLimit.severity === SEVERITY.HIGH,
+    JSON.stringify(noLimit.severity)
+  );
+
+  ok(
+    "§26: exceptions are DOCUMENTED, each with a reason and a bound",
+    QUERY_EXCEPTIONS.length > 0 &&
+      QUERY_EXCEPTIONS.every((e) => e.name && e.why && e.bound),
+    JSON.stringify(QUERY_EXCEPTIONS.map((e) => e.name))
+  );
+  const exempt = evaluateQueries({
+    queries: 5000, maxRows: 500_000, bounded: false, exception: "reconciliation",
+  });
+  ok(
+    "§26: a declared exception is honoured rather than flagged",
+    exempt.withinBudget && exempt.exception && exempt.exception.name === "reconciliation"
+  );
+  const fakeExempt = evaluateQueries({
+    queries: 5000, bounded: false, exception: "because I said so",
+  });
+  ok(
+    "§26: …but an UNDECLARED exception is itself a finding at HIGH (claiming one hides the problem)",
+    fakeExempt.findings.some((f) => f.type === "UNDECLARED_EXCEPTION") &&
+      fakeExempt.severity === SEVERITY.HIGH,
+    JSON.stringify(fakeExempt.severity)
+  );
+
+  sec("28. §23 — all six domains are observable, and dark ones are reported");
+
+  const snap = snapshot();
+  for (const d of ["api", "mongo", "supabase", "redis", "realtime", "storage"]) {
+    ok(`§23: the ${d} domain is present in the rollup`, Boolean(snap.domains[d]));
+    ok(`§23: …and reports whether it is actually being observed`, "observed" in snap.domains[d]);
+  }
+  ok(
+    "§23: a domain with no data is reported DARK rather than silently omitted",
+    Array.isArray(snap.dark)
+  );
+  ok(
+    "§23: …and darkness is at least a WARNING (an unmeasured domain is where incidents start)",
+    snap.dark.length === 0 || snap.severity === SEVERITY.WARNING,
+    `dark=${snap.dark.join(",")} severity=${snap.severity}`
+  );
+
+  /* The guard script must exist and be runnable, or §25 is a document only. */
+  const guardPath = path.join(ROOT, "scripts", "perf-guard.js");
+  ok("§25: the perf-guard script exists", fs.existsSync(guardPath));
+  ok(
+    "§25: …and refuses to run without an input file",
+    /usage: node scripts\/perf-guard/.test(read(guardPath))
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 (async () => {
@@ -1161,6 +1311,7 @@ async function auditDocs() {
     await auditOwnership();
     await auditFailureMatrix();
     await auditDocs();
+    await auditObservability();
   } catch (err) {
     failed += 1;
     failures.push(`suite crashed: ${err && err.message}`);

@@ -49,9 +49,9 @@ exports.toggleFollow = async (req, res) => {
     PostRepository.invalidateFeedContext(followerId);
 
     if (status === "pending") {
-      notify({ user: followeeId, actor: followerId, type: "follow_request" });
+      await notify({ user: followeeId, actor: followerId, type: "follow_request" });
     } else {
-      notify({ user: followeeId, actor: followerId, type: "follow" });
+      await notify({ user: followeeId, actor: followerId, type: "follow" });
     }
 
     res.json({ success: true, following: status === "accepted", requested: status === "pending" });
@@ -191,7 +191,7 @@ exports.acceptRequest = async (req, res) => {
     await edge.save();
     // The requester's cached graph is what changes — they now follow someone.
     PostRepository.invalidateFeedContext(requesterId);
-    notify({ user: requesterId, actor: req.user.id, type: "follow_accepted" });
+    await notify({ user: requesterId, actor: req.user.id, type: "follow_accepted" });
     // Achievements: crowd_favorite (10 accepted followers — for the followed user)
     require("../services/achievement.service").checkAchievements(req.user.id);
 

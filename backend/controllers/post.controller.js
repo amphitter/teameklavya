@@ -515,9 +515,11 @@ exports.createPost = async (req, res) => {
     });
 
     // Mention notifications (real users only, author excluded)
-    for (const mentioned of mentionedUsers) {
-      notify({ user: mentioned._id, actor: req.user.id, type: "mention", post: post._id });
-    }
+    await Promise.all(
+      mentionedUsers.map((mentioned) =>
+        notify({ user: mentioned._id, actor: req.user.id, type: "mention", post: post._id })
+      )
+    );
 
     // Achievements: first_post / prolific_poster / memory_maker (real data)
     checkAchievements(req.user.id);
@@ -558,7 +560,7 @@ exports.toggleLike = async (req, res) => {
       await existing.deleteOne();
     } else {
       await Reaction.create({ post: post._id, user: req.user.id });
-      notify({ user: post.author, actor: req.user.id, type: "like", post: post._id });
+      await notify({ user: post.author, actor: req.user.id, type: "like", post: post._id });
     }
 
     const likeCount = await Reaction.countDocuments({ post: post._id });
@@ -631,14 +633,17 @@ exports.addComment = async (req, res) => {
     }
 
     const comment = await Comment.create({ post: post._id, author: req.user.id, content });
-    notify({ user: post.author, actor: req.user.id, type: "comment", post: post._id });
+    await notify({ user: post.author, actor: req.user.id, type: "comment", post: post._id });
 
     // @mention notifications inside comments (real users, author excluded)
-    for (const mentioned of await parseMentions(content, req.user.id)) {
-      if (String(mentioned._id) !== String(post.author)) {
-        notify({ user: mentioned._id, actor: req.user.id, type: "mention", post: post._id });
-      }
-    }
+    const commentMentions = (await parseMentions(content, req.user.id)).filter(
+      (mentioned) => String(mentioned._id) !== String(post.author)
+    );
+    await Promise.all(
+      commentMentions.map((mentioned) =>
+        notify({ user: mentioned._id, actor: req.user.id, type: "mention", post: post._id })
+      )
+    );
     const populated = await Comment.findById(comment._id).populate("author", AUTHOR_FIELDS).lean();
 
     res.status(201).json({ success: true, comment: populated });

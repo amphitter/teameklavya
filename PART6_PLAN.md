@@ -526,6 +526,52 @@ assertions across 10 suites, 0 failed**; e2e unchanged and green.
   blocks, achievements.
 - Cursor pagination mandatory on every collection; no unbounded queries.
 
+### Phase 5 — RESULT: ✅ **DONE** (251 assertions in phase10, +60)
+**PREPARATION, NOT CUTOVER (§10).** Mongo still serves the social domain.
+Nothing here is wired to a controller; Phase 6 does backfill → verify →
+dual-read → cutover.
+
+- `providers/supabase/client.js` — hand-rolled PostgREST client over `fetch`.
+  **No new dependencies**, deliberately: we need queries, not a platform SDK,
+  and our observability (timing, N+1, row ceilings) has to sit inside the data
+  path rather than wrapped around someone else's client.
+- `providers/supabase/index.js` — the boundary. The service-role key is read
+  in exactly one module. `supabaseStats()` is what the dashboard may see: it
+  never contains the key, the host, or upstream error text (§14, §61).
+- `db/supabase/schema.sql` — 25 tables, 51 FKs, 31 CHECK constraints,
+  48 indexes, 17 triggers. Validated with `sqlglot` (121 statements parse),
+  plus checks that no FK, trigger or index references a missing table/column.
+
+**Decisions worth keeping:**
+- **§9 identity: `profiles.id` TEXT PRIMARY KEY holding the canonical EventHub
+  id.** No mapping table, because a mapping table *is* a second identity.
+  Costs 24 bytes/key vs a UUID's 16 — accepted, and documented in the schema.
+- **RLS intentionally omitted.** Authorisation lives in the API layer, where
+  it is tested. Duplicating it as policies would create two sources of truth
+  that can disagree. The service-role key bypasses RLS, so leaving it off is
+  not a risk today.
+- **One pagination dialect.** The Supabase repositories reuse
+  `repositories/cursor.js` verbatim, so a client cannot tell which store
+  answered — asserted by an envelope-shape equality test against
+  `cursor.buildPage()`.
+- **Counters are triggers, not application increments**, so no code path can
+  forget one. This is also why the Postgres feed is strictly cheaper:
+  `likes_count`/`comments_count` ride on the posts row, so attaching them
+  costs zero extra queries where Mongo needed two aggregations per page.
+- **Cross-store ids (events) are TEXT, never FKs.** A FK across two databases
+  cannot be enforced; pretending otherwise is a silent-data bug waiting to
+  happen.
+
+**Two real defects found while testing:**
+1. `scrub()` did not redact Postgres DSNs. A connection string is a
+   credential (host + user + password) and Postgres errors echo it. Now
+   redacted, with the scheme kept so logs stay diagnosable.
+2. `community_members` was missing the `id` tiebreaker in its keyset index.
+   Because `created_at` is not unique, two members joining in the same instant
+   could straddle a page boundary and one would be lost. The schema check is
+   now sort-aware, which also caught that `user_achievements` legitimately
+   sorts on `unlocked_at`, not `created_at`.
+
 ### Phase 6 — Migration, consistency & docs (brief §10, §11)
 - `docs/SUPABASE-MIGRATION.md` — backfill → verify → dual-read → cutover,
   with the "never delete Mongo data until independently verified" rule and a

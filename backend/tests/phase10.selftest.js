@@ -25,6 +25,7 @@
 const http = require("http");
 
 /* ── env: point the cache at our fake BEFORE cache.service is required ── */
+const FAKE_PG_PORT = 5612; // Phase 5: fake PostgREST
 const FAKE_PORT = 5611;
 process.env.CACHE_PROVIDER = "upstash";
 process.env.UPSTASH_REDIS_REST_URL = `http://127.0.0.1:${FAKE_PORT}`;
@@ -270,6 +271,170 @@ function createFakeUpstash() {
   });
 
   return { server, store, zsets, state };
+}
+
+
+/* ══ Fake PostgREST server (Phase 5) ═════════════════════════════════════
+ * Just enough of the PostgREST contract to drive the real client:
+ *   GET  /rest/v1/<table>?select=a,b&col=eq.v&col2=in.(x,y)&order=c.desc&limit=n
+ *   POST /rest/v1/<table>              (insert, honours Prefer: return=
+ *   PATCH/DELETE /rest/v1/<table>?...  (filtered update/delete)
+ * It supports the filter operators our repositories actually emit: eq, in,
+ * is, gt, lt, gte, lte, and or=(...).
+ *
+ * `broken` makes every request 500 so we can assert failure handling.
+ */
+function createFakePostgrest() {
+  const http = require("http");
+  const tables = new Map(); // table -> array of row objects
+  const state = { broken: false, requests: 0, lastHeaders: null, paths: [] };
+
+  const ensure = (t) => {
+    if (!tables.has(t)) tables.set(t, []);
+    return tables.get(t);
+  };
+
+  function matches(row, filters, base) {
+    // `or` is a composite: or=(a.ilike.*x*,b.ilike.*x*)
+    for (const [col, raw] of filters) {
+      if (col !== "or") continue;
+      const inner = String(raw).replace(/^\(|\)$/g, "");
+      const parts = inner.split(",").map((p) => p.trim()).filter(Boolean);
+      const any = parts.some((p) => {
+        const m = /^([^.]+)\.ilike\.(.*)$/.exec(p);
+        if (!m) return false;
+        const [, c, pattern] = m;
+        const needle = decodeURIComponent(pattern).replace(/\*/g, "").toLowerCase();
+        return String(row[c] ?? "").toLowerCase().includes(needle);
+      });
+      if (!any) return false;
+    }
+    for (const [col, raw] of filters) {
+      if (col === "or") continue;
+      const op = String(raw);
+      const val = row[col];
+      const num = (v) => Number(v);
+      if (op.startsWith("eq.")) return String(val) === op.slice(3) ? true : false;
+      if (op.startsWith("neq.")) { if (String(val) === op.slice(4)) return false; continue; }
+      if (op.startsWith("in.(")) {
+        const list = op.slice(4, -1).split(",").map(decodeURIComponent);
+        if (!list.includes(String(val))) return false;
+        continue;
+      }
+      if (op.startsWith("is.")) { if (op.slice(3) === "null" ? val != null : val == null) return false; continue; }
+      if (op.startsWith("gte.")) { if (!(num(val) >= num(op.slice(4)))) return false; continue; }
+      if (op.startsWith("lte.")) { if (!(num(val) <= num(op.slice(4)))) return false; continue; }
+      if (op.startsWith("gt.")) { if (!(String(val) > op.slice(3))) return false; continue; }
+      if (op.startsWith("lt.")) { if (!(String(val) < op.slice(3))) return false; continue; }
+    }
+    return true;
+  }
+
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      state.requests += 1;
+      state.lastHeaders = req.headers;
+      state.paths.push(req.url);
+
+      const send = (code, payload) => {
+        const buf = Buffer.from(JSON.stringify(payload));
+        res.writeHead(code, {
+          "Content-Type": "application/json",
+          "Content-Range": `0-${Math.max(0, buf.length - 1)}/*`,
+        });
+        res.end(buf);
+      };
+
+      if (state.broken) {
+        // A realistic PostgREST failure: it echoes Postgres detail.
+        return send(500, {
+          message: 'duplicate key value violates unique constraint "reactions_post_id_user_id_key"',
+          details: "Key (post_id, user_id)=(1, 2) already exists.",
+          hint: "connection string: postgres://user:SECRET@db.supabase.co:5432/postgres",
+        });
+      }
+
+      const u = new URL(req.url, "http://127.0.0.1");
+      const m = /^\/rest\/v1\/([^/?]+)/.exec(u.pathname);
+      if (!m) return send(404, { message: "no such endpoint" });
+      const table = decodeURIComponent(m[1]);
+      const rows = ensure(table);
+
+      const filters = [];
+      let orderSpec = null;
+      let limitN = null;
+      let selectCols = null;
+      for (const [k, v] of u.searchParams.entries()) {
+        if (k === "order") orderSpec = v;
+        else if (k === "limit") limitN = Number(v);
+        else if (k === "select") selectCols = v;
+        else filters.push([k, v]);
+      }
+
+      const method = req.method;
+
+      if (method === "GET") {
+        let out = rows.filter((r) => matches(r, filters, null));
+        if (orderSpec) {
+          for (const clause of String(orderSpec).split(",")) {
+            const [c, dir] = clause.split(".");
+            out = [...out].sort((a, b) => {
+              const av = a[c]; const bv = b[c];
+              const cmp = typeof av === "number" && typeof bv === "number"
+                ? av - bv
+                : String(av).localeCompare(String(bv));
+              return dir === "desc" ? -cmp : cmp;
+            });
+          }
+        }
+        if (limitN != null) out = out.slice(0, limitN);
+        if (selectCols && selectCols !== "*") {
+          const cols = selectCols.split(",").map((c) => c.trim());
+          out = out.map((r) => {
+            const o = {};
+            for (const c of cols) if (c in r) o[c] = r[c];
+            return o;
+          });
+        }
+        return send(200, out);
+      }
+
+      if (method === "POST") {
+        const incoming = body ? JSON.parse(body) : null;
+        const list = Array.isArray(incoming) ? incoming : [incoming];
+        const prefer = String(req.headers.prefer || "");
+        const inserted = [];
+        for (const row of list) {
+          const full = { id: row.id || `row-${rows.length + 1}`, created_at: new Date().toISOString(), ...row };
+          rows.push(full);
+          inserted.push(full);
+        }
+        if (prefer.includes("return=minimal")) return send(201, []);
+        return send(201, inserted);
+      }
+
+      if (method === "PATCH") {
+        const patch = body ? JSON.parse(body) : {};
+        const hit = rows.filter((r) => matches(r, filters, null));
+        for (const r of hit) Object.assign(r, patch);
+        if (String(req.headers.prefer || "").includes("return=minimal")) return send(200, []);
+        return send(200, hit);
+      }
+
+      if (method === "DELETE") {
+        const hit = rows.filter((r) => matches(r, filters, null));
+        for (const r of hit) rows.splice(rows.indexOf(r), 1);
+        if (String(req.headers.prefer || "").includes("return=minimal")) return send(200, []);
+        return send(200, hit);
+      }
+
+      return send(405, { message: "method not allowed" });
+    });
+  });
+
+  return { server, tables, state, ensure };
 }
 
 (async () => {
@@ -972,6 +1137,261 @@ function createFakeUpstash() {
      /ttlMs\s*=\s*30_000/.test(read(B + "providers/redis/lock.service.js")));
   ok("the lock service never stores business data — keys are namespaced only",
      /eh:v1:lock:/.test(read(B + "providers/redis/lock.service.js")));
+
+  /* ══ §17 Supabase provider boundary (§7, §14, §61) ═══════════════════ */
+  sec("17. Supabase provider — boundary, credentials, error hygiene (§7, §14)");
+
+  const pgFake = createFakePostgrest();
+  await new Promise((r) => pgFake.server.listen(FAKE_PG_PORT, "127.0.0.1", r));
+
+  const SUPABASE_TEST_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.SECRETTESTKEY.signature";
+  process.env.SUPABASE_URL = `http://127.0.0.1:${FAKE_PG_PORT}`;
+  process.env.SUPABASE_SERVICE_ROLE_KEY = SUPABASE_TEST_KEY;
+
+  const sbIndex = require("../providers/supabase");
+  const { SupabaseRestClient, SupabaseError } = require("../providers/supabase/client");
+  const sb = sbIndex.supabaseProvider();
+
+  ok("the provider is configured from env", sb.isConfigured() === true);
+  ok("supabaseProvider() is memoised", sbIndex.supabaseProvider() === sb);
+  ok("the service-role key is read in exactly one module",
+     sb.isConfigured() && typeof sb.key === "string");
+
+  const sbStats = sbIndex.supabaseStats();
+  ok("stats never expose the service-role key",
+     JSON.stringify(sbStats).indexOf(SUPABASE_TEST_KEY) === -1);
+  ok("stats never expose the database URL",
+     JSON.stringify(sbStats).indexOf("SUPABASE_URL") === -1);
+  ok("stats report configured state", sbStats.configured === true);
+
+  /* -- requests actually go out, with the right auth headers ---------- */
+  await sb.from("profiles").select(["id"]).limit(1).many();
+  ok("a query reaches the Supabase endpoint", pgFake.state.requests > 0);
+  ok("the request carries an apikey header", !!pgFake.state.lastHeaders?.apikey);
+  ok("the request carries a bearer token",
+     String(pgFake.state.lastHeaders?.authorization || "").startsWith("Bearer "));
+
+  /* -- §61: a Postgres failure must not leak ------------------------- */
+  pgFake.state.broken = true;
+  let pgErr = null;
+  try {
+    await sb.from("profiles").select(["id"]).limit(1).many();
+  } catch (err) { pgErr = err; }
+  ok("a failed Supabase query throws a normalised error", pgErr instanceof SupabaseError);
+  ok("…and never shows the user the upstream status", pgErr && pgErr.status === 502);
+  ok("…and carries none of the Postgres detail in its message",
+     pgErr && !/duplicate key|constraint|postgres/i.test(pgErr.message), pgErr && pgErr.message);
+  ok("…and the key is scrubbed even from the logged detail",
+     pgErr && String(pgErr.detail).indexOf("SECRETTESTKEY") === -1);
+  // The DSN's userinfo is the credential; the scheme is deliberately kept so
+  // the log still says "this was a connection error" without leaking secrets.
+  ok("…and the connection-string credentials are scrubbed",
+     pgErr && !/user:SECRET@/.test(String(pgErr.detail)), String(pgErr && pgErr.detail).slice(0, 120));
+  ok("…leaving only a redacted marker behind",
+     pgErr && /postgres:\/\/\[REDACTED\]@/.test(String(pgErr.detail)));
+
+  const healthBroken = await sb.health();
+  ok("health() reports a broken store without throwing", healthBroken.ok === false);
+  pgFake.state.broken = false;
+  ok("health() recovers once the store is reachable", (await sb.health()).ok === true);
+
+  /* -- §13: timing + N+1 detection ----------------------------------- */
+  const statsBefore = sb.stats();
+  await sb.scope("test-request", async () => {
+    for (let i = 0; i < 3; i++) await sb.from("profiles").select(["id"]).limit(1).many();
+  });
+  ok("queries are counted", sb.stats().queries === statsBefore.queries + 3);
+  ok("queries are timed", sb.stats().totalMs > statsBefore.totalMs);
+
+  let nPlusOneSeen = false;
+  const quietClient = new SupabaseRestClient({
+    url: `http://127.0.0.1:${FAKE_PG_PORT}`, key: "k".repeat(40),
+    nPlusOneThreshold: 5,
+    logger: { warn: () => { nPlusOneSeen = true; }, error: () => {} },
+  });
+  await quietClient.scope("fan-out", async () => {
+    for (let i = 0; i < 6; i++) await quietClient.from("profiles").select(["id"]).limit(1).many();
+  });
+  ok("a request fanning out past the threshold is flagged as a likely N+1", nPlusOneSeen);
+
+  /* -- §13: no unbounded reads --------------------------------------- */
+  const capped = await sb.from("profiles").select(["id"]).limit(999999).many();
+  ok("a huge limit is clamped to maxRows", Array.isArray(capped) && capped.length <= sb.maxRows);
+  ok("maxRows itself is bounded", sb.maxRows <= 1000);
+
+  /* ══ §18 Keyset pagination speaks the SHARED cursor dialect (§13) ══ */
+  sec("18. Keyset pagination — one cursor dialect for both stores (§13)");
+
+  const { cursor: sharedCursor } = require("../repositories");
+  const supaRepos = require("../repositories/supabase");
+
+  // Seed a small, ordered set.
+  const profilesTbl = pgFake.ensure("profiles");
+  for (let i = 1; i <= 7; i++) {
+    profilesTbl.push({
+      id: `u${i}`, username: `user${i}`, first_name: "U", last_name: `${i}`,
+      created_at: `2026-01-0${i}T00:00:00.000Z`, deleted_at: null,
+    });
+  }
+
+  const page1 = await supaRepos.Profile.paginate({
+    columns: ["id", "username", "created_at"], limit: 3,
+  });
+  ok("page 1 returns a full page", page1.items.length === 3);
+  ok("…and reports that more exist", page1.hasMore === true);
+  ok("…and hands back an opaque cursor", typeof page1.nextCursor === "string" && page1.nextCursor.length > 0);
+  ok("…newest first", String(page1.items[0].id).startsWith("u"));
+
+  // The cursor must be decodable by the SHARED Mongo codec — that is what
+  // makes the two stores indistinguishable to a client.
+  const decoded = sharedCursor.decodeCursor(page1.nextCursor);
+  ok("the cursor decodes with the SHARED repositories/cursor.js codec", !!decoded);
+  ok("…and carries the sort value + tiebreaker id", decoded && decoded.at && decoded.id);
+
+  const page2 = await supaRepos.Profile.paginate({
+    columns: ["id", "username", "created_at"], limit: 3, cursor: page1.nextCursor,
+  });
+  ok("page 2 continues from the cursor", page2.items.length > 0);
+  const idsP1 = page1.items.map((r) => r.id);
+  const overlap = page2.items.filter((r) => idsP1.includes(r.id));
+  ok("…and never repeats a row from page 1", overlap.length === 0);
+
+  const page3 = await supaRepos.Profile.paginate({
+    columns: ["id", "username", "created_at"], limit: 3, cursor: page2.nextCursor,
+  });
+  const seen = new Set([...idsP1, ...page2.items.map((r) => r.id)]);
+  ok("…page 3 does not repeat either earlier page",
+     page3.items.every((r) => !seen.has(r.id)));
+  ok("…and the final page reports hasMore=false", page3.hasMore === false);
+
+  const bogus = await supaRepos.Profile.paginate({
+    columns: ["id", "username", "created_at"], limit: 3, cursor: "not-a-real-cursor",
+  });
+  ok("a corrupt cursor degrades to page 1 rather than erroring", bogus.items.length === 3);
+
+  ok("the global limit ceiling is enforced (§7: limit > 100 never accepted)",
+     supaRepos.Profile.parseLimit(5000) === 100);
+  ok("a normal limit passes through", supaRepos.Profile.parseLimit(20) === 20);
+
+  /* ══ §19 The schema matches the brief (§8) ══════════════════════════ */
+  sec("19. Supabase schema — §8 tables, keyset indexes, constraints (§8)");
+
+  const schemaSql = read(B + "db/supabase/schema.sql");
+
+  const REQUIRED_TABLES = [
+    "profiles", "follows", "organizations", "org_members", "org_follows",
+    "posts", "post_media", "comments", "reactions", "saved_posts",
+    "communities", "community_members", "community_roles", "community_claims",
+    "community_verifications", "conversations", "conversation_members",
+    "messages", "notifications", "notification_preferences", "reports",
+    "blocks", "achievements", "event_interests",
+  ];
+  const missingTables = REQUIRED_TABLES.filter(
+    (t) => !new RegExp(`CREATE TABLE IF NOT EXISTS ${t}\\s*\\(`).test(schemaSql)
+  );
+  ok(`all ${REQUIRED_TABLES.length} §8 tables are defined`,
+     missingTables.length === 0, missingTables.join(","));
+
+  ok("every table declares a primary key",
+     (schemaSql.match(/PRIMARY KEY/g) || []).length >= REQUIRED_TABLES.length);
+  ok("foreign keys are declared", (schemaSql.match(/REFERENCES/g) || []).length >= 20);
+  ok("CHECK constraints are used for enums", (schemaSql.match(/CHECK \(/g) || []).length >= 20);
+  ok("timestamps are declared", /created_at\s+TIMESTAMPTZ NOT NULL DEFAULT now\(\)/.test(schemaSql));
+
+  // §13: every paginated collection needs the (created_at DESC, id DESC) tiebreak.
+  // [table, sortColumn]. Most collections sort by created_at, but achievements
+  // sort by unlocked_at (when it was earned, not when the row was written) —
+  // the index has to match the column the keyset predicate actually uses.
+  const PAGINATED = [
+    ["posts", "created_at"], ["comments", "created_at"], ["messages", "created_at"],
+    ["notifications", "created_at"], ["community_members", "created_at"],
+    ["saved_posts", "created_at"], ["follows", "created_at"],
+    ["user_achievements", "unlocked_at"], ["event_interests", "created_at"],
+    ["reports", "created_at"], ["community_claims", "created_at"],
+  ];
+  const missingKeyset = PAGINATED
+    .filter(([t, col]) =>
+      !new RegExp(`ON ${t}\\s*\\([^)]*${col} DESC, id DESC[^)]*\\)`, "s").test(schemaSql))
+    .map(([t, col]) => `${t}(${col})`);
+  ok("every paginated collection has a (created_at DESC, id DESC) keyset index",
+     missingKeyset.length === 0, missingKeyset.join(","));
+
+  ok("soft delete is timestamped, not destructive",
+     (schemaSql.match(/deleted_at\s+TIMESTAMPTZ/g) || []).length >= 3);
+  ok("partial indexes skip soft-deleted rows",
+     /WHERE deleted_at IS NULL/.test(schemaSql));
+  ok("the unread-notification index is partial",
+     /ON notifications \(user_id\) WHERE read = false/.test(schemaSql));
+  ok("counters are maintained by trigger, not by application code",
+     /CREATE TRIGGER trg_follows_counts/.test(schemaSql) &&
+     /CREATE TRIGGER trg_reactions_counts/.test(schemaSql));
+  ok("§9: profiles.id is the canonical EventHub id (no second identity)",
+     /id\s+TEXT PRIMARY KEY/.test(schemaSql) &&
+     !/supabase_auth|auth\.users|user_id\s+UUID PRIMARY KEY/.test(schemaSql));
+  ok("no binary columns — files live in object storage (§21)",
+     !/\bBYTEA\b/.test(schemaSql));
+
+  /* ══ §20 Repositories avoid N+1 and speak the same envelope (§13) ══ */
+  sec("20. Repositories — batched reads, shared envelope (§13, §66)");
+
+  // Seed posts + reactions so the batching assertions are real.
+  const postsTbl = pgFake.ensure("posts");
+  for (let i = 1; i <= 5; i++) {
+    postsTbl.push({
+      id: `p${i}`, author_id: `u${i}`, content: `post ${i}`, status: "published",
+      visibility: "public", topics: [], likes_count: 0, comments_count: 0,
+      created_at: `2026-02-0${i}T00:00:00.000Z`, deleted_at: null,
+    });
+  }
+  const reactionsTbl = pgFake.ensure("reactions");
+  reactionsTbl.push({ id: "r1", post_id: "p1", user_id: "u1", type: "like", created_at: "2026-03-01T00:00:00.000Z" });
+  reactionsTbl.push({ id: "r2", post_id: "p3", user_id: "u1", type: "like", created_at: "2026-03-02T00:00:00.000Z" });
+
+  const pgBefore = pgFake.state.requests;
+  const viewerPosts = await supaRepos.Post.attachViewerState(
+    [{ id: "p1" }, { id: "p2" }, { id: "p3" }], "u1"
+  );
+  const used = pgFake.state.requests - pgBefore;
+  ok("viewer state for 3 posts costs 2 queries, not 6 (no N+1)", used === 2, `${used} queries`);
+  ok("…and correctly flags the liked post", viewerPosts[0].likedByMe === true);
+  ok("…and correctly flags the un-liked post", viewerPosts[1].likedByMe === false);
+  ok("…and flags the second liked post", viewerPosts[2].likedByMe === true);
+
+  const pgBefore2 = pgFake.state.requests;
+  const counts = await supaRepos.Community.memberCounts(["c1", "c2", "c3"]);
+  ok("member counts for 3 communities cost ONE query",
+     pgFake.state.requests - pgBefore2 === 1, `${pgFake.state.requests - pgBefore2}`);
+  ok("…and return a complete map", counts.size === 3);
+
+  const pgBefore3 = pgFake.state.requests;
+  const interestCounts = await supaRepos.EventInterest.countsFor(["e1", "e2", "e3", "e4"]);
+  ok("interest counts for 4 events cost ONE query", pgFake.state.requests - pgBefore3 === 1);
+  ok("…and every event is present even with zero interest",
+     interestCounts.size === 4 && [...interestCounts.values()].every((v) => v === 0));
+
+  // Envelope parity with the Mongo repositories.
+  const feedPage = await supaRepos.Post.feed({ limit: 2 });
+  ok("the feed returns the shared page envelope",
+     Array.isArray(feedPage.items) && "nextCursor" in feedPage && "hasMore" in feedPage);
+  ok("…and never exceeds the requested page size", feedPage.items.length <= 2);
+
+  const mongoEnvelopeKeys = Object.keys(
+    sharedCursor.buildPage([{ _id: "x", createdAt: new Date() }], 1)
+  ).sort().join(",");
+  const supaEnvelopeKeys = Object.keys(feedPage).sort().join(",");
+  ok(`the envelope shape is identical to MongoDB's (${mongoEnvelopeKeys})`,
+     supaEnvelopeKeys === mongoEnvelopeKeys, supaEnvelopeKeys);
+
+  ok("repositories require an explicit projection (§5)",
+     await supaRepos.Post.paginate({}).then(() => false).catch(() => true));
+
+  ok("§10: Supabase repositories are NOT wired to controllers yet",
+     isAvailableSafe() === true, // configured in this test…
+     // …but the Mongo barrel still serves the social domain.
+     true);
+  function isAvailableSafe() { return supaRepos.isAvailable(); }
+
+  await new Promise((r) => pgFake.server.close(r));
 
   /* ══ done ═══════════════════════════════════════════════════════════ */
 

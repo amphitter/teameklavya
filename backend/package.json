@@ -31,7 +31,8 @@
     "test:phase8": "node tests/phase8.selftest.js",
     "test:phase9": "node tests/phase9.selftest.js",
     "test:phase10": "node tests/phase10.selftest.js",
-    "test:phase11": "node tests/phase11.selftest.js"
+    "test:phase11": "node tests/phase11.selftest.js",
+    "test:real-providers": "node tests/real-providers.selftest.js"
   },
   "keywords": [],
   "author": "",

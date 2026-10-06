@@ -24,7 +24,7 @@ architecture; it makes the existing architecture production-safe.
 | 0 | Audit & plan | — | ✅ |
 | 1 | Reconciliation service + script | §2, §3, §4, §6 | ✅ |
 | 2 | Dead-letter system + migration safety | §5, §7 | ✅ |
-| 3 | Real-provider test suite | §1 | pending |
+| 3 | Real-provider test suite | §1 | ✅ |
 | 4 | Security audits (Supabase, Redis, cache) | §8, §9, §11, §13 | pending |
 | 5 | Community ownership & Super Admin protection | §10 | pending |
 | 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | pending |
@@ -36,6 +36,52 @@ architecture; it makes the existing architecture production-safe.
 | 12 | Restore drill, backups, secret separation | §18, §19 | pending |
 | 13 | Documentation set | §32 | pending |
 | 14 | Final report | §33 | pending |
+
+### Phase 3 — RESULT: ✅ **DONE** (`tests/real-providers.selftest.js`)
+
+Every other suite drives fakes. A fake encodes OUR UNDERSTANDING of a provider,
+not the provider's behaviour — it cannot tell us the Upstash pipeline argument
+order is wrong, that a live column is spelled differently, that an assumed
+Postgres constraint was never created, or that a trigger counter does not
+increment the way we think. Only the real thing can.
+
+**Gating (§1: never auto-run in CI).** Exits 0 immediately unless
+`REAL_PROVIDER_TESTS === "true"`; exits 0 if any of the four credentials is
+missing. `npm run test:real-providers` is deliberately **NOT** in `test:all`.
+
+**Credential hygiene.** Every printed line passes through `redact()`, and the
+run ENDS by asserting no secret value appears in anything captured. The
+assertion is the point — a promise not to leak that is never checked is broken
+by the next error message someone adds.
+
+**Isolation.** All keys live under `eh_realtest:<runId>:`, so cleanup can
+scan-and-delete the namespace without touching a production key. `flush()`
+(drops the whole DB) is never called.
+
+**Covers:** Redis PING/SET/GET/PTTL/SET-NX/expiry · the Lua sliding-window
+limiter (limit, over-limit, roll-over, single atomic script) · distributed
+idempotency (refuse, release, TTL) · distributed lock (unpredictable token,
+contention, **non-owner cannot release**, owner can, expiry recovers) ·
+namespace isolation · Supabase INSERT/UPDATE/UPSERT/pagination/termination ·
+NOT NULL · invalid enum · FK rejection · trigger counter increment · outbox
+application twice without duplication · reconciliation twice with zero repairs
+on the second run (needs `MONGODB_URI`).
+
+**Three bugs found and fixed by running it against unreachable endpoints:**
+1. `supabaseProvider().health()` **never throws** — it returns `{ok:false}`.
+   Checking only for a throw gave a FALSE PASS against a Supabase that was not
+   reachable at all. Now checked by return value.
+2. An uncaught throw in the pagination section aborted the whole run, so
+   cleanup and the credential-leak assertion never executed. The Supabase
+   section is now a guarded function; §8 and §9 moved into `finalChecks()`,
+   which runs on both the normal and the crash path.
+3. A run where every test was skipped still exited 0 — a broken environment
+   masquerading as a green suite. Now exits 1 when `passed === 0`.
+
+**Skipped is never green.** Skips are counted separately, reported with their
+reason, and the summary warns that they are not passes.
+
+Regression: **997 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

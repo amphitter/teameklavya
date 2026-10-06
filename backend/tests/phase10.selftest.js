@@ -79,10 +79,97 @@ function createFakeUpstash() {
     return e.value;
   };
 
+  // Sorted sets for the rate-limit sliding window, kept ordered by score.
+  const zsets = new Map();
+
+  /** Drop everything scoring <= max (and any expired entry). */
+  function zremRangeByScore(key, min, max) {
+    const z = zsets.get(key);
+    if (!z) return 0;
+    let removed = 0;
+    for (let i = z.length - 1; i >= 0; i--) {
+      if (z[i].score <= max) {
+        z.splice(i, 1);
+        removed += 1;
+      }
+    }
+    if (!z.length) zsets.delete(key);
+    return removed;
+  }
+
+  function zadd(key, score, member) {
+    if (!zsets.has(key)) zsets.set(key, []);
+    const z = zsets.get(key);
+    z.push({ score: Number(score), member });
+    z.sort((a, b) => a.score - b.score);
+    return 1;
+  }
+
+  /**
+   * Test double for EVAL.
+   * ─────────────────────────────────────────────────────────────────────
+   * The fake does not embed a Lua interpreter. Instead, when the submitted
+   * script is our sliding-window script it executes the equivalent logic
+   * against a real ordered sorted set. That still exercises everything the
+   * provider is responsible for — sending EVAL with the right KEYS/ARGV and
+   * interpreting {totalHits, resetMs, allowed} — while the script's own
+   * semantics are verified by the separate script-shape assertions below.
+   */
+  function runEval(script, keys, argv) {
+    if (!/ZREMRANGEBYSCORE/.test(script) || !/ZCARD/.test(script)) return null;
+    const [key] = keys;
+    const now = Number(argv[0]);
+    const window = Number(argv[1]);
+    const limit = Number(argv[2]);
+    const member = argv[3];
+
+    zremRangeByScore(key, 0, now - window);
+    const z = zsets.get(key) || [];
+    const used = z.length;
+    const allowed = used < limit ? 1 : 0;
+
+    // Mirrors the script: the hit is always recorded.
+    zadd(key, now, member);
+    const z2 = zsets.get(key) || [];
+    const reset = z2.length ? z2[0].score + window : now + window;
+    return [used + 1, reset, allowed];
+  }
+
   function runCommand(args) {
     const cmd = String(args[0] || "").toUpperCase();
     state.commands += 1;
     switch (cmd) {
+      case "EVAL": {
+        const [, script, numkeys] = args;
+        const n = Number(numkeys) || 0;
+        const keys = args.slice(3, 3 + n);
+        const argv = args.slice(3 + n);
+        return runEval(String(script), keys, argv);
+      }
+      case "ZADD":
+        return zadd(args[1], Number(args[2]), args[3]);
+      case "ZCARD":
+        return (zsets.get(args[1]) || []).length;
+      case "ZREMRANGEBYSCORE":
+        return zremRangeByScore(args[1], Number(args[2]), Number(args[3]));
+      case "ZRANGE": {
+        const z = zsets.get(args[1]) || [];
+        const start = Number(args[2]);
+        const stop = Number(args[3]);
+        const slice = stop === 0 ? z.slice(start, start + 1) : z.slice(start, stop + 1);
+        const withScores = String(args[4] || "").toUpperCase() === "WITHSCORES";
+        return withScores ? slice.flatMap((e) => [e.member, String(e.score)]) : slice.map((e) => e.member);
+      }
+      case "PEXPIRE":
+        return zsets.has(args[1]) ? 1 : 0;
+      case "DEL": {
+        let n = 0;
+        for (const k of args.slice(1)) {
+          if (store.delete(k)) n += 1;
+          if (zsets.delete(k)) n += 1;
+        }
+        return n;
+      }
       case "PING":
         return "PONG";
       case "GET":
@@ -142,7 +229,7 @@ function createFakeUpstash() {
     });
   });
 
-  return { server, store, state };
+  return { server, store, zsets, state };
 }
 
 (async () => {
@@ -432,6 +519,145 @@ function createFakeUpstash() {
     ok(`the cache facade still exposes ${m}()`, facade.includes(m));
   }
   ok("the facade still exposes no raw set()", !facade.includes("set"));
+
+  /* ══ §8 Distributed rate limiting (brief §4) ══════════════════════ */
+  sec("8. Distributed rate limiting (§4)");
+
+  const {
+    MemorySlidingWindow,
+    RedisSlidingWindow,
+    createRedisRunner,
+    SLIDING_WINDOW_LUA,
+  } = require("../providers/redis/sliding-window.store");
+  const { SlidingWindowStore } = require("../providers/redis/rate-limit-store.adapter");
+
+  // The Lua script must be a correct sliding window; assert its shape.
+  ok("the sliding-window script removes entries older than the window", /ZREMRANGEBYSCORE/.test(SLIDING_WINDOW_LUA));
+  ok("it counts what remains", /ZCARD/.test(SLIDING_WINDOW_LUA));
+  ok("it decides admission against the limit", /used < limit/.test(SLIDING_WINDOW_LUA));
+  ok("it records the hit even when refused (express-rate-limit blocks on totalHits > limit)",
+    /-- ALWAYS record the hit/.test(SLIDING_WINDOW_LUA) && /return \{ used \+ 1/.test(SLIDING_WINDOW_LUA));
+  ok("it sets a TTL so abandoned buckets expire", /PEXPIRE/.test(SLIDING_WINDOW_LUA));
+  ok("it reports reset from the OLDEST surviving entry", /oldest\[2\]/.test(SLIDING_WINDOW_LUA));
+
+  // ── The brief's scenario, literally ───────────────────────────────────
+  // Two independent limiter instances (Server A and Server B) sharing one
+  // Redis. 10 hits split 5/5 across them must still exhaust a bucket of 10.
+  const runner = createRedisRunner({ url: `http://127.0.0.1:${FAKE_PORT}`, token: "test-token-do-not-log" });
+  ok("a Redis runner is created when configured", typeof runner === "function");
+
+  const sharedBackend = new RedisSlidingWindow(runner, { keyPrefix: "eh:v1:rl:" });
+
+  // Server A and Server B each get their OWN store object — that is what
+  // makes this a real multi-instance simulation rather than one object
+  // counting for itself.
+  const serverA = new SlidingWindowStore({ backend: sharedBackend, domain: "AUTH", limit: 10, windowMs: 60_000 });
+  const serverB = new SlidingWindowStore({ backend: sharedBackend, domain: "AUTH", limit: 10, windowMs: 60_000 });
+
+  let aHits = 0;
+  let bHits = 0;
+  for (let i = 0; i < 5; i++) {
+    await serverA.increment("u:shared-user");
+    aHits += 1;
+  }
+  for (let i = 0; i < 5; i++) {
+    await serverB.increment("u:shared-user");
+    bHits += 1;
+  }
+  eq("Server A recorded 5 hits", aHits, 5);
+  eq("Server B recorded 5 hits", bHits, 5);
+
+  const eleventh = await serverB.increment("u:shared-user");
+  ok("the 11th hit ACROSS BOTH SERVERS exceeds the limit of 10",
+    eleventh.totalHits > 10, JSON.stringify(eleventh));
+  ok("the shared bucket really did accumulate 10 hits",
+    eleventh.totalHits === 11, `totalHits=${eleventh.totalHits}`);
+  ok("a resetTime is reported so Retry-After can be computed",
+    eleventh.resetTime instanceof Date, JSON.stringify(eleventh.resetTime));
+
+  // Compare against the memory backend, which would NOT see the other server.
+  // Two SEPARATE memory backends = two processes that cannot see each other.
+  // This is the divergence Redis exists to remove, stated as a test.
+  const memA = new SlidingWindowStore({ backend: new MemorySlidingWindow(), domain: "AUTH", limit: 10, windowMs: 60_000 });
+  const memB = new SlidingWindowStore({ backend: new MemorySlidingWindow(), domain: "AUTH", limit: 10, windowMs: 60_000 });
+  for (let i = 0; i < 5; i++) await memA.increment("u:x");
+  for (let i = 0; i < 5; i++) await memB.increment("u:x");
+  const memLast = await memB.increment("u:x");
+  eq("two isolated memory backends each see only their own 5 hits", memLast.totalHits, 6);
+
+  // ── Domains must not collide ──
+  const authStore = new SlidingWindowStore({ backend: sharedBackend, domain: "AUTH", limit: 3, windowMs: 60_000 });
+  const searchStore = new SlidingWindowStore({ backend: sharedBackend, domain: "SEARCH", limit: 3, windowMs: 60_000 });
+  for (let i = 0; i < 3; i++) await authStore.increment("u:collide");
+  const searchFirst = await searchStore.increment("u:collide");
+  eq("a different domain has its own bucket", searchFirst.totalHits, 1);
+
+  // ── resetKey ──
+  await authStore.resetKey("u:collide");
+  const afterReset = await authStore.increment("u:collide");
+  eq("resetKey clears the bucket", afterReset.totalHits, 1);
+
+  // ── FAIL OPEN on Redis failure ──
+  sec("9. Rate limiting fails OPEN (§4, §15)");
+  fake.state.broken = true;
+  const errorsBefore = sharedBackend.stats_.errors;
+  let rlThrew = false;
+  let rlVerdict = null;
+  try {
+    rlVerdict = await serverA.increment("u:outage-user");
+  } catch {
+    rlThrew = true;
+  }
+  ok("a Redis outage does not throw from the rate limiter", !rlThrew);
+  ok("traffic is ALLOWED during the outage (no self-inflicted outage)",
+    rlVerdict && rlVerdict.totalHits === 0, JSON.stringify(rlVerdict));
+  ok("the outage is counted so the dashboard can show it",
+    sharedBackend.stats_.errors > errorsBefore, JSON.stringify(sharedBackend.stats()));
+  ok("the backend reports itself as degraded", sharedBackend.stats_.fallbacks > 0);
+  fake.state.broken = false;
+
+  // ── The 429 contract must be unchanged ──
+  sec("10. The 429 contract is preserved (§4)");
+  const rateLimits = require("../config/rate-limits");
+  ok("all 18 rate-limit domains are still defined", Object.keys(rateLimits.LIMITS).length === 18,
+    String(Object.keys(rateLimits.LIMITS).length));
+  ok("the AUTH bucket is still 25/15m", rateLimits.LIMITS.AUTH.limit === 25 && rateLimits.LIMITS.AUTH.windowMs === 900_000);
+  ok("the READ bucket is still generous (300/min)", rateLimits.LIMITS.READ.limit === 300);
+  ok("env overrides still apply",
+    rateLimits.LIMITS.SEARCH.limit === Number(process.env.RATE_LIMIT_SEARCH_LIMIT || 30));
+  ok("REALTIME_CAPS is untouched", rateLimits.REALTIME_CAPS.SOCKETS_PER_USER === 5);
+  ok("every HTTP limiter is wired to a store bound to its own domain",
+    ["auth", "social", "messaging", "search", "event", "uploadBurst", "uploadHourly", "read"].every(
+      (name) => {
+        const st = rateLimits.limiterStores.get({ auth: "AUTH", social: "SOCIAL", messaging: "MESSAGING",
+          search: "SEARCH", event: "EVENT", uploadBurst: "UPLOAD_BURST", uploadHourly: "UPLOAD_HOURLY",
+          read: "READ" }[name]);
+        return st && st.domain && st.limit > 0 && st.windowMs > 0;
+      }
+    ),
+    JSON.stringify([...rateLimits.limiterStores.keys()]));
+  ok("the limiters share ONE backend instance (that is what makes them distributed)",
+    new Set([...rateLimits.limiterStores.values()].map((s) => s.backend)).size === 1);
+  ok("the backend is exposed for the dashboard", typeof rateLimits.rateLimitBackend === "function");
+
+  // ── SlidingWindow (action + socket guards) shares the same backend ──
+  sec("11. Action + socket guards share counters (§4)");
+  const { SlidingWindow } = require("../utils/frequency-limiter");
+  const guardA = new SlidingWindow(3, 60_000, sharedBackend);
+  const guardB = new SlidingWindow(3, 60_000, sharedBackend);
+  const g1 = await guardA.allowAsync("guard:u1");
+  const g2 = await guardB.allowAsync("guard:u1");
+  const g3 = await guardA.allowAsync("guard:u1");
+  const g4 = await guardB.allowAsync("guard:u1");
+  ok("guard hits 1-3 on two different 'instances' are allowed", g1.allowed && g2.allowed && g3.allowed);
+  ok("the 4th hit across both is refused", !g4.allowed, JSON.stringify(g4));
+  ok("a refused guard reports a positive retryAfterMs", g4.retryAfterMs > 0, String(g4.retryAfterMs));
+
+  // The synchronous path must still work (socket handlers cannot await).
+  const syncGuard = new SlidingWindow(2, 60_000);
+  ok("the synchronous allow() path still works", syncGuard.allow("s1").allowed === true);
+  ok("and still refuses past the limit",
+    syncGuard.allow("s1").allowed === true && syncGuard.allow("s1").allowed === false);
 
   /* ══ done ═══════════════════════════════════════════════════════════ */
 

@@ -26,7 +26,7 @@ The headline measurable outcomes:
 | Unbounded list endpoints | Participant list loaded **every** registration, populated | Cursor-paginated, hard-capped at 100 |
 | HTTP compression | **None** | gzip/br on text above the 1 KB threshold |
 | Cache-Control policy | **None** (Express defaults only) | Public short-TTL + SWR for anonymous public GETs; `private, no-store` for everything authenticated |
-| Rate-limit buckets | 3 ad-hoc, numbers buried in routes | 21 domains in one file, env-overridable |
+| Rate-limit buckets | 3 ad-hoc, numbers buried in routes | 18 domains in one file, env-overridable |
 | Frontend polling loops | 7 (messages 6 s, bell 30 s, leaderboard 10 s …) | Replaced with ETag/304 + backoff + server-cached payloads |
 | Raw `<img>` pulling originals | 56 | `OptimizedImage` with responsive `srcset`, `f_auto`, lazy load |
 | Storage access | Cloudinary specifics inside `media.service.js` | `StorageProvider` interface — Cloudinary or local, chosen in one place |
@@ -47,7 +47,7 @@ are documented in §20.
 | Architecture | ✅ Still a modular monolith; boundaries cleaned, no new runtime infra | §3, `docs/PERFORMANCE-ARCHITECTURE.md` |
 | Database | ✅ Repositories, cursor pagination, projections, batching, pooling audited | phase3 selftest 44/44 |
 | Caching | ✅ In-memory provider behind an interface; TTL registry; SWR public-only; in-flight dedup | phase9 §9 (23 assertions) |
-| Rate limiting | ✅ One source of truth, 21 domains, HTTP + socket + action guards | phase2 22/22, phase9 §1 |
+| Rate limiting | ✅ One source of truth, 18 domains, HTTP + socket + action guards | phase2 22/22, phase9 §1 |
 | API performance | ✅ Compression, ETag/304, Cache-Control, cursor pagination, payload caps | phase9 §2–§5 |
 | Images & files | ✅ Provider interface, variants, client compression, lifecycle sweeper | phase4 37/37 |
 | Realtime | ✅ Rooms, caps, backpressure, no DB writes for transient noise | phase6 87/87, load profiles §17 |
@@ -157,7 +157,7 @@ Design decisions worth stating plainly:
 
 ## 6. Rate limiting & abuse control (§23–§28)
 
-`config/rate-limits.js` is the single source of truth. Twenty-one domains, each
+`config/rate-limits.js` is the single source of truth. Eighteen domains, each
 env-overridable (`RATE_LIMIT_<DOMAIN>_LIMIT` / `_WINDOW_MS`), no numbers
 buried in route files.
 

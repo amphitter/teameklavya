@@ -30,6 +30,14 @@ const rateLimit = require("express-rate-limit").rateLimit || require("express-ra
 const { ipKeyGenerator } = require("express-rate-limit");
 const { RateLimitError } = require("../utils/app-error");
 const metrics = require("../services/metrics.service");
+// Part 6, Phase 2 (§4): the shared sliding-window backend. When
+// RATE_LIMIT_PROVIDER=upstash every instance counts into the same bucket;
+// when it is unset (the default) behaviour is exactly as it was in Part 5.
+const { rateLimitBackend } = require("../providers/redis/sliding-window.store");
+const { SlidingWindowStore } = require("../providers/redis/rate-limit-store.adapter");
+
+/** domain -> the store that limiter was built with (tests + dashboard). */
+const limiterStores = new Map();
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -134,9 +142,25 @@ function createLimiter(domain) {
     return (_req, _res, next) => next();
   }
   const { limit, windowMs } = LIMITS[domain];
+
+  // A store per limiter, bound to this domain's numbers. Without it the
+  // limiter keeps its process-local default store and a second instance
+  // would apply the limit independently — the exact bug §4 calls out.
+  const store = new SlidingWindowStore({
+    backend: rateLimitBackend(),
+    domain,
+    limit,
+    windowMs,
+  });
+
+  // Track it so tests and the admin dashboard can see which buckets exist
+  // and which backend they share, without reaching into library internals.
+  limiterStores.set(domain, store);
+
   return rateLimit({
     windowMs,
     limit,
+    store,
     standardHeaders: "draft-7",
     legacyHeaders: false,
     keyGenerator: defaultKeyGenerator,
@@ -179,7 +203,10 @@ function applyGlobalRateLimits(app) {
 
 module.exports = {
   LIMITS,
+  DEFAULTS,
   REALTIME_CAPS,
+  rateLimitBackend,
+  limiterStores,
   limiters,
   applyGlobalRateLimits,
   createLimiter,

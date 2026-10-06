@@ -179,12 +179,16 @@ exports.resolveReport = async (req, res) => {
       ).select("_id");
       if (!event) return res.status(404).json({ success: false, message: "Event no longer exists" });
     } else if (action === "suspend_user") {
-      // The permanent super admin can never be suspended (server-side rule)
-      const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "devanshsinghr00@gmail.com").toLowerCase();
+      // The permanent Super Admin can never be suspended (§10).
+      // This is the SECOND suspension path — the other is suspendUser() — and
+      // it used to re-derive the address by hand. Two copies of one security
+      // rule is how the rule eventually stops holding, so both now call the
+      // same guard. See services/ownership.service.
       const target = await User.findById(targetId).select("email").lean();
       if (!target) return res.status(404).json({ success: false, message: "User no longer exists" });
-      if (String(target.email).toLowerCase() === SUPER_ADMIN_EMAIL) {
-        return res.status(403).json({ success: false, message: "The super admin cannot be suspended" });
+      const verdict = guardSuperAdmin(target, PROTECTED_ACTIONS.SUSPEND);
+      if (!verdict.allowed) {
+        return res.status(403).json({ success: false, message: verdict.reason });
       }
       const reason = String(suspendReason || "Policy violation").slice(0, 300);
       await User.findByIdAndUpdate(targetId, { suspendedAt: new Date(), suspensionReason: reason });
@@ -217,10 +221,11 @@ exports.suspendUser = async (req, res) => {
     const target = await User.findById(userId).select("email suspendedAt").lean();
     if (!target) return res.status(404).json({ success: false, message: "User not found" });
 
-    // The permanent super admin can never be suspended (server-side rule)
-    const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "devanshsinghr00@gmail.com").toLowerCase();
-    if (String(target.email).toLowerCase() === SUPER_ADMIN_EMAIL) {
-      return res.status(403).json({ success: false, message: "The super admin cannot be suspended" });
+    // The permanent Super Admin can never be suspended (§10).
+    // The address is NOT re-derived here — see services/ownership.service.
+    const verdict = guardSuperAdmin(target, PROTECTED_ACTIONS.SUSPEND);
+    if (!verdict.allowed) {
+      return res.status(403).json({ success: false, message: verdict.reason });
     }
 
     await User.findByIdAndUpdate(userId, { suspendedAt: new Date(), suspensionReason: reasonText });

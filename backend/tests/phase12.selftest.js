@@ -632,6 +632,210 @@ async function auditRls() {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §10  COMMUNITY OWNERSHIP & THE PERMANENT SUPER ADMIN
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * §10 asks for three properties and says to test them explicitly. The value of
+ * writing them down as tests is that "permanent" stops being a comment
+ * somebody wrote once and becomes something that fails the build.
+ */
+
+async function auditOwnership() {
+  sec("14. §10 — the permanent Super Admin");
+
+  const ownership = require("../services/ownership.service");
+  const {
+    SUPER_ADMIN_EMAIL,
+    isSuperAdminEmail,
+    isSuperAdminUser,
+    guardSuperAdmin,
+    isSelfAction,
+    PROTECTED_ACTIONS,
+    GUARD_MESSAGES,
+    institutionalDomain,
+    isInstitutionOwned,
+    resolveOwner,
+  } = ownership;
+
+  eq("§10: the permanent Super Admin address", SUPER_ADMIN_EMAIL, "devanshsinghr00@gmail.com");
+  ok("§10: it is recognised", isSuperAdminEmail("devanshsinghr00@gmail.com"));
+  ok(
+    "§10: …case-insensitively (an email local part is technically case-sensitive)",
+    isSuperAdminEmail("DevanshSinghR00@Gmail.com")
+  );
+  ok("§10: …and whitespace is tolerated", isSuperAdminEmail("  devanshsinghr00@gmail.com  "));
+  ok("§10: a different address is NOT the Super Admin", !isSuperAdminEmail("someone@else.com"));
+  ok("§10: a null/empty address is NOT the Super Admin", !isSuperAdminEmail(null) && !isSuperAdminEmail(""));
+
+  sec("15. §10 — UNDEMOTABLE");
+
+  /* The decisive property: authority is DERIVED from the address, not stored
+   * in a mutable field. So there is nothing to flip. */
+  ok(
+    "§10: a user with the Super Admin address is Super Admin even if their stored role is 'user'",
+    isSuperAdminUser({ email: SUPER_ADMIN_EMAIL, role: "user" }) === true
+  );
+  ok(
+    "§10: …which is what makes demotion impossible — there is no flag to lower",
+    isSuperAdminUser({ email: SUPER_ADMIN_EMAIL, role: "admin" }) === true
+  );
+  ok(
+    "§10: a different user with role 'admin' is NOT the Super Admin",
+    isSuperAdminUser({ email: "admin@elsewhere.com", role: "admin" }) === false
+  );
+
+  const demote = guardSuperAdmin({ email: SUPER_ADMIN_EMAIL }, PROTECTED_ACTIONS.DEMOTE);
+  ok("§10: the DEMOTE guard refuses", demote.allowed === false, JSON.stringify(demote));
+  ok("§10: …with an operator-readable reason", /demot/i.test(demote.reason || ""), demote.reason);
+
+  /* No endpoint may lower the Super Admin's stored role either. */
+  const roleMutators = [];
+  for (const f of walk(path.join(ROOT, "controllers"))) {
+    const text = read(f);
+    if (/\.role\s*=\s*["'](user|admin)["']/.test(text)) roleMutators.push(rel(f));
+  }
+  ok(
+    "§10: no controller assigns a platform role (so no path lowers the Super Admin's)",
+    roleMutators.length === 0,
+    roleMutators.join(",")
+  );
+
+  sec("16. §10 — UNDELETABLE");
+
+  for (const action of ["DELETE", "SUSPEND", "REMOVE_MEMBERSHIP"]) {
+    const v = guardSuperAdmin({ email: SUPER_ADMIN_EMAIL }, PROTECTED_ACTIONS[action]);
+    ok(`§10: the ${action} guard refuses`, v.allowed === false, JSON.stringify(v));
+  }
+  const nonTarget = guardSuperAdmin({ email: "ordinary@user.com" }, PROTECTED_ACTIONS.DELETE);
+  ok(
+    "§10: …but an ordinary user is unaffected (the guard is not a blanket ban)",
+    nonTarget.allowed === true
+  );
+
+  /* No controller may delete a user at all, let alone this one. */
+  const userDeleters = [];
+  for (const f of walk(path.join(ROOT, "controllers"))) {
+    const text = read(f);
+    if (/User\.(findByIdAndDelete|deleteOne|deleteMany|findByIdAndRemove)/.test(text)) {
+      userDeleters.push(rel(f));
+    }
+  }
+  ok(
+    "§10: no controller deletes a User document",
+    userDeleters.length === 0,
+    userDeleters.join(",")
+  );
+
+  /* Both suspension paths must be guarded — there are two, and guarding only
+   * one is the classic way this rule stops holding. */
+  const modSrc = read(path.join(ROOT, "controllers", "moderation.controller.js"));
+  eq(
+    "§10: BOTH suspension paths call the guard (report resolution + direct suspend)",
+    (modSrc.match(/guardSuperAdmin\(/g) || []).length >= 2,
+    true
+  );
+
+  sec("17. §10 — UNTRANSFERABLE");
+
+  const transfer = guardSuperAdmin({ email: SUPER_ADMIN_EMAIL }, PROTECTED_ACTIONS.TRANSFER);
+  ok("§10: the TRANSFER guard refuses", transfer.allowed === false);
+
+  /* Status cannot be granted to anyone else: the only grant is the constant,
+   * and nothing writes it. */
+  const granters = [];
+  for (const f of walk(path.join(ROOT, "controllers")).concat(walk(path.join(ROOT, "services")))) {
+    // ownership.service is the one place ALLOWED to define it — everywhere
+    // else must import it.
+    if (rel(f) === path.join("services", "ownership.service.js")) continue;
+    const text = read(f);
+    if (/SUPER_ADMIN_EMAIL\s*=/.test(text)) granters.push(rel(f));
+  }
+  ok(
+    "§10: no controller or service writes SUPER_ADMIN_EMAIL (status cannot be granted)",
+    granters.length === 0,
+    granters.join(",")
+  );
+
+  ok(
+    "§10: …and every protected action has a defined message",
+    Object.values(PROTECTED_ACTIONS).every((a) => typeof GUARD_MESSAGES[a] === "string")
+  );
+
+  sec("18. §10 — one definition, not five");
+
+  /* The drift risk this phase set out to remove. Five modules used to re-derive
+   * the address by hand; they agreed by coincidence. */
+  const reDerivers = [];
+  for (const f of walk(ROOT)) {
+    if (rel(f).startsWith("tests") || rel(f).startsWith("node_modules")) continue;
+    if (rel(f) === path.join("services", "ownership.service.js")) continue;
+    if (/process\.env\.SUPER_ADMIN_EMAIL/.test(read(f))) reDerivers.push(rel(f));
+  }
+  ok(
+    "§10: only ownership.service reads SUPER_ADMIN_EMAIL — every other module imports it",
+    reDerivers.length === 0,
+    reDerivers.join(",")
+  );
+
+  const middleware = require("../middleware/auth.middleware");
+  ok(
+    "§10: the middleware re-exports the same constant, so existing callers are unchanged",
+    middleware.SUPER_ADMIN_EMAIL === SUPER_ADMIN_EMAIL
+  );
+  ok(
+    "§10: …and the same predicate",
+    middleware.isSuperAdminEmail("devanshsinghr00@gmail.com") === true
+  );
+
+  sec("19. §10 — institutional email is affiliation, NEVER ownership");
+
+  eq("§10: the domain is extracted for an institutional address", institutionalDomain("a@iitd.ac.in"), "iitd.ac.in");
+  eq("§10: …and null for a malformed one", institutionalDomain("not-an-email"), null);
+
+  ok(
+    "§10: an institutional email confers NO ownership — ever",
+    isInstitutionOwned({ email: "vc@iitd.ac.in" }) === false
+  );
+  ok(
+    "§10: …and it does not make someone the Super Admin either",
+    isSuperAdminEmail("vc@iitd.ac.in") === false
+  );
+  ok(
+    "§10: …while the actual owner is unaffected by what domain they use",
+    isSuperAdminEmail(SUPER_ADMIN_EMAIL) === true
+  );
+
+  /* Ownership resolves from what the platform RECORDED, not from an address. */
+  const creatorId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+  ok(
+    "§10: ownership resolves to the recorded creator",
+    String(resolveOwner({ createdBy: creatorId }, [])) === creatorId
+  );
+  const fallback = "bbbbbbbbbbbbbbbbbbbbbbbb";
+  ok(
+    "§10: …falling back to an active admin member when no creator is recorded",
+    String(resolveOwner({}, [{ user: fallback, role: "admin", status: "active" }])) === fallback
+  );
+  ok(
+    "§10: …and an INACTIVE admin does not confer ownership",
+    resolveOwner({}, [{ user: fallback, role: "admin", status: "pending" }]) === null
+  );
+
+  sec("20. §10 — the owner is not locked out of their own account");
+
+  /* The one exception to the guards: the owner may act on themselves.
+   * Refusing self-action would lock them out of their own property. */
+  const self = { _id: "same-id", email: SUPER_ADMIN_EMAIL };
+  ok("§10: a self-action is recognised", isSelfAction({ _id: "same-id" }, self) === true);
+  ok("§10: …and a different actor is not", isSelfAction({ _id: "other-id" }, self) === false);
+  const selfVerdict = guardSuperAdmin(self, PROTECTED_ACTIONS.REMOVE_MEMBERSHIP);
+  ok(
+    "§10: the guard reports the block, and the CALLER decides whether self-action is exempt",
+    selfVerdict.allowed === false && isSelfAction({ _id: "same-id" }, self) === true
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 (async () => {
@@ -644,6 +848,7 @@ async function auditRls() {
     await auditRedis();
     await auditSupabase();
     await auditRls();
+    await auditOwnership();
   } catch (err) {
     failed += 1;
     failures.push(`suite crashed: ${err && err.message}`);

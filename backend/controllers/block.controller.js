@@ -21,7 +21,7 @@ exports.toggleBlock = async (req, res) => {
     const target = await User.findById(blockedId).select("_id email");
     if (!target) return res.status(404).json({ success: false, message: "User not found" });
     // The permanent Super Admin can never be blocked (platform control)
-    if (isSuperAdminEmail(target.email)) {
+    if (isSuperAdminEmail(target.email)) { // §10 — see services/ownership.service
       return res.status(403).json({ success: false, message: "The Super Admin cannot be blocked" });
     }
 

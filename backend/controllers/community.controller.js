@@ -14,6 +14,7 @@ const CommunityClaim = require("../models/communityClaim.model");
 const AuditLog = require("../models/auditLog.model");
 const { isSuperAdminEmail } = require("../middleware/auth.middleware");
 const { isInstitutionalDomain, emailDomain } = require("../utils/domain");
+const { guardSuperAdmin, isSelfAction, PROTECTED_ACTIONS } = require("../services/ownership.service");
 
 const AUTHOR_FIELDS = "firstName lastName username verified profile.avatar profile.institution";
 const EVENT_FIELDS = "title slug bannerUrl startDate endDate venue eventType category organizer price visibility isLive";
@@ -528,8 +529,12 @@ exports.removeMember = async (req, res) => {
       return res.status(403).json({ success: false, message: "Only platform admins can remove a community admin" });
     }
     const memberUser = await User.findById(member.user).select("email").lean();
-    if (memberUser && isSuperAdminEmail(memberUser.email) && String(req.user.id) !== String(member.user)) {
-      return res.status(403).json({ success: false, message: "The Super Admin cannot be removed" });
+    // §10: the Super Admin cannot be stripped of a membership. Self-service
+    // (leaving a community) is exempt — the owner may always walk away from
+    // their own membership, and refusing that would lock them out.
+    const verdict = guardSuperAdmin(memberUser, PROTECTED_ACTIONS.REMOVE_MEMBERSHIP);
+    if (!verdict.allowed && !isSelfAction(req.user, memberUser)) {
+      return res.status(403).json({ success: false, message: verdict.reason });
     }
 
     await member.deleteOne();
@@ -1077,6 +1082,27 @@ exports.transferOwnership = async (req, res) => {
     if (!userId) return res.status(400).json({ success: false, message: "Target user required" });
     const target = await User.findById(userId).select("email firstName lastName");
     if (!target) return res.status(404).json({ success: false, message: "User not found" });
+
+    // §10 UNTRANSFERABLE. Two distinct things are being protected:
+    //   1. Super Admin STATUS cannot be handed to anyone else — there is no
+    //      grant, so it cannot be transferred. Asserted in the audit.
+    //   2. A community the Super Admin owns can only be transferred BY the
+    //      Super Admin. `requireSuperAdmin` already guarantees the actor is
+    //      the owner, so this is the belt to that braces: it means a future
+    //      relaxation of the route guard cannot quietly strip the owner.
+    const currentOwner = community.createdBy
+      ? await User.findById(community.createdBy).select("email").lean()
+      : null;
+    const ownerVerdict = guardSuperAdmin(currentOwner, PROTECTED_ACTIONS.TRANSFER);
+    if (!ownerVerdict.allowed) {
+      audit({
+        community: community._id,
+        actor: req.user.id,
+        action: "ownership_transfer_blocked",
+        details: "refused: target community belongs to the permanent Super Admin",
+      });
+      return res.status(403).json({ success: false, message: ownerVerdict.reason });
+    }
 
     const previous = community.createdBy;
     community.createdBy = target._id;

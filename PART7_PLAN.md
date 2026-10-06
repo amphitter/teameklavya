@@ -26,7 +26,7 @@ architecture; it makes the existing architecture production-safe.
 | 2 | Dead-letter system + migration safety | §5, §7 | ✅ |
 | 3 | Real-provider test suite | §1 | ✅ |
 | 4 | Security audits (Supabase, Redis, cache) | §8, §9, §11, §13 | ✅ |
-| 5 | Community ownership & Super Admin protection | §10 | pending |
+| 5 | Community ownership & Super Admin protection | §10 | ✅ |
 | 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | pending |
 | 7 | Provider failure matrix + preflight | §12, §31 | pending |
 | 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | pending |
@@ -132,6 +132,53 @@ recovers.
 
 Regression: 999 → **1055 assertions, 0 failed** (924 floor held); 6/6 e2e.
 phase10 went 363 → 365 (2 assertions strengthened, none weakened).
+
+### Phase 5 — RESULT: ✅ **DONE** (`services/ownership.service.js`, 35 new assertions)
+
+**The finding that drove this phase:** the permanent Super Admin was already
+protected — but in **five places that each re-derived the address by hand**:
+
+```js
+const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "...").toLowerCase();
+```
+
+They agreed by coincidence. The first one to be edited would have become
+either a hole (protecting the wrong address) or a lockout (protecting a stale
+one). A security rule that holds by coincidence is not a security rule.
+
+`services/ownership.service.js` is now the single definition. The middleware
+re-exports it, so every existing caller is unchanged, and a test asserts no
+other module reads `process.env.SUPER_ADMIN_EMAIL`.
+
+**A second suspension path was found.** `suspendUser()` was guarded, but the
+report-resolution flow (`action === "suspend_user"`) suspended users too and
+had its own copy of the rule. Guarding one path is how this rule stops
+holding. Both now call the same guard, and the test asserts the guard appears
+at least twice in that controller.
+
+**UNDIMINISHABLE BY CONSTRUCTION (§10 undemotable).** Super Admin authority is
+derived from an email CONSTANT, not from the stored `role` field. So there is
+no flag to flip: a user with the address has the authority even if their
+`role` is `'user'`. Asserted directly. The trade-off is deliberate — a role
+field is editable, a constant is not, and for a permanent owner we want rigid.
+
+**Verified:** UNDELETABLE (no controller deletes a User; both suspension paths
+guarded) · UNDEMOTABLE (derived; no controller assigns a platform role) ·
+UNTRANSFERABLE (no controller or service writes the constant, so status cannot
+be granted; the transfer guard is belt-and-braces behind `requireSuperAdmin`).
+
+**Institutional email is affiliation, never ownership.** `isInstitutionOwned()`
+returns `false` unconditionally and exists so the rule is sayable in code
+rather than a convention nobody can discover. Ownership resolves from what the
+platform RECORDED (`createdBy`, then an *active* admin member) — never from an
+email domain. A pending admin does not confer ownership.
+
+**One deliberate exception:** the owner may act on themselves. Refusing
+self-service would lock them out of their own property, which is the opposite
+of what §10 protects. `guardSuperAdmin` reports the block and the caller
+decides; `isSelfAction` is the exemption.
+
+Regression: 1055 → **1090 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

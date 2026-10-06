@@ -5,14 +5,21 @@ const User = require("../models/user.model");
  * PERMANENT SUPER ADMIN (Ownership Verification system)
  * This account always has full platform-level control. It can never be
  * removed, demoted or transferred, and it bypasses every role check.
- * Override via env is supported, but the default is fixed.
+ *
+ * Part 7 §10: the address and the rule now live in services/ownership.service
+ * and are RE-EXPORTED from here. Five modules used to re-derive the address by
+ * hand; they agreed by coincidence, and the first one to be edited would have
+ * become either a hole or a lockout. Import from this module as before — the
+ * surface is unchanged — but there is now one definition underneath it.
  */
-const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "devanshsinghr00@gmail.com").toLowerCase();
+const ownership = require("../services/ownership.service");
 
-const isSuperAdminEmail = (email) => Boolean(email) && String(email).toLowerCase() === SUPER_ADMIN_EMAIL;
+const SUPER_ADMIN_EMAIL = ownership.SUPER_ADMIN_EMAIL;
+const isSuperAdminEmail = ownership.isSuperAdminEmail;
 
 exports.SUPER_ADMIN_EMAIL = SUPER_ADMIN_EMAIL;
 exports.isSuperAdminEmail = isSuperAdminEmail;
+exports.ownership = ownership;
 
 /** True if the given request user (id) is the permanent super admin. */
 exports.isSuperAdmin = async (user) => {

@@ -190,53 +190,79 @@ unclassifiable new domain is then a decision, not an accident.
 
 ---
 
-## 6. §15 — Session and CSRF
+## 6. §15 — Tokens and CSRF
 
-### The auth model
+### The auth model, as it actually is
 
-Sessions are **cookie-based**. On login the server sets an HttpOnly cookie
-containing a signed JWT. The browser sends it automatically; JavaScript cannot
-read it.
+Authentication is **bearer-token**, not cookie-based. On a successful login the
+API returns a signed JWT **in the response body**; the client stores it and
+sends it on every request as:
 
-Cookies are set with:
+```
+Authorization: Bearer <jwt>
+```
 
-- `HttpOnly` — the token is invisible to JavaScript, so XSS cannot exfiltrate
-  the session.
-- `Secure` — the cookie is only sent over HTTPS.
-- `SameSite=Lax` — cross-site requests do not carry it by default.
-- A scoped `Path` and an explicit expiry.
+`middleware/auth.middleware.js` reads exactly that header. **The API sets no
+cookies** — there is no `res.cookie` call anywhere in the codebase, and a test
+in `tests/phase13.selftest.js` asserts both halves of that statement, so this
+section cannot drift from the code again.
 
-### CSRF
+This matters because an earlier draft of this document described a
+cookie-based model with `HttpOnly`/`Secure`/`SameSite` settings. That
+description was wrong, and a security document describing a model the system
+does not use is worse than no document: it sends the next reader looking for
+controls that do not exist, and reassures them about protections they do not
+have. The model is recorded here because §15 asks for it explicitly.
 
-Because authentication is cookie-based, **CSRF protection applies** — a
-cross-site form post or fetch would otherwise carry the session cookie
-automatically.
+### CSRF does not apply — deliberately
 
-`SameSite=Lax` is the primary defence and blocks the classic cross-site POST.
-State-changing requests additionally require a custom header, which a
-cross-origin page cannot set without a CORS preflight the API does not grant.
+**CSRF protection is not implemented, and it should not be.**
 
-CSRF protection is deliberately **not** applied to bearer-token endpoints:
-there are none. Adding a CSRF token scheme to an API that only accepts cookies
-would add a second, differently-implemented mechanism for no gain. If a
-bearer-token path is ever added — for a mobile client, say — it is exempt from
-CSRF by construction, because a bearer token is not sent automatically.
+CSRF is an attack on *ambient authority*: the browser automatically attaches a
+credential to a cross-site request, so an attacker's page can act as the
+victim without ever learning the credential. That is a property of **cookies**.
 
-### Session lifetime
+A bearer token is not attached automatically. The client has to read it from
+storage and set the header explicitly, which an attacker's origin cannot do
+without reading the token first — and if they can read the token, they already
+have it and CSRF is not the interesting attack any more.
 
-- **Maximum lifetime** — a session expires absolutely, regardless of activity.
-- **Idle timeout** — inactivity shorter than the maximum also expires it.
-- **Revocation** — sessions can be revoked server-side (logout everywhere,
-  password change), and revocation takes effect immediately rather than at the
-  next expiry.
+Adding a CSRF-token scheme to a pure bearer-token API would therefore add a
+second, separately-implemented mechanism defending against an attack that
+cannot occur, plus a new way to get it wrong. §15's rule is that CSRF applies
+*only where cookie authentication applies*; here it does not.
+
+**This is conditional, not permanent.** If a session cookie is ever introduced
+— for a server-rendered admin console, say — CSRF protection becomes mandatory
+at the same moment, along with `SameSite` and the rest. The condition is
+recorded so the decision is revisited rather than forgotten.
+
+### Token handling
+
+Because there is no HttpOnly cookie, the token is readable by JavaScript, which
+makes **XSS the primary session-stealing risk** and raises the importance of
+§27 (frontend security) correspondingly. The mitigations are:
+
+- **Short expiry.** `JWT_EXPIRES_IN` bounds the window in which a stolen token
+  is useful.
+- **Never in a URL.** Tokens travel in a header, never in a query string, where
+  they would land in access logs, `Referer` headers and browser history.
+- **Never logged.** A login failure logs *that* it failed and why, never the
+  credential or the token that was tried. Asserted in `tests/phase13.selftest.js`.
+- **Server-side revocation.** Suspension is checked against the database on
+  every authenticated request, so an existing token is not a bypass: suspending
+  an account revokes its sessions immediately rather than at token expiry.
+
+### Login
+
+- The same `Invalid credentials` response is returned for an unknown address
+  and a wrong password, so the endpoint cannot be used to enumerate accounts.
+- Unverified and suspended accounts are rejected with distinct statuses.
+- Repeated failures are rate-limited (§29).
 
 ### What is never logged
 
-Passwords, OTPs, tokens, and reset links. A login failure logs *that* it
-failed and why, never the credential that was tried.
-
----
-
+Passwords, OTPs, tokens and reset links.
 ## 7. Error handling
 
 No infrastructure detail reaches a user. A user sees a stable error code and a

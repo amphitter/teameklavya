@@ -16,6 +16,7 @@ const Event = require("../models/event.model");
 const Organization = require("../models/organization.model");
 const User = require("../models/user.model");
 const { PostRepository } = require("../repositories");
+const mongoose = require("mongoose");
 
 const AUTHOR_FIELDS = "firstName lastName username verified email profile.avatar profile.institution";
 const EVENT_FIELDS = "title slug bannerUrl startDate endDate venue eventType category organizer price visibility isLive";
@@ -283,8 +284,24 @@ exports.getFeed = async (req, res) => {
 };
 
 // GET /api/posts/:id
-exports.getPostById = async (req, res) => {
+exports.getPostById = async (req, res, next) => {
   try {
+    /* §16: a malformed identifier is a CLIENT error, not a server fault.
+     * Post.findById("not-an-objectid") throws a CastError, and the generic
+     * catch below used to turn that into a 500. That is wrong three ways: it
+     * reports a user mistake as an outage (polluting error alerting), it tells
+     * the client to retry a request that can never succeed, and it hands an
+     * attacker a clean oracle for "which inputs reach Mongo unvalidated".
+     * Reject it here, and route anything genuinely unexpected through next()
+     * so the central normalizer decides the status (§30). */
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid identifier",
+        error: { code: "VALIDATION_FAILED", message: "Invalid identifier" },
+      });
+    }
+
     const post = await Post.findById(req.params.id)
       .populate("author", AUTHOR_FIELDS)
       .populate("event", EVENT_FIELDS)
@@ -298,7 +315,9 @@ exports.getPostById = async (req, res) => {
     const [enriched] = await attachCounts([post], req.user?.id || null);
     res.json({ success: true, post: sanitizeEvent(enriched) });
   } catch (error) {
-    console.error("Get post error:", error.message);
+    // Let the taxonomy decide the status: a CastError is 400, a real outage
+    // is 503, and neither leaks a stack trace (§61).
+    if (typeof next === "function") return next(error);
     res.status(500).json({ success: false, message: "Failed to load post" });
   }
 };

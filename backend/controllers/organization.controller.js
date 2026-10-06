@@ -29,20 +29,37 @@ async function canManageOrg(req, org) {
 /* ── Create ──────────────────────────────────────────────── */
 
 // POST /api/organizations  (admin)
-exports.createOrganization = async (req, res) => {
+/** Slugs are indexed; Mongo rejects an index key over ~1024 bytes. */
+const MAX_SLUG_LEN = 80;
+
+exports.createOrganization = async (req, res, next) => {
   try {
     const { name, description = "", logoUrl = "", coverUrl = "", website = "" } = req.body;
     if (!String(name || "").trim()) {
       return res.status(400).json({ success: false, message: "Organization name is required" });
     }
 
+    /* §16: the name was used unchecked, so a 200 000-character name produced
+     * a 200 000-character slug, and Organization.exists({ slug }) then exceeded
+     * Mongo's index key limit and threw — reported to the client as a 500.
+     * A client fault became an apparent outage, and the client was told to
+     * retry a request that could never succeed. Bound the input first. */
+    const trimmed = String(name).trim();
+    if (trimmed.length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Organization name must be 100 characters or fewer",
+        error: { code: "VALIDATION_FAILED", message: "Organization name must be 100 characters or fewer" },
+      });
+    }
+
     // Unique slug (suffix on collision)
-    const base = slugify(name) || "org";
+    const base = (slugify(trimmed) || "org").slice(0, MAX_SLUG_LEN);
     let slug = base;
     for (let i = 1; await Organization.exists({ slug }); i++) slug = `${base}-${i}`;
 
     const org = await Organization.create({
-      name: String(name).trim(),
+      name: trimmed,
       slug,
       description: String(description).slice(0, 1000),
       logoUrl: String(logoUrl),
@@ -52,7 +69,9 @@ exports.createOrganization = async (req, res) => {
     });
     res.status(201).json({ success: true, organization: org });
   } catch (error) {
-    console.error("Create organization error:", error.message);
+    // A duplicate key is a 409, a validation failure a 400 — let the taxonomy
+    // decide rather than flattening everything into a 500 (§30, §61).
+    if (typeof next === "function") return next(error);
     res.status(500).json({ success: false, message: "Failed to create organization" });
   }
 };

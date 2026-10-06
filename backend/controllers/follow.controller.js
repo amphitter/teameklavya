@@ -4,6 +4,7 @@ const Block = require("../models/block.model");
 const { notify } = require("../services/notification.service");
 const { isBlockedBetween, severFollows } = require("../services/social.service");
 const { PostRepository } = require("../repositories");
+const mongoose = require("mongoose");
 
 const USER_LIST_FIELDS = "firstName lastName username verified profile.avatar profile.institution";
 
@@ -60,9 +61,22 @@ exports.toggleFollow = async (req, res) => {
 };
 
 // GET /api/follow/:userId/status — viewer-aware follow state
-exports.getFollowStatus = async (req, res) => {
+exports.getFollowStatus = async (req, res, next) => {
   try {
     const targetId = req.params.userId;
+
+    /* §16: same class of bug as getPostById. A malformed id reaches Mongo,
+     * throws a CastError, and the generic catch used to report a client
+     * mistake as a 500. Validate first; route the unexpected through next()
+     * so the taxonomy decides the status (§30). */
+    if (!mongoose.Types.ObjectId.isValid(targetId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid identifier",
+        error: { code: "VALIDATION_FAILED", message: "Invalid identifier" },
+      });
+    }
+
     let following = false;
     let requested = false;
     if (req.user && String(req.user.id) !== String(targetId)) {
@@ -80,7 +94,7 @@ exports.getFollowStatus = async (req, res) => {
       isPrivate: target?.socialSettings?.profileVisibility === "private",
     });
   } catch (error) {
-    console.error("Follow status error:", error.message);
+    if (typeof next === "function") return next(error);
     res.status(500).json({ success: false, message: "Failed to load follow status" });
   }
 };

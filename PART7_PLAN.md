@@ -27,7 +27,7 @@ architecture; it makes the existing architecture production-safe.
 | 3 | Real-provider test suite | §1 | ✅ |
 | 4 | Security audits (Supabase, Redis, cache) | §8, §9, §11, §13 | ✅ |
 | 5 | Community ownership & Super Admin protection | §10 | ✅ |
-| 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | pending |
+| 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | ✅ |
 | 7 | Provider failure matrix + preflight | §12, §31 | pending |
 | 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | pending |
 | 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | pending |
@@ -179,6 +179,62 @@ of what §10 protects. `guardSuperAdmin` reports the block and the caller
 decides; `isSelfAction` is the exemption.
 
 Regression: 1055 → **1090 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
+### Phase 6 — RESULT: ✅ **DONE** (`tests/phase13.selftest.js`, 35 assertions)
+
+Boots the REAL server against in-memory Mongo and attacks it over HTTP.
+
+**§15 — the auth model is bearer-token, not cookie-based.** An earlier draft of
+`docs/SECURITY-MODEL.md` described an HttpOnly/Secure/SameSite cookie model.
+That was wrong: the API sets **no cookies at all** — login returns a JWT in the
+body and `requireAuth` reads `Authorization: Bearer`. A security document
+describing controls that do not exist is worse than no document, so §6 of the
+doc now states the real model and the test asserts it by observation (no
+`set-cookie` on login) rather than by comment.
+
+**CSRF is therefore not implemented, and should not be** — §15's rule is that
+CSRF applies only where cookie auth applies, and a bearer token is not attached
+automatically by the browser. The condition is recorded: if a session cookie is
+ever introduced, CSRF becomes mandatory at the same moment.
+
+**Four real server bugs found by fuzzing (all fixed):**
+1. `getPostById` — a malformed ObjectId threw a `CastError` that the generic
+   `catch` turned into a **500**. Three consequences: a client mistake reported
+   as an outage (polluting alerting), a retry hint on a request that can never
+   succeed, and a clean oracle for "which inputs reach Mongo unvalidated".
+   Now validated up front, with unexpected errors routed through `next()` so
+   the central taxonomy decides the status.
+2. `getFollowStatus` — the identical pattern, fixed the same way.
+3. `createOrganization` — a 200 000-character name produced a 200 000-character
+   slug, and `exists({slug})` then exceeded Mongo's ~1024-byte index key limit
+   and threw, again as a 500. Name now bounded to 100 chars, slug to 80.
+4. All three controllers flattened every failure to 500. They now call
+   `next(error)` so a duplicate key is 409 and a validation error is 400.
+
+**Two bugs in my own harness, worth recording:**
+- **Port 5061 is on the WHATWG fetch spec's BLOCKED PORT list** (it is `sips`).
+  undici refused to connect, every request returned `status 0`, and my
+  assertions "passed" against a value that meant *the request never happened*.
+  A test that cannot fail is not a test. Moved to 5099.
+- The helper discarded `rawBody` whenever `body` was undefined, so the
+  malformed-JSON and oversized-payload probes sent **no body at all** and were
+  measuring a 403 from the auth middleware. Both now exercise body-parser.
+- Several probes also used routes that do not exist (`/users/me`,
+  `/admin/overview`) and were measuring 404s. Replaced with real routes.
+
+**Coverage:** 84 malformed-ObjectId probes · 88 hostile-body probes
+(deep JSON, huge strings/arrays, prototype pollution via `__proto__` and
+`constructor`, ReDoS patterns, RTL-override Unicode, null bytes, script/img
+payloads, Mongo operators, wrong types) · invalid content types · malformed
+JSON (400) · 5 MB payload (413) · duplicate params · invalid cursors · and a
+seven-role authorization matrix (USER_A/USER_B/ORGANIZER_A/ORGANIZER_B/
+ORG_MANAGER/COMMUNITY_OWNER/SUPER_ADMIN/ANON).
+
+**§14 verified:** no account enumeration (identical response for unknown
+address and wrong password) · brute force throttled at 429 with `Retry-After` ·
+the attempted password, any OTP and any JWT are absent from server output.
+
+Regression: 1090 → **1125 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

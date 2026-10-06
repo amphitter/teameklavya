@@ -28,7 +28,7 @@ const LIVE = { deletedAt: null, status: { $ne: "suspended" } };
 async function publicBySlug(slug) {
   const key = `community:slug:${slug}`;
 
-  const hit = cache.peek(key);
+  const hit = await cache.peek(key);
   if (hit !== undefined) return hit;
 
   const doc = await Community.findOne({ slug, ...LIVE }).select(PUBLIC_FIELDS).lean();
@@ -77,12 +77,20 @@ async function listForUser(userId, { limit = 50 } = {}) {
 }
 
 /** Invalidate cached community metadata + counts (§13). */
-function invalidate(community) {
+async function invalidate(community) {
   if (!community) return;
   const id = community._id ? String(community._id) : String(community);
-  cache.invalidate(keys.community(id));
-  cache.invalidate(`counts:community:${id}`);
-  if (community.slug) cache.invalidate(`community:slug:${community.slug}`);
+  // Invalidation is BEST-EFFORT: a failed invalidation must never fail the
+  // write that triggered it — the stale entry simply expires on its TTL.
+  try {
+    await Promise.all([
+      cache.invalidate(keys.community(id)),
+      cache.invalidate(keys.communityCounts(id)),
+      community.slug ? cache.invalidate(keys.communitySlug(community.slug)) : Promise.resolve(),
+    ]);
+  } catch (err) {
+    console.warn("[cache] invalidation failed:", err?.message || err);
+  }
 }
 
 module.exports = {

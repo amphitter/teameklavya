@@ -69,9 +69,9 @@ function toPublicEvent(event) {
  *   NOT cached and NOT redacted — the controller handles that path.
  */
 async function publicBySlug(slug) {
-  const key = `event:slug:${slug}`;
+  const key = keys.eventSlug(slug);
 
-  const hit = cache.peek(key);
+  const hit = await cache.peek(key);
   if (hit !== undefined) return hit; // 0 database queries
 
   const doc = await Event.findOne({ slug, removedAt: null })
@@ -90,7 +90,7 @@ async function publicBySlug(slug) {
 async function publicById(id) {
   const key = keys.event(id);
 
-  const hit = cache.peek(key);
+  const hit = await cache.peek(key);
   if (hit !== undefined) return hit;
 
   const doc = await Event.findById(id).populate("organization", ORG_SUMMARY).lean();
@@ -116,17 +116,30 @@ function interestCount(eventId) {
  * Call on update, publish, unpublish and delete — by id AND by slug, since
  * public lookups are keyed by slug and admin lookups by id.
  */
-function invalidate(event) {
+/**
+ * Invalidate every cached view of an event (§13).
+ * Async since Part 6: invalidation is now a network call when the provider
+ * is Redis, so callers must await it before relying on the cache being cold.
+ */
+async function invalidate(event) {
   if (!event) return;
   const id = event._id ? String(event._id) : String(event);
-  cache.invalidate(keys.event(id));
-  cache.invalidate(keys.eventCounts(id));
-  cache.invalidate(`stats:event:${id}`);
-  cache.invalidate(`counts:interest:${id}`);
-  if (event.slug) cache.invalidate(`event:slug:${event.slug}`);
-  // Discovery feeds (explore/popular/trending) are derived from events
-  cache.invalidatePrefix("explore:");
-  cache.invalidatePrefix("trending:");
+  // Invalidation is BEST-EFFORT: a failed invalidation must never fail the
+  // write that triggered it — the stale entry simply expires on its TTL.
+  try {
+    await Promise.all([
+      cache.invalidate(keys.event(id)),
+      cache.invalidate(keys.eventCounts(id)),
+      cache.invalidate(`stats:event:${id}`),
+      cache.invalidate(`counts:interest:${id}`),
+      event.slug ? cache.invalidate(keys.eventSlug(event.slug)) : Promise.resolve(),
+      // Discovery feeds (explore/popular/trending) are derived from events
+      cache.invalidatePrefix("explore:"),
+      cache.invalidatePrefix("trending:"),
+    ]);
+  } catch (err) {
+    console.warn("[cache] invalidation failed:", err?.message || err);
+  }
 }
 
 module.exports = {

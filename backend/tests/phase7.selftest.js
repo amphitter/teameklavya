@@ -209,7 +209,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   sec("5. Metrics respond to real load (§59)");
 
-  cache.flush();
+  await cache.flush();
   // NB — getOrSet(key, loader, { ttl }): the third argument is an OPTIONS
   // object. Passing ttl positionally leaves it undefined, which makes
   // getOrSet skip caching entirely and record no metrics at all.

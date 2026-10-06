@@ -521,7 +521,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   ok("the facade exposes invalidatePrefix", typeof cache.invalidatePrefix === "function");
   ok("the facade does NOT expose a raw set (values must come from a loader)", typeof cache.set === "undefined");
 
-  cache.flush();
+  await cache.flush();
 
   // hit / miss
   let loaderRuns = 0;
@@ -539,20 +539,20 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   ok("the cached value is returned", m2 && m2.v === "hello", JSON.stringify(m2));
 
   // peek reads without ever invoking a loader
-  const peeked = cache.peek("p9:probe");
+  const peeked = await cache.peek("p9:probe");
   ok("peek returns the cached value", peeked && peeked.v === "hello", JSON.stringify(peeked));
-  const peekMiss = cache.peek("p9:definitely-absent");
+  const peekMiss = await cache.peek("p9:definitely-absent");
   ok("peek returns undefined on a miss (never invokes a loader)", peekMiss === undefined, JSON.stringify(peekMiss));
   eq("peeking a miss did not run any loader", loaderRuns, 1);
 
   // invalidation
-  cache.invalidate("p9:probe");
-  eq("invalidate removes the key", cache.peek("p9:probe"), undefined);
+  await cache.invalidate("p9:probe");
+  eq("invalidate removes the key", await cache.peek("p9:probe"), undefined);
   await cache.getOrSet("p9:probe", load, { ttl: 60000 });
   eq("after invalidation the loader runs again", loaderRuns, 2);
 
   // in-flight dedup (§15) — concurrent callers share ONE loader run
-  cache.flush();
+  await cache.flush();
   let slowRuns = 0;
   const slow = async () => {
     slowRuns++;
@@ -582,7 +582,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   ok("SWR is refused on a private key (§14)", swrBlocked);
 
   // The classic footgun: passing ttl positionally silently disables caching.
-  cache.flush();
+  await cache.flush();
   let posRuns = 0;
   const posLoad = async () => {
     posRuns++;
@@ -593,9 +593,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   eq("a positional ttl bypasses the cache entirely (documented footgun)", posRuns, 2);
 
   // stats
-  cache.flush();
+  await cache.flush();
   await cache.getOrSet("p9:st", async () => 1, { ttl: 60000 });
-  const st = cache.stats();
+  const st = await cache.stats();
   ok("stats reports a numeric size", typeof st.size === "number", JSON.stringify(st));
   ok("stats reports the entry cap", Number.isFinite(st.maxEntries) && st.maxEntries > 0, JSON.stringify(st));
   ok("stats reports the in-flight count", typeof st.inflight === "number", JSON.stringify(st));

@@ -31,7 +31,7 @@ const PUBLIC_FIELDS = "name slug description logoUrl coverUrl website isVerified
 async function publicBySlug(slug) {
   const key = `org:slug:${slug}`;
 
-  const hit = cache.peek(key);
+  const hit = await cache.peek(key);
   if (hit !== undefined) return hit;
 
   const doc = await Organization.findOne({ slug }).select(PUBLIC_FIELDS).lean();
@@ -73,12 +73,20 @@ async function listFollowers({ organizationId, limit, cursor }) {
 }
 
 /** Invalidate an org's cached profile + stats (§13). */
-function invalidate(organization) {
+async function invalidate(organization) {
   if (!organization) return;
   const id = organization._id ? String(organization._id) : String(organization);
-  cache.invalidate(keys.organization(id));
-  cache.invalidate(`counts:org:${id}`);
-  if (organization.slug) cache.invalidate(`org:slug:${organization.slug}`);
+  // Invalidation is BEST-EFFORT: a failed invalidation must never fail the
+  // write that triggered it — the stale entry simply expires on its TTL.
+  try {
+    await Promise.all([
+      cache.invalidate(keys.organization(id)),
+      cache.invalidate(keys.orgCounts(id)),
+      organization.slug ? cache.invalidate(keys.orgSlug(organization.slug)) : Promise.resolve(),
+    ]);
+  } catch (err) {
+    console.warn("[cache] invalidation failed:", err?.message || err);
+  }
 }
 
 module.exports = {

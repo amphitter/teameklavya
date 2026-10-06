@@ -157,14 +157,14 @@ function collectDatabase(db) {
   };
 }
 
-function collectCache(snap) {
+async function collectCache(snap) {
   // Prefer the live cache service; the metrics snapshot is process-lifetime.
   let size = null;
   let maxEntries = BUDGETS.cacheEntries;
   let inflight = null;
   let disabled = false;
   try {
-    const s = cache.stats();
+    const s = await cache.stats();
     size = s.size;
     maxEntries = s.maxEntries || maxEntries;
     inflight = s.inflight;
@@ -328,7 +328,7 @@ async function collect({ fresh = false } = {}) {
 
   const sections = {
     database: collectDatabase(db),
-    cache: collectCache(snap),
+    cache: await collectCache(snap),
     api: collectApi(snap),
     rateLimits: collectRateLimits(snap),
     sockets: collectSockets(snap),

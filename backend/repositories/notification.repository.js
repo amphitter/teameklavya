@@ -60,8 +60,14 @@ function unreadCount(userId) {
  * Invalidate a user's cached unread count (§13).
  * Called on: notification created, notification read, mark-all-read.
  */
-function invalidate(userId) {
-  if (userId) cache.invalidate(`notif:unread:${userId}`);
+async function invalidate(userId) {
+  if (userId) {
+    try {
+      await cache.invalidate(keys.unreadNotifications(userId));
+    } catch (err) {
+      console.warn("[cache] invalidation failed:", err?.message || err);
+    }
+  }
 }
 
 module.exports = {

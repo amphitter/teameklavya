@@ -350,7 +350,7 @@ const { MongoMemoryServer } = require("mongodb-memory-server");
         })
       );
     }
-    cache.flush(); // ensure a cold read so we measure the real query, not cache
+    await cache.flush(); // ensure a cold read so we measure the real query, not cache
     startCounting();
     await RegistrationRepository.countsBatch([eventId, ...extras.map((e) => String(e._id))]);
     const used = stopCounting();
@@ -537,7 +537,7 @@ const { MongoMemoryServer } = require("mongodb-memory-server");
 
   await test("§13 updating an event evicts its cached public page", async () => {
     await EventRepository.publicBySlug(event.slug); // prime
-    EventRepository.invalidate(event);
+    await EventRepository.invalidate(event);
     startCounting();
     await EventRepository.publicBySlug(event.slug);
     const used = stopCounting();

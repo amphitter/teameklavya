@@ -269,9 +269,14 @@ function existsForUser(eventId, userId) {
  * Invalidate every cached derivative of an event's registration data.
  * MUST be called on each registration write (§13).
  */
-function invalidateEvent(eventId) {
-  cache.invalidate(keys.eventCounts(eventId));
-  cache.invalidate(`stats:event:${eventId}`);
+async function invalidateEvent(eventId) {
+  // Invalidation is BEST-EFFORT: a failed invalidation must never fail the
+  // write that triggered it — the stale entry simply expires on its TTL.
+  try {
+    await Promise.all([cache.invalidate(keys.eventCounts(eventId)), cache.invalidate(keys.eventStats(eventId))]);
+  } catch (err) {
+    console.warn("[cache] invalidation failed:", err?.message || err);
+  }
 }
 
 module.exports = {

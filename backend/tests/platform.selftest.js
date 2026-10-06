@@ -83,7 +83,7 @@ async function test(name, fn) {
   });
 
   console.log("── 2. CacheService ──");
-  cache.flush();
+  await cache.flush();
   metrics.reset();
   await test("getOrSet caches: loader runs once", async () => {
     let calls = 0;
@@ -158,14 +158,14 @@ async function test(name, fn) {
     );
   });
   await test("invalidatePrefix clears a whole domain family (§13)", async () => {
-    cache.flush(); // isolate state from earlier tests
+    await cache.flush(); // isolate state from earlier tests
     const load = async () => ({ v: 1 });
     await cache.getOrSet(keys.event("a"), load, { ttl: 60_000 });
     await cache.getOrSet(keys.event("b"), load, { ttl: 60_000 });
     await cache.getOrSet(keys.eventCounts("a"), load, { ttl: 60_000 });
-    const removed = cache.invalidatePrefix("event:");
+    const removed = await cache.invalidatePrefix("event:");
     assert.strictEqual(removed, 2);
-    assert.strictEqual(cache.stats().size, 1); // counts:event:a survives a prefix-scoped invalidation
+    assert.strictEqual((await cache.stats()).size, 1); // counts:event:a survives a prefix-scoped invalidation
   });
   await test("LRU eviction respects maxEntries", async () => {
     const tiny = new MemoryCacheProvider({ maxEntries: 3 });

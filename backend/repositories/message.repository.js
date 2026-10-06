@@ -106,8 +106,14 @@ function unreadTotal(userId) {
 }
 
 /** Drop cached unread state after a send/read (§13). */
-function invalidate(userId) {
-  if (userId) cache.invalidate(`msg:unread:${userId}`);
+async function invalidate(userId) {
+  if (userId) {
+    try {
+      await cache.invalidate(keys.unreadMessages(userId));
+    } catch (err) {
+      console.warn("[cache] invalidation failed:", err?.message || err);
+    }
+  }
 }
 
 module.exports = {

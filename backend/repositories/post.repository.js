@@ -103,8 +103,14 @@ async function getFeedContext(userId) {
 }
 
 /** Drop the cached context after a follow/unfollow so the feed reacts. */
-function invalidateFeedContext(userId) {
-  if (userId) cache.invalidate(keys.followList(userId));
+async function invalidateFeedContext(userId) {
+  if (userId) {
+    try {
+      await cache.invalidate(keys.followList(userId));
+    } catch (err) {
+      console.warn("[cache] invalidation failed:", err?.message || err);
+    }
+  }
 }
 
 /**

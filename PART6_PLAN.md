@@ -387,6 +387,54 @@ live 65 · social ✅ · community 38.
 - Multi-instance simulation: two independent limiter instances sharing one
   store see one bucket.
 
+### Phase 2 — RESULT: ✅ **DONE** (121/89 → 121 assertions in phase10)
+
+**`providers/redis/sliding-window.store.js`** — one shared sliding-window
+primitive serving **both** limiters (`express-rate-limit` for the 18 HTTP
+domains, and `SlidingWindow` for action/socket guards). Fixing them separately
+would have meant two algorithms to keep in step; now there is one.
+
+The Redis backend uses a **Lua script evaluated inside Redis**. A sliding
+window is a read followed by a conditional write, so doing it from the app is
+a race — two instances can both read "9 of 10" and both allow, letting 11
+through. Evaluating in Redis makes the count correct no matter how many
+instances are hammering it, at one round-trip.
+
+**A real off-by-one was caught here.** The first version of the script refused
+a hit *without counting it*. That is wrong for this library: it blocks on
+`totalHits > limit`, and its `positiveHits` validation rejects a count below
+1 — so a refused request **must** still increment. Returning the pre-refusal
+count would have silently allowed **limit+1 requests on all 18 domains**. Both
+backends now always record the hit and report admission separately. Neither
+the phase2 nor the phase9 suite could have caught this (they test the contract,
+not the store), so phase10 asserts the script's shape and the always-count
+rule directly.
+
+**Verified multi-instance, literally as the brief describes:** two independent
+store objects (Server A / Server B) over one shared backend, 5 hits each into
+a bucket of 10 → the 11th hit across both is refused. The same test run
+against two *isolated* memory backends shows each seeing only its own 5 —
+which is precisely the divergence Redis removes.
+
+**Failure behaviour is fail-open.** Redis unreachable → traffic allowed and
+the outage counted. A rate-limiter outage that blocks all traffic is a
+self-inflicted outage worse than no rate limiting, and the unique indexes,
+action guards and auth checks remain in force underneath.
+
+**Contract preserved:** 18 domains, AUTH 25/15m, READ 300/min, env overrides,
+`Retry-After`, `RateLimit`, `RateLimit-Policy`, and the 429 shape.
+
+`SlidingWindow` gained `allowAsync()` (awaited, exact across instances). The
+synchronous `allow()` path is deliberately kept: socket handlers cannot
+become async without a wider refactor, and those guards stop abuse loops
+rather than doing accounting.
+
+**Also corrected:** the Part 5 final report claimed 21 rate-limit domains.
+The actual count is 18 — now asserted by a test.
+
+**Results:** phase10 **121 passed, 0 failed**. Full regression: **682
+assertions across 10 suites, 0 failed**; e2e unchanged and green.
+
 ### Phase 3 — Distributed idempotency (brief §5)
 - Redis-backed `SET NX PX` key store, same 409 semantics, same per-user scoping.
 - Extend mounting to ticket issuance, bulk tickets, quiz submission and event

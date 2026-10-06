@@ -1,23 +1,44 @@
 const Event = require("../models/event.model");
+const Organization = require("../models/organization.model");
 const User = require("../models/user.model");
 const RegistrationResponse = require("../models/registrationResponse.model");
+const EventInterest = require("../models/eventInterest.model");
+const OrgFollow = require("../models/orgFollow.model");
 const Ticket = require("../models/ticket.model");
 const mongoose = require('mongoose');
 const crypto = require('crypto');
-const { sendEmailWithAttachment, sendEmail } = require("../utils/email");
+const emailService = require("../services/email.service");
+const { notifyMany } = require("../services/notification.service");
+const templates = require("../services/emailTemplates");
+const { canManageEvent } = require("../middleware/auth.middleware");
+const Post = require("../models/post.model");
+const Reaction = require("../models/reaction.model");
+const Comment = require("../models/comment.model");
 
-// Helper functions for event location display
-const getEventLocationText = (event) => {
-  switch (event.eventType) {
-    case 'online':
-      return `🌐 Online Event - ${event.platform || 'Online Platform'}`;
-    case 'offline':
-      return `📍 Venue: ${event.venue}`;
-    case 'hybrid':
-      return `📍 Venue: ${event.venue} + 🌐 Online Option`;
-    default:
-      return `📍 Venue: ${event.venue}`;
+// ─── Visibility helpers ─────────────────────────────────────
+const VISIBILITY_LEVELS = ["public", "unlisted", "private"];
+
+/**
+ * Strip organizer-sensitive / credential fields before returning an event
+ * through a public endpoint.
+ */
+const toPublicEvent = (event) => {
+  const doc = event.toObject ? event.toObject() : { ...event };
+  const strip = [
+    "meetingId",
+    "passcode",
+    "checkIns",
+    "bannerPublicId",
+    "ticketSettings",
+    "whatsappGroup",
+  ];
+  strip.forEach((key) => delete doc[key]);
+  if (doc.visibility === "private") {
+    delete doc.onlineEventLink;
+    delete doc.materials;
+    delete doc.recordingLink;
   }
+  return doc;
 };
 
 const getEventLocationHTML = (event) => {
@@ -39,6 +60,30 @@ exports.createEvent = async (req, res) => {
   try {
     const body = req.body || {};
     
+    // Validate organization attachment (if any)
+    if (body.organization) {
+      const org = await Organization.findById(body.organization);
+      if (!org) {
+        return res.status(400).json({ success: false, message: "Organization not found" });
+      }
+    }
+
+    // Validate community attachment (Phase 6) — must exist and not be deleted
+    if (body.community) {
+      const community = await Community.findById(body.community).select("deletedAt").lean();
+      if (!community || community.deletedAt) {
+        return res.status(400).json({ success: false, message: "Community not found" });
+      }
+    }
+
+    // Validate visibility
+    if (body.visibility && !VISIBILITY_LEVELS.includes(body.visibility)) {
+      return res.status(400).json({
+        success: false,
+        message: "Visibility must be 'public', 'unlisted', or 'private'",
+      });
+    }
+
     // Validate event type and related fields
     if (!body.eventType || !['online', 'offline', 'hybrid'].includes(body.eventType)) {
       return res.status(400).json({ 
@@ -105,6 +150,24 @@ exports.createEvent = async (req, res) => {
       ...body, 
       createdBy: req.user.id 
     });
+
+    // Achievements: event_host (first real event created)
+    require("../services/achievement.service").checkAchievements(req.user.id);
+
+    // Organizations v2: notify the org's followers about the new event
+    // (in-app only, create-time only — deterministic, no spam on edits)
+    if (event.organization) {
+      try {
+        const followers = await OrgFollow.find({ organization: event.organization }).select("user").lean();
+        const docs = followers
+          .map((f) => f.user)
+          .filter((uid) => String(uid) !== String(req.user.id))
+          .map((user) => ({ user, actor: req.user.id, type: "announcement", event: event._id }));
+        if (docs.length) await notifyMany(docs);
+      } catch (notifyErr) {
+        console.error("Org followers notify error:", notifyErr.message); // never fail creation
+      }
+    }
     
     res.status(201).json({ success: true, event });
   } catch (error) {
@@ -122,10 +185,24 @@ exports.getEvents = async (req, res) => {
       category, 
       featured, 
       type = 'all',
-      eventType // New filter for event type
+      q,          // free-text search
+      eventType,  // filter for event type
+      price       // 'free' | 'paid' (Explore filter)
     } = req.query;
     
     let query = {};
+
+    // Free-text search across title, description, venue and organizer
+    if (q && String(q).trim()) {
+      const escaped = String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      query.$or = [
+        { title: { $regex: escaped, $options: "i" } },
+        { description: { $regex: escaped, $options: "i" } },
+        { venue: { $regex: escaped, $options: "i" } },
+        { organizer: { $regex: escaped, $options: "i" } },
+        { category: { $regex: escaped, $options: "i" } },
+      ];
+    }
     
     // Category filter
     if (category && category !== 'all') {
@@ -146,13 +223,30 @@ exports.getEvents = async (req, res) => {
     const now = new Date();
     if (type === 'upcoming') {
       query.endDate = { $gte: now };
+    } else if (type === 'ongoing') {
+      // Live right now: started but not ended
+      query.startDate = { $lte: now };
+      query.endDate = { $gte: now };
     } else if (type === 'past') {
       query.endDate = { $lt: now };
     }
     // If type is 'all' or not provided, don't filter by date
-    
+
+    // Price filter (Explore)
+    if (price === 'free') {
+      query.price = { $lte: 0 };
+    } else if (price === 'paid') {
+      query.price = { $gt: 0 };
+    }
+
+    // Discovery only ever shows PUBLIC events.
+    // Unlisted events are reachable via direct link; private via invitation.
+    query.visibility = 'public';
+    // Moderation takedowns (Part 3, Phase 10) are hidden from discovery
+    query.removedAt = null;
+
     const events = await Event.find(query)
-      .select('title slug description category venue venueIframeLink onlineEventLink platform eventType startDate endDate bannerUrl organizer price theme isFeatured ticketSettings')
+      .select('title slug description category venue venueIframeLink eventType startDate endDate startTime endTime bannerUrl organizer price theme isFeatured visibility maxAttendees')
       .sort({ startDate: 1 })
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));
@@ -182,12 +276,34 @@ exports.getEvents = async (req, res) => {
   }
 };
 
-// Public: get by slug
+// Public: distinct categories (discovery filters)
+exports.getEventCategories = async (_req, res) => {
+  try {
+    const categories = await Event.distinct("category", { visibility: "public" });
+    res.json({ success: true, categories: categories.filter(Boolean).sort() });
+  } catch (error) {
+    console.error("Get categories error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Public: get by slug (unlisted reachable by link; private needs organizer/admin rights)
 exports.getEventBySlug = async (req, res) => {
   try {
-    const event = await Event.findOne({ slug: req.params.slug });
+    // Moderation takedowns (Part 3, Phase 10) are gone from detail pages too
+    const event = await Event.findOne({ slug: req.params.slug, removedAt: null }).populate("organization", "name slug logoUrl");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
-    res.json({ success: true, event });
+
+    if (event.visibility === "private") {
+      const authorized = await canManageEvent(req.user, event);
+      if (!authorized) {
+        // Do not reveal that a private event exists
+        return res.status(404).json({ success: false, message: "Event not found" });
+      }
+      return res.json({ success: true, event }); // full document for the organizer
+    }
+
+    res.json({ success: true, event: toPublicEvent(event) });
   } catch (error) {
     console.error("Get event by slug error:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -197,7 +313,7 @@ exports.getEventBySlug = async (req, res) => {
 // Admin: get by id
 exports.getEventById = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
+    const event = await Event.findById(req.params.id).populate("organization", "name slug logoUrl");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
     res.json({ success: true, event });
   } catch (error) {
@@ -211,6 +327,26 @@ exports.updateEvent = async (req, res) => {
   try {
     const body = req.body || {};
     
+    // Validate visibility if being updated
+    if (body.visibility && !VISIBILITY_LEVELS.includes(body.visibility)) {
+      return res.status(400).json({
+        success: false,
+        message: "Visibility must be 'public', 'unlisted', or 'private'",
+      });
+    }
+
+    // Never allow these sensitive fields to be mass-assigned from the client
+    delete body.checkIns;
+    delete body.bannerPublicId;
+
+    // Validate community attachment (Phase 6)
+    if (body.community) {
+      const community = await Community.findById(body.community).select("deletedAt").lean();
+      if (!community || community.deletedAt) {
+        return res.status(400).json({ success: false, message: "Community not found" });
+      }
+    }
+
     // Validate event type if being updated
     if (body.eventType && !['online', 'offline', 'hybrid'].includes(body.eventType)) {
       return res.status(400).json({ 
@@ -235,6 +371,30 @@ exports.updateEvent = async (req, res) => {
     
     const event = await Event.findByIdAndUpdate(req.params.id, body, { new: true });
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+
+    // Event update → notify registered participants + interested users (soft-follow),
+    // deduped, never the actor themself. Real audience only.
+    try {
+      const [regUsers, intUsers] = await Promise.all([
+        RegistrationResponse.find({ eventId: event._id }).select("userId").lean(),
+        EventInterest.find({ event: event._id }).select("user").lean(),
+      ]);
+      const audience = [
+        ...new Set(
+          [...regUsers.map((r) => String(r.userId)), ...intUsers.map((i) => String(i.user))].filter(
+            (id) => id !== String(req.user.id)
+          )
+        ),
+      ];
+      if (audience.length) {
+        await notifyMany(
+          audience.map((user) => ({ user, actor: req.user.id, type: "event_update", event: event._id }))
+        );
+      }
+    } catch (notifyErr) {
+      console.error("Event update notify error:", notifyErr.message); // never fail the update itself
+    }
+
     res.json({ success: true, event });
   } catch (error) {
     console.error("Update event error:", error);
@@ -289,6 +449,8 @@ exports.getAdminEvents = async (req, res) => {
       }
     }
     
+    // Moderation takedowns (Part 3, Phase 10) are hidden from event lists
+    query.removedAt = null;
     const events = await Event.find(query)
       .select('-description -schedule -speakers -benefits -partners -checkIns') // Exclude heavy fields
       .sort({ createdAt: -1 })
@@ -335,477 +497,75 @@ exports.sendRSVP = async (req, res) => {
     const users = await User.find({ _id: { $in: userIds } });
     if (!users.length) return res.status(404).json({ success: false, message: "No users found" });
 
+    const note = event.ticketSettings?.autoGenerate
+      ? "Your ticket will be generated automatically after you register."
+      : "Tickets are issued after registration approval.";
+
     const results = [];
-    for (let user of users) {
+    for (const user of users) {
       try {
-        const htmlContent = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Event Invitation - Team Eklavya</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fa;font-family:'Inter',Helvetica,Arial,sans-serif;">
-
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-    You're invited to ${event.title} by Team Eklavya.
-  </div>
-
-  <div style="width:100%;padding:0;background-color:#f5f7fa;">
-    <div style="max-width:600px;margin:0 auto;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,0.05);overflow:hidden;">
-      
-      <div style="background:#004aad;padding:20px 30px;text-align:center;">
-        <img src="https://i.ibb.co/v6H3n86S/logo.png" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
-        <h1 style="color:#fff;margin:0;font-size:22px;font-weight:600;">You're Invited!</h1>
-        <p style="color:#fff;margin:10px 0 0;font-size:16px;opacity:0.9;">${event.title}</p>
-      </div>
-
-      <div style="padding:30px;">
-        <h2 style="color:#004aad;margin-bottom:10px;">Hey ${user.firstName},</h2>
-        <p style="color:#333;font-size:15px;line-height:1.6;margin-bottom:25px;">
-          You are invited to <strong>${event.title}</strong>.
-        </p>
-
-        <div style="background:#f8f9fb;padding:20px;border-radius:8px;margin:20px 0;">
-          <h3 style="margin-top:0;color:#555;">Event Details:</h3>
-          <p><strong>📅 Date:</strong> ${new Date(event.startDate).toLocaleDateString()}</p>
-          <p><strong>⏰ Time:</strong> ${event.startTime || 'To be announced'}</p>
-          ${getEventLocationHTML(event)}
-          <p><strong>👨‍💼 Organizer:</strong> ${event.organizer}</p>
-        </div>
-
-        ${rsvpLink ? `
-        <div style="text-align:center;margin:30px 0;">
-          <a href="${rsvpLink}" 
-             style="background:#004aad;color:#fff;padding:12px 28px;text-decoration:none;border-radius:6px;font-weight:600;display:inline-block;">
-            ✅ Confirm Your RSVP
-          </a>
-        </div>
-        ` : ''}
-
-        <div style="background:#e8f4fd;padding:15px;border-radius:6px;border-left:4px solid #2E86C1;">
-          <p style="margin:0;color:#2E86C1;font-size:14px;">
-            <strong>Note:</strong> ${event.ticketSettings?.autoGenerate ? 
-              'Your ticket will be automatically generated upon registration.' : 
-              'Tickets will be provided after registration approval.'}
-          </p>
-        </div>
-      </div>
-
-      <div style="background:#f8f9fb;text-align:center;padding:20px;">
-        <p style="color:#888;font-size:13px;margin-bottom:10px;">Follow us for updates</p>
-        <table role="presentation" align="center" style="margin:0 auto 15px auto;">
-          <tr>
-            <td style="padding:0 6px;">
-              <a href="https://www.instagram.com/iteameklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/2111/2111463.png" alt="Instagram" width="24" height="24" />
-              </a>
-            </td>
-            <td style="padding:0 6px;">
-              <a href="https://x.com/iteameklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/5968/5968830.png" alt="X" width="24" height="24" />
-              </a>
-            </td>
-            <td style="padding:0 6px;">
-              <a href="https://www.linkedin.com/company/i-team-eklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" alt="LinkedIn" width="24" height="24" />
-              </a>
-            </td>
-            <td style="padding:0 6px;">
-              <a href="https://chat.whatsapp.com/L7HvHNOatFbHIWM7EGBaaA" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/733/733585.png" alt="WhatsApp" width="24" height="24" />
-              </a>
-            </td>
-          </tr>
-        </table>
-        <p style="color:#888;font-size:13px;margin:0;">Team Eklavya</p>
-        <p style="color:#aaa;font-size:12px;margin-top:5px;">If you have any questions, contact the event organizers.</p>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
-        `;
-
-        const textContent = `
-Hey ${user.firstName},
-
-You are invited to ${event.title}.
-
-Event Details:
-📅 Date: ${new Date(event.startDate).toLocaleDateString()}
-⏰ Time: ${event.startTime || 'To be announced'}
-${getEventLocationText(event)}
-👨‍💼 Organizer: ${event.organizer}
-
-${rsvpLink ? `Please confirm your RSVP by visiting: ${rsvpLink}` : ''}
-
-Note: ${event.ticketSettings?.autoGenerate ? 
-  'Your ticket will be automatically generated upon registration.' : 
-  'Tickets will be provided after registration approval.'}
-
-If you have any questions, please contact the event organizer.
-
-Team Eklavya
-        `;
-
-        await sendEmailWithAttachment({
-          to: user.email,
-          subject: `Invitation: ${event.title}`,
-          text: textContent,
-          html: htmlContent
-        });
-        results.push({ 
-          userId: user._id,
-          email: user.email, 
-          status: "sent",
-          message: "RSVP sent successfully"
-        });
+        const { html, text } = templates.eventInvitation({ user, event, ctaUrl: rsvpLink, note });
+        await emailService.send({ to: user.email, subject: `Invitation: ${event.title}`, html, text });
+        results.push({ userId: user._id, email: user.email, status: "sent" });
       } catch (err) {
-        console.error(`Failed to send RSVP to ${user.email}:`, err);
-        results.push({ 
-          userId: user._id,
-          email: user.email, 
-          status: "failed", 
-          error: err.message 
-        });
+        console.error(`Failed to send RSVP to ${user.email}:`, err.message);
+        results.push({ userId: user._id, email: user.email, status: "failed", error: err.message });
       }
     }
-    
-    const successful = results.filter(r => r.status === 'sent').length;
-    const failed = results.filter(r => r.status === 'failed').length;
-    
-    res.json({ 
-      success: true, 
-      message: `RSVP process completed: ${successful} sent, ${failed} failed`,
-      results 
-    });
+
+    const successful = results.filter((r) => r.status === "sent").length;
+    const failed = results.filter((r) => r.status === "failed").length;
+    res.json({ success: true, message: `RSVP process completed: ${successful} sent, ${failed} failed`, results });
   } catch (error) {
     console.error("sendRSVP error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Send event notification to all users
+// Send event announcement to all users (batched)
 exports.sendEventNotificationToAllUsers = async (req, res) => {
   try {
     const { id } = req.params;
     const event = await Event.findById(id);
-    if (!event) {
-      return res.status(404).json({ success: false, message: "Event not found" });
-    }
+    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
 
-    // Get all users (you might want to paginate this for large user bases)
-    const users = await User.find({}, 'email firstName lastName');
-    if (!users.length) {
-      return res.status(404).json({ success: false, message: "No users found" });
-    }
+    const users = await User.find({}, "email firstName lastName");
+    if (!users.length) return res.status(404).json({ success: false, message: "No users found" });
 
-    const eventLink = `${process.env.FRONTEND_URL || 'https://yourapp.com'}/events/${event.slug}`;
+    const eventUrl = `${process.env.FRONTEND_URL}/events/${event.slug}`;
     let sentCount = 0;
     let failedCount = 0;
 
-    // Send notifications in batches to avoid overwhelming the email service
     const batchSize = 50;
     for (let i = 0; i < users.length; i += batchSize) {
       const batch = users.slice(i, i + batchSize);
-      
-      const batchPromises = batch.map(async (user) => {
-        try {
-          const htmlContent = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>New Event Announcement - ${event.title}</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-  </style>
-</head>
-<body style="margin:0;padding:0;background-color:#f8fafc;font-family:'Inter',Helvetica,Arial,sans-serif;">
-
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-    Team Eklavya is pleased to announce our new event: ${event.title}. Join us for an incredible experience.
-  </div>
-
-  <!-- Preheader Text -->
-  <div style="display:none;font-size:1px;color:#f8fafc;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
-    You're invited to ${event.title} - ${event.description ? event.description.substring(0, 100) + '...' : 'Join us for an amazing experience'}
-  </div>
-
-  <div style="width:100%;padding:0;background-color:#f8fafc;">
-    <div style="max-width:600px;margin:0 auto;background:#ffffff;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -1px rgba(0,0,0,0.06);overflow:hidden;border-radius:8px;">
-      
-      <!-- Header Section -->
-      <div style="background:linear-gradient(135deg,#004aad 0%,#0066cc 100%);padding:25px 30px;text-align:center;">
-        <table width="100%" border="0" cellspacing="0" cellpadding="0">
-          <tr>
-            <td align="center">
-              <img src="https://i.ibb.co/v6H3n86S/logo.png" alt="Team Eklavya Logo" style="max-height:50px;width:auto;margin-bottom:15px;" />
-            </td>
-          </tr>
-          <tr>
-            <td align="center">
-              <h1 style="color:#ffffff;margin:0;font-size:24px;font-weight:700;letter-spacing:-0.5px;">New Event Announcement</h1>
-              <p style="color:#e6f0ff;margin:8px 0 0;font-size:16px;font-weight:400;opacity:0.95;">${event.title}</p>
-            </td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- Event Banner Image -->
-      ${event.bannerUrl ? `
-      <div style="width:100%;overflow:hidden;">
-        <img src="${event.bannerUrl}" alt="${event.title}" style="width:100%;height:auto;max-height:300px;object-fit:cover;display:block;" />
-      </div>
-      ` : ''}
-
-      <!-- Main Content -->
-      <div style="padding:35px 30px;">
-        <!-- Greeting -->
-        <table width="100%" border="0" cellspacing="0" cellpadding="0">
-          <tr>
-            <td>
-              <h2 style="color:#1e293b;margin:0 0 15px 0;font-size:20px;font-weight:600;">Dear ${user.firstName},</h2>
-              <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 25px 0;">
-                We are delighted to announce our upcoming event and extend a special invitation to you. 
-                This promises to be an exceptional opportunity for learning, networking, and growth.
-              </p>
-            </td>
-          </tr>
-        </table>
-
-        <!-- Event Details Card -->
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:25px;margin:25px 0;">
-          <table width="100%" border="0" cellspacing="0" cellpadding="0">
-            <tr>
-              <td>
-                <h3 style="color:#004aad;margin:0 0 20px 0;font-size:18px;font-weight:600;">📋 Event Overview</h3>
-              </td>
-            </tr>
-            <tr>
-              <td>
-                <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-                  <tr>
-                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
-                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Event:</td>
-                    <td style="padding:8px 0;color:#1e293b;font-size:14px;font-weight:600;">${event.title}</td>
-                  </tr>
-                  ${event.organizer ? `
-                  <tr>
-                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
-                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Organizer:</td>
-                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${event.organizer}</td>
-                  </tr>
-                  ` : ''}
-                  <tr>
-                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
-                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Date:</td>
-                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${new Date(event.startDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</td>
-                  </tr>
-                  ${event.startTime ? `
-                  <tr>
-                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
-                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Time:</td>
-                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${event.startTime}</td>
-                  </tr>
-                  ` : ''}
-                  <tr>
-                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
-                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Location:</td>
-                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${getEventLocationText(event)}</td>
-                  </tr>
-                  <tr>
-                    <td width="30" style="padding:8px 0;color:#64748b;font-size:14px;"></td>
-                    <td style="padding:8px 0;color:#475569;font-size:14px;font-weight:500;">Participation:</td>
-                    <td style="padding:8px 0;color:#1e293b;font-size:14px;">${event.price ? `$${event.price}` : "Complimentary"}</td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-          </table>
-        </div>
-
-        <!-- Event Description -->
-        ${event.description ? `
-        <div style="margin:25px 0;">
-          <h3 style="color:#004aad;margin:0 0 15px 0;font-size:16px;font-weight:600;">About This Event</h3>
-          <p style="color:#475569;font-size:14px;line-height:1.6;margin:0;">
-            ${event.description}
-          </p>
-        </div>
-        ` : ''}
-
-        <!-- CTA Button -->
-        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin:30px 0;">
-          <tr>
-            <td align="center">
-              <a href="${eventLink}" 
-                 style="background:linear-gradient(135deg,#004aad 0%,#0066cc 100%);color:#ffffff;padding:14px 35px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;display:inline-block;text-align:center;box-shadow:0 4px 6px -1px rgba(0,74,173,0.3);">
-                🎫 View Event Details & Register
-              </a>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding-top:12px;">
-              <p style="color:#64748b;font-size:13px;margin:0;">
-                Limited seats available • Early registration recommended
-              </p>
-            </td>
-          </tr>
-        </table>
-
-        <!-- Important Note -->
-        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:18px;margin:20px 0;">
-          <table width="100%" border="0" cellspacing="0" cellpadding="0">
-            <tr>
-              <td width="24" style="vertical-align:top;padding-right:12px;">
-                <span style="color:#ea580c;font-size:16px;"></span>
-              </td>
-              <td>
-                <p style="color:#9a3412;font-size:14px;line-height:1.5;margin:0;font-weight:500;">
-                  <strong>Pro Tip:</strong> Register early to secure your spot and receive event updates directly in your inbox.
-                </p>
-              </td>
-            </tr>
-          </table>
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div style="background:#1e293b;padding:30px;text-align:center;">
-        <!-- Logo -->
-        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom:20px;">
-          <tr>
-            <td align="center">
-              <img src="https://i.ibb.co/v6H3n86S/logo.png" alt="Team Eklavya Logo" style="max-height:40px;width:auto;opacity:0.9;" />
-            </td>
-          </tr>
-        </table>
-
-        <!-- Organization Info -->
-        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom:20px;">
-          <tr>
-            <td align="center">
-              <p style="color:#cbd5e1;font-size:14px;line-height:1.5;margin:0 0 10px 0;">
-                Empowering students through innovative events and learning opportunities
-              </p>
-            </td>
-          </tr>
-        </table>
-
-        <!-- Social Links -->
-        <table border="0" cellspacing="0" cellpadding="0" align="center" style="margin:0 auto 20px auto;">
-          <tr>
-            <td style="padding:0 8px;">
-              <a href="https://www.instagram.com/iteameklavya" target="_blank" style="display:block;">
-                <img src="https://cdn-icons-png.flaticon.com/512/2111/2111463.png" alt="Instagram" width="20" height="20" style="display:block;opacity:0.8;" />
-              </a>
-            </td>
-            <td style="padding:0 8px;">
-              <a href="https://x.com/iteameklavya" target="_blank" style="display:block;">
-                <img src="https://cdn-icons-png.flaticon.com/512/5968/5968830.png" alt="X" width="20" height="20" style="display:block;opacity:0.8;" />
-              </a>
-            </td>
-            <td style="padding:0 8px;">
-              <a href="https://www.linkedin.com/company/i-team-eklavya" target="_blank" style="display:block;">
-                <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" alt="LinkedIn" width="20" height="20" style="display:block;opacity:0.8;" />
-              </a>
-            </td>
-            <td style="padding:0 8px;">
-              <a href="https://chat.whatsapp.com/L7HvHNOatFbHIWM7EGBaaA" target="_blank" style="display:block;">
-                <img src="https://cdn-icons-png.flaticon.com/512/733/733585.png" alt="WhatsApp" width="20" height="20" style="display:block;opacity:0.8;" />
-              </a>
-            </td>
-          </tr>
-        </table>
-
-        <!-- Contact Info -->
-        <table width="100%" border="0" cellspacing="0" cellpadding="0">
-          <tr>
-            <td align="center">
-              <p style="color:#94a3b8;font-size:12px;line-height:1.4;margin:0;">
-                For any queries regarding this event, please contact the event organizer.<br />
-                <span style="color:#cbd5e1;">© ${new Date().getFullYear()} Team Eklavya. All rights reserved.</span>
-              </p>
-            </td>
-          </tr>
-        </table>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
-          `;
-
-          const textContent = `
-NEW EVENT ANNOUNCEMENT
-Team Eklavya
-
-Dear ${user.firstName},
-
-We are delighted to announce our upcoming event and extend a special invitation to you. 
-This promises to be an exceptional opportunity for learning, networking, and growth.
-
-EVENT DETAILS:
-──────────────
-  Event: ${event.title}
-${event.organizer ? `  Organizer: ${event.organizer}\n` : ''}  Date: ${new Date(event.startDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-${event.startTime ? `  Time: ${event.startTime}\n` : ''}  Location: ${getEventLocationText(event)}
-  Participation: ${event.price ? `$${event.price}` : "Complimentary"}
-
-${event.description ? `ABOUT THIS EVENT:\n${event.description}\n\n` : ''}
-VIEW EVENT & REGISTER:
-${eventLink}
-
-Limited seats available • Early registration recommended
-
- Pro Tip: Register early to secure your spot and receive event updates directly in your inbox.
-
-───
-Follow Team Eklavya:
-• Instagram: https://www.instagram.com/iteameklavya
-• X (Twitter): https://x.com/iteameklavya  
-• LinkedIn: https://www.linkedin.com/company/i-team-eklavya
-• WhatsApp: https://chat.whatsapp.com/L7HvHNOatFbHIWM7EGBaaA
-
-For any queries regarding this event, please contact the event organizer.
-
-© ${new Date().getFullYear()} Team Eklavya. All rights reserved.
-          `;
-
-          await sendEmail({
-            to: user.email,
-            subject: `🎉 New Event Announcement: ${event.title} - Team Eklavya`,
-            text: textContent,
-            html: htmlContent
-          });
-          
-          sentCount++;
-          return { email: user.email, status: 'sent' };
-        } catch (err) {
-          console.error(`Failed to send notification to ${user.email}:`, err);
-          failedCount++;
-          return { email: user.email, status: 'failed', error: err.message };
-        }
-      });
-
-      await Promise.all(batchPromises);
-      
-      // Small delay between batches to avoid rate limiting
-      if (i + batchSize < users.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+      await Promise.all(
+        batch.map(async (user) => {
+          try {
+            const { html, text } = templates.eventAnnouncement({ user, event, eventUrl });
+            await emailService.send({
+              to: user.email,
+              subject: `New event on EventHub: ${event.title}`,
+              html,
+              text,
+            });
+            sentCount++;
+          } catch (err) {
+            console.error(`Failed to notify ${user.email}:`, err.message);
+            failedCount++;
+          }
+        })
+      );
     }
 
-    res.json({ 
-      success: true, 
-      message: `Event notification completed: ${sentCount} sent, ${failedCount} failed`,
-      sentCount,
-      failedCount
-    });
+    // Mirror the email as an in-app notification (skip the sender themself)
+    await notifyMany(
+      users
+        .filter((u) => String(u._id) !== String(req.user.id))
+        .map((u) => ({ user: u._id, actor: req.user.id, type: "announcement", event: event._id }))
+    );
+
+    res.json({ success: true, message: `Notification sent: ${sentCount} sent, ${failedCount} failed`, sentCount, failedCount });
   } catch (error) {
     console.error("sendEventNotificationToAllUsers error:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -817,6 +577,7 @@ const generateRSVPToken = () => {
 };
 
 // Send RSVP to registered students with tickets
+// Send RSVP to registered students with tickets
 exports.sendRSVPWithVerification = async (req, res) => {
   try {
     const { eventId, userIds, customMessage } = req.body;
@@ -827,28 +588,19 @@ exports.sendRSVPWithVerification = async (req, res) => {
     if (!users.length) return res.status(404).json({ success: false, message: "No users found" });
 
     const results = [];
-    
-    for (let user of users) {
+
+    for (const user of users) {
       try {
-        // Find or create registration response
-        let registration = await RegistrationResponse.findOne({
-          eventId,
-          userId: user._id
-        });
+        let registration = await RegistrationResponse.findOne({ eventId, userId: user._id });
 
         if (!registration) {
-          // Create a new registration with pending status
           registration = await RegistrationResponse.create({
             eventId,
             userId: user._id,
-            answers: [],
-            status: 'pending',
             rsvpToken: generateRSVPToken(),
             rsvpVerificationExpires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-            source: 'admin'
           });
         } else {
-          // Update existing registration with new token
           registration.rsvpToken = generateRSVPToken();
           registration.rsvpVerificationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
           registration.rsvpVerified = false;
@@ -856,142 +608,36 @@ exports.sendRSVPWithVerification = async (req, res) => {
           await registration.save();
         }
 
-        // Generate verification link
-        const verificationLink = `${process.env.FRONTEND_URL || 'https://yourapp.com'}/rsvp/verify/${registration.rsvpToken}`;
+        const verificationLink = `${process.env.FRONTEND_URL}/rsvp/verify/${registration.rsvpToken}`;
+        const { html, text } = templates.rsvpVerification({ user, event, verificationLink, customMessage });
 
-        const htmlContent = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RSVP Confirmation - Team Eklavya</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fa;font-family:'Inter',Helvetica,Arial,sans-serif;">
-  <div style="width:100%;padding:0;background-color:#f5f7fa;">
-    <div style="max-width:600px;margin:0 auto;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,0.05);overflow:hidden;">
-      
-      <div style="background:#004aad;padding:20px 30px;text-align:center;">
-        <img src="https://www.teameklavya.xyz/logo.png" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
-        <h1 style="color:#fff;margin:0;font-size:22px;font-weight:600;">You're Invited!</h1>
-        <p style="color:#fff;margin:10px 0 0;font-size:16px;opacity:0.9;">${event.title}</p>
-      </div>
-
-      <div style="padding:30px;">
-        <h2 style="color:#004aad;margin-bottom:10px;">Hey ${user.firstName},</h2>
-        <p style="color:#333;font-size:15px;line-height:1.6;margin-bottom:25px;">
-          You are invited to <strong>${event.title}</strong>. Please confirm your attendance by clicking the button below.
-        </p>
-
-        ${customMessage ? `
-        <div style="background:#f8f9fb;padding:15px;border-radius:8px;margin:15px 0;border-left:4px solid #004aad;">
-          <p style="margin:0;color:#555;font-size:14px;"><strong>Note from organizer:</strong> ${customMessage}</p>
-        </div>
-        ` : ''}
-
-        <div style="background:#f0f9ff;padding:20px;border-radius:8px;margin:20px 0;border:2px solid #bae6fd;">
-          <h3 style="margin-top:0;color:#0369a1;">Event Details:</h3>
-          <p><strong>📅 Date:</strong> ${new Date(event.startDate).toLocaleDateString()}</p>
-          <p><strong>⏰ Time:</strong> ${event.startTime || 'To be announced'}</p>
-          ${getEventLocationHTML(event)}
-          <p><strong>👨‍💼 Organizer:</strong> ${event.organizer}</p>
-        </div>
-
-        <div style="text-align:center;margin:30px 0;">
-          <a href="${verificationLink}" 
-             style="background:#004aad;color:#fff;padding:14px 32px;text-decoration:none;border-radius:8px;font-weight:600;display:inline-block;font-size:16px;">
-            ✅ Confirm My Attendance
-          </a>
-          <p style="color:#666;font-size:13px;margin-top:10px;">
-            This link expires in 7 days
-          </p>
-        </div>
-
-        <div style="background:#f0fdf4;padding:15px;border-radius:6px;border-left:4px solid #10b981;">
-          <p style="margin:0;color:#065f46;font-size:14px;">
-            <strong>What happens next?</strong> After confirming, you'll receive your event ticket and further instructions.
-          </p>
-        </div>
-      </div>
-
-      <div style="background:#f8f9fb;text-align:center;padding:20px;">
-        <p style="color:#888;font-size:13px;margin:0;">Team Eklavya</p>
-        <p style="color:#aaa;font-size:12px;margin-top:5px;">If you have any questions, contact the event organizers.</p>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
-        `;
-
-        const textContent = `
-RSVP Invitation: ${event.title}
-
-Hey ${user.firstName},
-
-You are invited to ${event.title}. Please confirm your attendance by visiting the link below.
-
-Event Details:
-📅 Date: ${new Date(event.startDate).toLocaleDateString()}
-⏰ Time: ${event.startTime || 'To be announced'}
-${getEventLocationText(event)}
-👨‍💼 Organizer: ${event.organizer}
-
-${customMessage ? `Note from organizer: ${customMessage}\n` : ''}
-
-Confirm your attendance: ${verificationLink}
-
-This link expires in 7 days.
-
-What happens next? After confirming, you'll receive your event ticket and further instructions.
-
-Team Eklavya
-        `;
-
-        await sendEmail({
+        await emailService.send({
           to: user.email,
-          subject: `📧 RSVP Request: ${event.title}`,
-          text: textContent,
-          html: htmlContent
+          subject: `RSVP: ${event.title}`,
+          html,
+          text,
         });
 
-        // Update registration with RSVP sent status
         registration.rsvpSent = true;
         registration.rsvpSentAt = new Date();
         await registration.save();
 
-        results.push({ 
-          userId: user._id,
-          email: user.email, 
-          status: "sent",
-          message: "RSVP with verification link sent successfully"
-        });
+        results.push({ userId: user._id, email: user.email, status: "sent" });
       } catch (err) {
-        console.error(`Failed to send RSVP to ${user.email}:`, err);
-        results.push({ 
-          userId: user._id,
-          email: user.email, 
-          status: "failed", 
-          error: err.message 
-        });
+        console.error(`Failed to send RSVP to ${user.email}:`, err.message);
+        results.push({ userId: user._id, email: user.email, status: "failed", error: err.message });
       }
     }
-    
-    const successful = results.filter(r => r.status === 'sent').length;
-    const failed = results.filter(r => r.status === 'failed').length;
-    
-    res.json({ 
-      success: true, 
-      message: `RSVP process completed: ${successful} sent, ${failed} failed`,
-      results 
-    });
+
+    const successful = results.filter((r) => r.status === "sent").length;
+    const failed = results.filter((r) => r.status === "failed").length;
+    res.json({ success: true, message: `RSVP process completed: ${successful} sent, ${failed} failed`, results });
   } catch (error) {
     console.error("sendRSVPWithVerification error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Verify RSVP token
 exports.verifyRSVP = async (req, res) => {
   try {
     const { token } = req.params;
@@ -1293,5 +939,411 @@ exports.getEventsWithTicketStats = async (req, res) => {
   } catch (error) {
     console.error("Get events with ticket stats error:", error);
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Get public participants of an event (minimal fields — no emails)
+exports.getEventParticipants = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const responses = await RegistrationResponse.find({ eventId: id, status: 'confirmed' })
+      .populate('userId', 'firstName lastName profile')
+      .sort({ createdAt: 1 })
+      .limit(50)
+      .lean();
+
+    const participants = responses
+      .filter((r) => r.userId)
+      .map((r) => ({
+        _id: r.userId._id,
+        firstName: r.userId.firstName || 'Member',
+        lastName: r.userId.lastName ? `${r.userId.lastName[0]}.` : '',
+        avatar: r.userId.profile?.avatar || null,
+      }));
+
+    res.json({ success: true, participants, total: participants.length });
+  } catch (error) {
+    console.error("Get participants error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load participants" });
+  }
+};
+
+/*
+ * TRENDING (Part 3 §34) — deterministic, documented:
+ *   score = 2 × registrations + 1 × recent post engagement (likes + comments
+ *   on the event's posts in the last 30 days). Same data, same order —
+ *   no ML, no randomization. Pool: public upcoming/ongoing events.
+ */
+// GET /api/events/trending?limit=6
+exports.getTrendingEvents = async (req, res) => {
+  try {
+    const limit = Math.min(12, Math.max(1, parseInt(req.query.limit) || 6));
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+
+    const events = await Event.find({
+      visibility: "public",
+      endDate: { $gte: new Date(Date.now() - 24 * 3600 * 1000) },
+    })
+      .select("title slug bannerUrl category venue eventType startDate endDate price isFeatured")
+      .sort({ createdAt: -1 })
+      .limit(80)
+      .lean();
+    if (!events.length) return res.json({ success: true, events: [] });
+
+    const [regAgg, likeAgg, commentAgg] = await Promise.all([
+      RegistrationResponse.aggregate([{ $group: { _id: "$eventId", count: { $sum: 1 } } }]),
+      Reaction.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        { $lookup: { from: "posts", localField: "post", foreignField: "_id", as: "pd" } },
+        { $unwind: "$pd" },
+        { $match: { "pd.event": { $ne: null } } },
+        { $group: { _id: "$pd.event", count: { $sum: 1 } } },
+      ]),
+      Comment.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        { $lookup: { from: "posts", localField: "post", foreignField: "_id", as: "pd" } },
+        { $unwind: "$pd" },
+        { $match: { "pd.event": { $ne: null } } },
+        { $group: { _id: "$pd.event", count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const regMap = new Map(regAgg.map((r) => [String(r._id), r.count]));
+    const likeMap = new Map(likeAgg.map((r) => [String(r._id), r.count]));
+    const commentMap = new Map(commentAgg.map((r) => [String(r._id), r.count]));
+
+    const scored = events
+      .map((e) => {
+        const id = String(e._id);
+        const regs = regMap.get(id) || 0;
+        const engagement = (likeMap.get(id) || 0) + (commentMap.get(id) || 0);
+        return { ...e, participantCount: regs, trendScore: regs * 2 + engagement };
+      })
+      .sort((a, b) => b.trendScore - a.trendScore || +new Date(a.startDate) - +new Date(b.startDate))
+      .slice(0, limit);
+
+    res.json({ success: true, events: scored });
+  } catch (error) {
+    console.error("Trending events error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load trending events" });
+  }
+};
+
+/*
+ * EVENT INTEREST (Part 3, Phase 5)
+ * "Interested" is a lightweight, public soft-follow on an event — distinct
+ * from registration. Interested users receive event update notifications.
+ */
+// GET /api/events/:id/interest — real state for the CTA (count + mine + preview)
+exports.getEventInterest = async (req, res) => {
+  try {
+    const eventId = req.params.id;
+    const event = await Event.findById(eventId).select("visibility createdBy").lean();
+    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+
+    // Private events are invisible to non-managers — never reveal interest data
+    if (event.visibility === "private") {
+      const authorized = await canManageEvent(req.user, { _id: eventId });
+      if (!authorized) return res.status(404).json({ success: false, message: "Event not found" });
+    }
+
+    const [count, mine, preview] = await Promise.all([
+      EventInterest.countDocuments({ event: eventId }),
+      req.user ? EventInterest.findOne({ event: eventId, user: req.user.id }).lean() : null,
+      EventInterest.find({ event: eventId })
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .populate("user", "firstName lastName username profile.avatar")
+        .lean(),
+    ]);
+
+    res.json({
+      success: true,
+      count,
+      interested: Boolean(mine),
+      preview: preview.map((p) => p.user).filter(Boolean),
+    });
+  } catch (error) {
+    console.error("Get event interest error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load interest" });
+  }
+};
+
+// POST /api/events/:id/interest — toggle (requireAuth)
+exports.toggleEventInterest = async (req, res) => {
+  try {
+    const eventId = req.params.id;
+    const event = await Event.findById(eventId).select("visibility removedAt");
+    if (!event || event.removedAt) return res.status(404).json({ success: false, message: "Event not found" });
+
+    if (event.visibility === "private") {
+      const authorized = await canManageEvent(req.user, event);
+      if (!authorized) return res.status(404).json({ success: false, message: "Event not found" });
+    }
+
+    const existing = await EventInterest.findOne({ event: eventId, user: req.user.id });
+    if (existing) {
+      await existing.deleteOne();
+      const count = await EventInterest.countDocuments({ event: eventId });
+      return res.json({ success: true, interested: false, count });
+    }
+
+    await EventInterest.create({ event: eventId, user: req.user.id });
+    const count = await EventInterest.countDocuments({ event: eventId });
+    res.json({ success: true, interested: true, count });
+  } catch (error) {
+    console.error("Toggle event interest error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to update interest" });
+  }
+};
+
+/*
+ * FOR-YOU EVENTS (Part 3, Phase 5) — deterministic, no ML:
+ *   +4  events by organizations I follow
+ *   +2  events by organizations behind events I registered for
+ *   +3  event category matches one of my profile interests
+ * Excluded: events I already registered for, private/unlisted events,
+ * events already past, and events whose capacity is full.
+ * Tie-break: earliest start date, then id — stable across requests.
+ */
+// GET /api/events/for-you?limit=6 (requireAuth)
+exports.getEventsForYou = async (req, res) => {
+  try {
+    const me = req.user.id;
+    const limit = Math.min(12, Math.max(1, parseInt(req.query.limit) || 6));
+
+    const [meDoc, myRegs, orgFollows] = await Promise.all([
+      User.findById(me).select("interests").lean(),
+      RegistrationResponse.find({ userId: me }).select("eventId").lean(),
+      OrgFollow.find({ user: me }).select("organization").lean(),
+    ]);
+
+    const registeredIds = myRegs.map((r) => r.eventId);
+    const followedOrgSet = new Set(orgFollows.map((f) => String(f.organization)));
+
+    // Orgs behind my registered events (frequent organizer of my events)
+    const regEventOrgs = await Event.find({ _id: { $in: registeredIds }, organization: { $ne: null } })
+      .select("organization")
+      .lean();
+    const regOrgSet = new Set(regEventOrgs.map((e) => String(e.organization)));
+
+    const interests = new Set((meDoc?.interests || []).map((t) => String(t).toLowerCase()));
+
+    // Candidate pool: public, not over, not already mine — latest 120
+    const candidates = await Event.find({
+      visibility: "public",
+      endDate: { $gte: new Date(Date.now() - 24 * 3600 * 1000) },
+      ...(registeredIds.length ? { _id: { $nin: registeredIds } } : {}),
+    })
+      .sort({ createdAt: -1 })
+      .limit(120)
+      .select("title slug bannerUrl description category eventType venue platform startDate endDate price maxAttendees isFeatured organization")
+      .populate("organization", "name slug logoUrl")
+      .lean();
+
+    // Real registration counts for capacity + display
+    const counts = await RegistrationResponse.aggregate([
+      { $match: { eventId: { $in: candidates.map((c) => c._id) } } },
+      { $group: { _id: "$eventId", count: { $sum: 1 } } },
+    ]);
+    const countMap = new Map(counts.map((c) => [String(c._id), c.count]));
+
+    const scored = candidates
+      .filter((e) => {
+        const n = countMap.get(String(e._id)) || 0;
+        return !(e.maxAttendees && e.maxAttendees > 0 && n >= e.maxAttendees); // drop full events
+      })
+      .map((e) => {
+        const orgId = e.organization ? String(e.organization._id) : null;
+        let score = 0;
+        if (orgId && followedOrgSet.has(orgId)) score += 4;
+        if (orgId && regOrgSet.has(orgId)) score += 2;
+        if (interests.has(String(e.category || "").toLowerCase())) score += 3;
+        return { e, score, participants: countMap.get(String(e._id)) || 0 };
+      });
+
+    scored.sort(
+      (a, b) => b.score - a.score || String(a.e.startDate).localeCompare(String(b.e.startDate)) || String(a.e._id).localeCompare(String(b.e._id))
+    );
+
+    const events = scored.slice(0, limit).map(({ e, score, participants }) => ({
+      ...e,
+      participantCount: participants,
+      forYouScore: score,
+    }));
+    res.json({ success: true, events });
+  } catch (error) {
+    console.error("For-you events error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load events for you" });
+  }
+};
+
+/* ── Event analytics for organizers (Part 3, Phase 11) ─────── */
+
+// GET /api/events/:id/analytics — registration timeline, interest,
+// check-in summary and top posts (organizer/admin only)
+exports.getEventAnalytics = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const event = await Event.findById(id).select("_id title createdBy startDate registrationsCount");
+    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    if (!(await canManageEvent(req.user, event))) {
+      return res.status(403).json({ success: false, message: "You can't view analytics for this event" });
+    }
+
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [totalRegistrations, checkedInTickets, totalTickets, interestCount, timelineAgg, topPostDocs] =
+      await Promise.all([
+        RegistrationResponse.countDocuments({ eventId: id }),
+        Ticket.countDocuments({ eventId: id, checkedIn: true }),
+        Ticket.countDocuments({ eventId: id }),
+        EventInterest.countDocuments({ event: id }),
+        // Daily registration counts for the last 30 days
+        RegistrationResponse.aggregate([
+          { $match: { eventId: new mongoose.Types.ObjectId(id), createdAt: { $gte: since } } },
+          {
+            $group: {
+              _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ]),
+        // Posts attached to this event → engagement below
+        Post.find({ event: id, status: "published" })
+          .select("content author createdAt")
+          .sort({ createdAt: -1 })
+          .limit(20)
+          .populate("author", "firstName lastName username profile")
+          .lean(),
+      ]);
+
+    // Engagement for those posts (likes + comments per post)
+    const postIds = topPostDocs.map((p) => p._id);
+    const Reaction = require("../models/reaction.model");
+    const Comment = require("../models/comment.model");
+    const [likeAgg, commentAgg] = await Promise.all([
+      Reaction.aggregate([
+        { $match: { post: { $in: postIds } } },
+        { $group: { _id: "$post", count: { $sum: 1 } } },
+      ]),
+      Comment.aggregate([
+        { $match: { post: { $in: postIds }, removedAt: null } },
+        { $group: { _id: "$post", count: { $sum: 1 } } },
+      ]),
+    ]);
+    const likeMap = new Map(likeAgg.map((r) => [String(r._id), r.count]));
+    const commentMap = new Map(commentAgg.map((r) => [String(r._id), r.count]));
+    const topPosts = topPostDocs
+      .map((p) => ({
+        _id: p._id,
+        content: String(p.content || "").slice(0, 160),
+        author: p.author,
+        createdAt: p.createdAt,
+        likes: likeMap.get(String(p._id)) || 0,
+        comments: commentMap.get(String(p._id)) || 0,
+      }))
+      .sort((a, b) => b.likes + b.comments - (a.likes + a.comments))
+      .slice(0, 5);
+
+    res.json({
+      success: true,
+      analytics: {
+        summary: {
+          registrations: totalRegistrations,
+          tickets: totalTickets,
+          checkedIn: checkedInTickets,
+          checkInRate: totalTickets > 0 ? Math.round((checkedInTickets / totalTickets) * 100) : 0,
+          interested: interestCount,
+        },
+        timeline: timelineAgg.map((d) => ({ day: d._id, count: d.count })),
+        topPosts,
+      },
+    });
+  } catch (error) {
+    console.error("Event analytics error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load analytics" });
+  }
+};
+
+/* ── Live engine settings (Part 4, Phase 1 — spec §74) ────── */
+
+// GET /api/events/:id/live-settings (organizer)
+exports.getLiveSettings = async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id).select("liveSettings joinCode liveState");
+    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    if (!(await canManageEvent(req.user, event))) {
+      return res.status(403).json({ success: false, message: "You can't manage this event" });
+    }
+    res.json({ success: true, liveSettings: event.liveSettings, joinCode: event.joinCode, liveState: event.liveState });
+  } catch (error) {
+    console.error("Get live settings error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load live settings" });
+  }
+};
+
+// PUT /api/events/:id/live-settings — whitelisted fields only, server-validated
+exports.updateLiveSettings = async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id).select("liveSettings joinCode");
+    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    if (!(await canManageEvent(req.user, event))) {
+      return res.status(403).json({ success: false, message: "You can't manage this event" });
+    }
+
+    const b = req.body || {};
+    const s = event.liveSettings || {};
+    const BOOL_FIELDS = ["allowLateJoin", "requireRegistration", "requireCheckIn", "allowAnswerChanges", "chatEnabled", "qaEnabled", "pollsEnabled", "teamMode", "requireFullScreen"];
+    BOOL_FIELDS.forEach((f) => {
+      if (typeof b[f] === "boolean") s[f] = b[f];
+    });
+    if (["never", "every_question", "every_n", "after_activity", "checkpoints", "final"].includes(b.leaderboardVisibility)) {
+      s.leaderboardVisibility = b.leaderboardVisibility;
+    }
+    if (Number.isInteger(Number(b.leaderboardInterval)) && Number(b.leaderboardInterval) >= 1 && Number(b.leaderboardInterval) <= 50) {
+      s.leaderboardInterval = Number(b.leaderboardInterval);
+    }
+    if (b.scoring && typeof b.scoring === "object") {
+      const sc = s.scoring || {};
+      const NUM_FIELDS = ["basePoints", "speedBonus", "negativeMarking"];
+      NUM_FIELDS.forEach((f) => {
+        const v = Number(b.scoring[f]);
+        if (Number.isFinite(v) && v >= 0 && v <= 10000) sc[f] = v;
+      });
+      if (typeof b.scoring.partialScoring === "boolean") sc.partialScoring = b.scoring.partialScoring;
+      if (typeof b.scoring.questionWeighting === "boolean") sc.questionWeighting = b.scoring.questionWeighting;
+      s.scoring = sc;
+    }
+    event.liveSettings = s;
+    await event.save();
+    res.json({ success: true, liveSettings: event.liveSettings, joinCode: event.joinCode });
+  } catch (error) {
+    console.error("Update live settings error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to update live settings" });
+  }
+};
+
+// POST /api/events/:id/join-code/regenerate (organizer)
+exports.regenerateJoinCode = async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id).select("joinCode");
+    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    if (!(await canManageEvent(req.user, event))) {
+      return res.status(403).json({ success: false, message: "You can't manage this event" });
+    }
+    // unique index retry — collisions are ~1 in a billion, but be exact
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      event.regenerateJoinCode();
+      try {
+        await event.save();
+        return res.json({ success: true, joinCode: event.joinCode });
+      } catch (err) {
+        if (attempt === 2 || String(err.code) !== "11000") throw err;
+      }
+    }
+  } catch (error) {
+    console.error("Regenerate join code error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to regenerate join code" });
   }
 };

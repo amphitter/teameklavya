@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://www.teameklavya.xyz/sitemap.xml
+# Update the sitemap host to your production domain when deploying
+Sitemap: /sitemap.xml

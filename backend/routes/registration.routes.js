@@ -1,41 +1,27 @@
 const express = require("express");
+// Part 5, Phase 2 — registration bucket + double-submit guard (§24, §28)
+const { limiters } = require("../config/rate-limits");
+const { idempotencyWindow } = require("../middleware/idempotency");
+
 const router = express.Router();
 const registrationController = require("../controllers/registration.controller");
-const { requireAuth, requireAdmin } = require("../middleware/auth.middleware");
-const RegistrationResponse = require("../models/registrationResponse.model");
+const { requireAuth, requireAdmin, optionalUser } = require("../middleware/auth.middleware");
 
-// Public: get form to show on website
-router.get("/form/:eventId", registrationController.getForm);
+// Public: get registration form for an event
+router.get("/form/:eventId", optionalUser, registrationController.getForm);
 
 // User routes
-router.post("/responses", requireAuth, registrationController.submitResponse);
+router.post("/responses", requireAuth, idempotencyWindow, limiters.event, registrationController.submitResponse);
 router.get("/responses/status/:eventId", requireAuth, registrationController.getRegistrationStatus);
+router.get("/user/events", requireAuth, registrationController.getUserEvents);
+
+// Public: registration counts only (no personal data) — used by public event cards
+router.post("/responses/counts/batch", registrationController.getRegistrationCounts);
+router.get("/responses/:eventId/count", registrationController.getRegistrationCount);
 
 // Admin routes
 router.get("/responses/:eventId", requireAuth, requireAdmin, registrationController.getEventResponses);
 router.get("/responses/:eventId/export", requireAuth, requireAdmin, registrationController.exportRegistrations);
-router.get("/responses/:eventId/count", requireAuth, registrationController.getRegistrationCount);
-router.post("/responses/counts/batch", requireAuth, registrationController.getRegistrationCounts);
 router.get("/responses/:id/stats", requireAuth, requireAdmin, registrationController.getRegistrationStats);
-
-// User events route
-router.get("/user/events", requireAuth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    
-    console.log("🔍 Fetching user events via registration route for user:", userId);
-    
-    const responses = await RegistrationResponse.find({ userId })
-      .populate("eventId")
-      .sort({ createdAt: -1 });
-
-    const events = responses.map(response => response.eventId);
-
-    res.json({ success: true, events });
-  } catch (error) {
-    console.error("Get user events error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
 
 module.exports = router;

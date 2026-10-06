@@ -8,4 +8,5 @@ router.get("/users", requireAuth, requireAdmin, adminController.getAllUsers);
 router.get("/users/export", requireAuth, requireAdmin, adminController.exportUsersCSV);
 router.get("/events", requireAuth, requireAdmin, adminController.getAdminEvents);
 router.get("/activity", requireAuth, requireAdmin, adminController.getRecentActivity);
+router.get("/analytics", requireAuth, requireAdmin, adminController.getAnalytics);
 module.exports = router;

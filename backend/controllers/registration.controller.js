@@ -1,6 +1,7 @@
 const RegistrationForm = require("../models/registrationForm.model");
 const RegistrationResponse = require("../models/registrationResponse.model");
 const Event = require("../models/event.model");
+const { notify } = require("../services/notification.service");
 const User = require("../models/user.model");
 const Ticket = require("../models/ticket.model");
 const ticketService = require("../services/ticket.service");
@@ -33,8 +34,18 @@ exports.getForm = async (req, res) => {
     const { eventId } = req.params;
     const event = await Event.findById(eventId);
     
-    if (!event) {
+    // Moderation takedowns (Part 3, Phase 10) accept no new registrations
+    if (!event || event.removedAt) {
       return res.status(404).json({ message: "Event not found" });
+    }
+
+    // Private events: only the organizer/admin may fetch the form
+    if (event.visibility === "private") {
+      const { canManageEvent } = require("../middleware/auth.middleware");
+      const authorized = await canManageEvent(req.user, event);
+      if (!authorized) {
+        return res.status(404).json({ message: "Event not found" });
+      }
     }
 
     // Use event's registrationForm if it exists
@@ -115,10 +126,21 @@ exports.submitResponse = async (req, res) => {
     const userId = req.user.id;
 
     const event = await Event.findById(eventId);
-    if (!event) return res.status(404).json({ message: "Event not found" });
+    // Moderation takedown (Part 3, Phase 10): no new registrations
+    if (!event || event.removedAt) return res.status(404).json({ message: "Event not found" });
 
     const existing = await RegistrationResponse.findOne({ eventId, userId });
     if (existing) return res.status(400).json({ message: "Already registered for this event" });
+
+    // Private events are invite-only: participants are added by the organizer
+    // (e.g. via RSVP). Self-registration is not allowed unless already invited.
+    if (event.visibility === "private") {
+      const { canManageEvent } = require("../middleware/auth.middleware");
+      const authorized = await canManageEvent(req.user, event);
+      if (!authorized) {
+        return res.status(403).json({ message: "This event is invite-only" });
+      }
+    }
 
     // Check if event has reached max attendees
     const registrationCount = await RegistrationResponse.countDocuments({ eventId });
@@ -132,6 +154,11 @@ exports.submitResponse = async (req, res) => {
       answers,
       status: 'confirmed'
     });
+
+    // Let the organizer know someone signed up
+    notify({ user: event.createdBy, actor: userId, type: "event_registration", event: event._id });
+    // Achievements: event_explorer (first real registration)
+    require("../services/achievement.service").checkAchievements(userId);
 
     // Generate ticket based on event settings
     if (event.ticketSettings?.autoGenerate) {
@@ -228,11 +255,15 @@ exports.getRegistrationStats = async (req, res) => {
       { $sort: { "_id.date": 1 } }
     ]);
 
-    const sourceBreakdown = {
-      web: Math.floor(totalRegistrations * 0.7),
-      mobile: Math.floor(totalRegistrations * 0.25),
-      other: totalRegistrations - Math.floor(totalRegistrations * 0.7) - Math.floor(totalRegistrations * 0.25)
-    };
+    const sourceAgg = await RegistrationResponse.aggregate([
+      { $match: { eventId: new mongoose.Types.ObjectId(id) } },
+      { $group: { _id: "$source", count: { $sum: 1 } } },
+    ]);
+    const sourceBreakdown = { web: 0, mobile: 0, admin: 0 };
+    sourceAgg.forEach((row) => {
+      const key = row._id || "web";
+      sourceBreakdown[key] = (sourceBreakdown[key] || 0) + row.count;
+    });
 
     res.json({
       success: true,
@@ -397,6 +428,24 @@ exports.createForm = async (req, res) => {
 
     res.status(201).json({ success: true, form });
   } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+// Get the events a user has registered for
+exports.getUserEvents = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const responses = await RegistrationResponse.find({ userId })
+      .populate("eventId")
+      .sort({ createdAt: -1 });
+
+    const events = responses
+      .map((response) => response.eventId)
+      .filter(Boolean);
+
+    res.json({ success: true, events });
+  } catch (error) {
+    console.error("Get user events error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

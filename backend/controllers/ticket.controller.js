@@ -6,9 +6,8 @@ const Event = require("../models/event.model");
 const RegistrationResponse = require("../models/registrationResponse.model");
 const User = require("../models/user.model");
 const { generateToken } = require("../utils/crypto");
-const { sendEmailWithAttachment } = require("../utils/email");
-const path = require("path");
-const fs = require("fs");
+const emailService = require("../services/email.service");
+const templates = require("../services/emailTemplates");
 
 // Generate a new event ticket
 exports.generateTicket = async (req, res) => {
@@ -256,167 +255,27 @@ exports.sendTicketToUser = async (req, res) => {
 };
 
 // Send ticket email helper function
+// Send ticket email (QR attached) — called internally & by admin routes
 exports.sendTicketEmail = async (ticket, user, event) => {
   try {
-    // Convert base64 QR to buffer
     const qrBuffer = Buffer.from(ticket.qrCode.split(",")[1], "base64");
-        const eventDate = event.startDate 
-  ? new Date(event.startDate).toLocaleDateString("en-IN", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    })
-  : "TBA";
+    const { html, text } = templates.ticketEmail({ user, event, ticket });
 
-    const htmlContent = `
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${event.title} - Ticket Confirmation</title>
-  </head>
-  <body style="margin: 0; padding: 0; background-color: #f5f7fa; font-family: 'Inter', Helvetica, Arial, sans-serif;">
-    
-    <!-- Hidden Preheader (for inbox preview) -->
-    <div style="display:none; max-height:0; overflow:hidden; opacity:0;">
-      Your ticket confirmation for ${event.title}. Show this QR code at entry.
-    </div>
-
-    <!-- Outer Container -->
-    <div style="width: 100%; padding: 0px 0px; background-color: #f5f7fa;">
-      <div style="max-width: 600px; width: 100%; margin: 0 auto; background: #ffffff; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
-
-        <!-- Header -->
-        <div style="background: #004aad; padding: 20px 30px; text-align: center;">
-          <img src="https://i.ibb.co/v6H3n86S/logo.png" alt="Team Eklavya Logo" style="max-height: 55px; margin-bottom: 10px;" />
-          <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 600;">${event.title}</h1>
-        </div>
-
-        <!-- Body -->
-        <div style="padding: 30px;">
-          <h2 style="color: #004aad; margin-bottom: 10px;">Hey ${user.firstName} ${user.lastName},</h2>
-          <p style="color: #333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
-            Thanks for confirming your participation in <strong>${event.title}</strong>!<br/>
-            You're all set to attend. Please show the QR code below at check-in.
-          </p>
-
-          <!-- QR Code -->
-          <div style="text-align: center; margin: 30px 0;">
-            <img 
-              src="cid:qrCodeImage" 
-              alt="QR Code" 
-              style="width: 160px; height: 160px; border: 5px solid #e6f0ff; border-radius: 10px; background: #fff;"
-            />
-            <p style="color: #777; font-size: 13px; margin-top: 10px;">Scan this QR code at the event entrance</p>
-          </div>
-
-          <!-- Event Details -->
-          <div style="background: #f0f6ff; border-left: 4px solid #004aad; padding: 15px 20px; border-radius: 6px; margin-bottom: 25px;">
-            <h3 style="margin: 0 0 10px; color: #004aad; font-size: 16px;">Event Details</h3>
-            <p style="margin: 0; color: #333; font-size: 14px;"><strong>Date:</strong> ${eventDate}</p>
-            <p style="margin: 0; color: #333; font-size: 14px;"><strong>Time:</strong> ${event.startTime || 'TBA'}</p>
-            <p style="margin: 0; color: #333; font-size: 14px;"><strong>Venue:</strong> ${event.venue}</p>
-          </div>
-
-          <!-- Ticket Button -->
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="http://localhost:3000/user/profile?tab=tickets" 
-              style="background: #004aad; color: #fff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
-              🎫 View Your Ticket
-            </a>
-          </div>
-
-          <p style="color: #555; font-size: 13px; text-align: center; margin: 0;">
-            Note: Each attendee must RSVP and check-in individually.
-          </p>
-        </div>
-
-        <!-- Footer -->
-        <div style="background: #f8f9fb; text-align: center; padding: 20px;">
-          <p style="color: #888; font-size: 13px; margin-bottom: 10px;">Follow us for updates</p>
-
-          <!-- Social Media Links -->
-          <table role="presentation" align="center" style="margin: 0 auto 15px auto;">
-            <tr>
-              <td style="padding: 0 6px;">
-                <a href="https://www.instagram.com/iteameklavya" target="_blank">
-                  <img src="https://cdn-icons-png.flaticon.com/512/2111/2111463.png" alt="Instagram" width="24" height="24" style="display: block;">
-                </a>
-              </td>
-              <td style="padding: 0 6px;">
-                <a href="https://x.com/iteameklavya" target="_blank">
-                  <img src="https://cdn-icons-png.flaticon.com/512/5968/5968830.png" alt="X" width="24" height="24" style="display: block;">
-                </a>
-              </td>
-              <td style="padding: 0 6px;">
-                <a href="https://www.linkedin.com/company/i-team-eklavya" target="_blank">
-                  <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" alt="LinkedIn" width="24" height="24" style="display: block;">
-                </a>
-              </td>
-              <td style="padding: 0 6px;">
-                <a href="https://chat.whatsapp.com/L7HvHNOatFbHIWM7EGBaaA" target="_blank">
-                  <img src="https://cdn-icons-png.flaticon.com/512/733/733585.png" alt="WhatsApp" width="24" height="24" style="display: block;">
-                </a>
-              </td>
-            </tr>
-          </table>
-
-          <p style="color: #888; font-size: 13px; margin: 0;">Team Eklavya</p>
-          <p style="color: #aaa; font-size: 12px; margin-top: 5px;">If you have any questions, contact the event organizers.</p>
-        </div>
-
-      </div>
-    </div>
-
-  </body>
-</html>
-`;
-
-    const textContent = `
-Hello ${user.firstName},
-
-Your ticket for ${event.title} has been generated successfully!
-
-Event Details:
-Date: ${new Date(event.startDate).toLocaleDateString()}
-Time: ${event.startTime || 'To be announced'}
-Venue: ${event.venue}
-Ticket ID: ${ticket.token}
-
-Please present the QR code at the event entrance.
-
-Important: Please keep this ticket safe.
-
-If you have any questions, please contact the event organizer.
-
-Team Eklavya
-`;
-
-    await sendEmailWithAttachment({
+    await emailService.send({
       to: user.email,
-      subject: `Your Ticket for ${event.title}`,
-      text: textContent,
-      html: htmlContent,
-      attachments: [
-        {
-          filename: 'ticket.png',
-          content: qrBuffer,
-          cid: 'qrCodeImage'
-        }
-      ]
+      subject: `Your ticket for ${event.title}`,
+      html,
+      text,
+      attachments: [{ filename: "ticket.png", content: qrBuffer, cid: "qrCodeImage" }],
     });
-  
 
-    console.log(`✅ Ticket email sent to ${user.email}`);
+    console.log(`Ticket email sent to ${user.email}`);
   } catch (error) {
-    console.error("❌ Failed to send ticket email:", error);
+    console.error("Failed to send ticket email:", error.message);
     throw error;
   }
 };
 
-// Generate tickets for all registered users of an event (admin only)
 exports.generateTicketsForAllRegistered = async (req, res) => {
   try {
     const { eventId, sendEmail = true } = req.body;
@@ -835,19 +694,3 @@ exports.getUserTickets = async (req, res) => {
   }
 };
 
-// Download ticket as image
-exports.downloadTicket = async (req, res) => {
-  try {
-    const { filename } = req.params;
-    const filePath = path.join(__dirname, "../tickets", filename);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ message: "Ticket file not found" });
-    }
-
-    res.download(filePath);
-  } catch (error) {
-    console.error("Download ticket error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};

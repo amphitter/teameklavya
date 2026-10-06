@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 
 type Theme = "light" | "dark";
 
@@ -13,19 +13,30 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("theme") as Theme | null;
-      if (stored) return stored;
-      return window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-    }
-    return "light";
-  });
+  // SSR-stable initial value — the persisted/system theme is adopted AFTER
+  // hydration. Reading localStorage during the first render makes server
+  // HTML ≠ client HTML (hydration mismatch: Moon vs Sun icon, aria-label…).
+  const [theme, setThemeState] = useState<Theme>("light");
+  const hydratedRef = useRef(false);
 
-  // Set theme on document
+  // Adopt the stored/system theme once, after mount. The inline pre-paint
+  // script in app/layout.tsx has already set the correct class on <html>.
   useEffect(() => {
+    const stored = localStorage.getItem("theme");
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const initial: Theme =
+      stored === "dark" || stored === "light" ? stored : systemDark ? "dark" : "light";
+    hydratedRef.current = true;
+    if (initial !== theme) setThemeState(initial);
+    // keep the class in sync even when the adopted theme equals the default
+    document.documentElement.classList.toggle("dark", initial === "dark");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist + apply on every theme change AFTER adoption — the first pass
+  // must not clobber the pre-paint state written by the inline script.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
     document.documentElement.classList.toggle("dark", theme === "dark");
     localStorage.setItem("theme", theme);
   }, [theme]);

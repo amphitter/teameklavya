@@ -1,35 +1,150 @@
 @import "tailwindcss";
-@import "slick-carousel/slick/slick.css";
-@import "slick-carousel/slick/slick-theme.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Class-based dark mode (ThemeContext toggles .dark on <html>) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ══════════════════════════════════════════════════════════
+   EVENTHUB DESIGN SYSTEM — light-first
+   Brand extracted from the EventHub logo:
+   navy #102030 · blue #0070f0 · purple #5030f0 · cyan #10b0f0
+   ══════════════════════════════════════════════════════════ */
+@theme {
+  /* Brand palette */
+  --color-brand: #0070f0;
+  --color-brand-dark: #005ac4;
+  --color-brand-light: #e8f2fe;
+  --color-purple: #5030f0;
+  --color-purple-light: #efecfe;
+  --color-cyan: #10b0f0;
+  --color-navy: #102030;
+
+  /* Semantic tokens (shadcn-compatible) */
+  --color-background: #ffffff;
+  --color-foreground: #102030;
+  --color-card: #ffffff;
+  --color-card-foreground: #102030;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #102030;
+  --color-primary: #0070f0;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #eef4fc;
+  --color-secondary-foreground: #102030;
+  --color-muted: #f4f6fa;
+  --color-muted-foreground: #5b6675;
+  --color-accent: #eef4fc;
+  --color-accent-foreground: #102030;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-success: #16a34a;
+  --color-success-light: #e8f9ee;
+  --color-warning: #d97706;
+  --color-warning-light: #fdf3e3;
+  --color-border: #e5e9f2;
+  --color-input: #d8dfec;
+  --color-ring: #0070f0;
+
+  /* Radius — clean, not overly rounded */
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.875rem;
+
+  /* Typography */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ── Dark mode — designed, not inverted ────────────────────
+   Deep navy surfaces, brighter brand for contrast,
+   tinted state surfaces instead of light pastels. */
+.dark {
+  --color-background: #0a111c;
+  --color-foreground: #e6ecf5;
+  --color-card: #101b2b;
+  --color-card-foreground: #e6ecf5;
+  --color-popover: #131f30;
+  --color-popover-foreground: #e6ecf5;
+  --color-primary: #4b95f7;
+  --color-primary-foreground: #08101d;
+  --color-secondary: #182740;
+  --color-secondary-foreground: #e6ecf5;
+  --color-muted: #172438;
+  --color-muted-foreground: #8fa0b5;
+  --color-accent: #182740;
+  --color-accent-foreground: #e6ecf5;
+  --color-destructive: #f05252;
+  --color-destructive-foreground: #08101d;
+  --color-success: #34c977;
+  --color-success-light: #0f2a1d;
+  --color-warning: #f5a623;
+  --color-warning-light: #2f230e;
+  --color-border: #223349;
+  --color-input: #2a3d57;
+  --color-ring: #4b95f7;
+  --color-navy: #e6ecf5;
+  --color-brand: #4b95f7;
+  --color-brand-dark: #2b7be8;
+  --color-brand-light: #142a45;
+  --color-purple: #8f7bff;
+  --color-purple-light: #1e1c3f;
+  --color-cyan: #3ec4f5;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ── Base ───────────────────────────────────────────────── */
+* {
+  border-color: var(--color-border);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
+
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+/* ── Signature utilities (used sparingly) ───────────────── */
+.text-gradient {
+  background: linear-gradient(100deg, #0070f0 0%, #5030f0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Subtle dotted texture for hero sections */
+.bg-dots {
+  background-image: radial-gradient(color-mix(in srgb, var(--color-primary) 14%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Thin, unobtrusive scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent);
+  border-radius: 8px;
+  border: 3px solid var(--color-background);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ── Animations (subtle, professional) ──────────────────── */
 @keyframes fade-in-up {
   from {
     opacity: 0;
-    transform: translateY(30px);
+    transform: translateY(14px);
   }
   to {
     opacity: 1;
@@ -37,26 +152,54 @@ body {
   }
 }
 
-@keyframes float {
-  0%, 100% {
-    transform: translateY(0px);
+.animate-fade-in-up {
+  animation: fade-in-up 0.5s ease-out both;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted) 0%,
+    color-mix(in srgb, var(--color-muted) 55%, var(--color-foreground)) 50%,
+    var(--color-muted) 100%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+/* Live indicator pulse — used for LIVE states only */
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
   }
   50% {
-    transform: translateY(-10px);
+    opacity: 0.45;
   }
 }
-
-.animate-fade-in-up {
-  animation: fade-in-up 0.6s ease-out forwards;
+.animate-live-pulse {
+  animation: live-pulse 1.6s ease-in-out infinite;
 }
 
-.animate-float {
-  animation: float 3s ease-in-out infinite;
-}
-
+/* Legacy helpers still referenced during migration */
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

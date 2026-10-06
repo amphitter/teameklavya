@@ -3,7 +3,24 @@ const mongoose = require('mongoose');
 const profileSchema = new mongoose.Schema({
   institution: { type: String, default: '' },
   course: { type: String, default: '' },
-  year: { type: String, default: '' }
+  year: { type: String, default: '' },
+  // ── Social profile (Part 3) ──────────────────────────────
+  avatar: { type: String, default: '' },        // Cloudinary URL
+  coverImage: { type: String, default: '' },    // Cloudinary URL
+  bio: { type: String, default: '', maxlength: [280, 'Bio is too long (max 280 characters)'] },
+  location: { type: String, default: '', maxlength: 80 },
+  interests: { type: [String], default: [] },    // lowercase topics, max 10 enforced in controller
+  // Per-type notification mutes (Part 3, Phase 8): { like: true, comment: true, … }
+  // Missing/false = allowed. Enforced in the notification service, never the client.
+  notificationPrefs: { type: Object, default: {} },
+}, { _id: false });
+
+/** Who can see the profile / message the user (backend-enforced). */
+const socialSettingsSchema = new mongoose.Schema({
+  profileVisibility: { type: String, enum: ['public', 'followers', 'private'], default: 'public' },
+  allowMessagesFrom: { type: String, enum: ['everyone', 'followers', 'nobody'], default: 'everyone' },
+  showAttendance: { type: Boolean, default: true },
+  showAchievements: { type: Boolean, default: true }
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -34,6 +51,25 @@ const userSchema = new mongoose.Schema({
     default: 'user'
   },
 
+  // ── Moderation (Part 3, Phase 10) ────────────────────────
+  // suspendedAt set = account suspended: login + all authenticated
+  // actions are blocked server-side until an admin unsuspends.
+  suspendedAt: { type: Date, default: null },
+  suspensionReason: { type: String, default: "" },
+
+  // ── Social identity (Part 3) ─────────────────────────────
+  username: {
+    type: String,
+    lowercase: true,
+    trim: true,
+    match: [/^[a-z0-9_]{3,30}$/, 'Username must be 3-30 characters: letters, numbers, underscore'],
+    // sparse: legacy users without a username don't collide on the unique index
+    index: { unique: true, sparse: true }
+  },
+  verified: { type: Boolean, default: false },
+  points: { type: Number, default: 0, min: 0 },
+  socialSettings: { type: socialSettingsSchema, default: () => ({}) },
+
   // Email verification fields
   emailVerified: { type: Boolean, default: false },
   emailVerifyToken: { type: String },
@@ -42,6 +78,10 @@ const userSchema = new mongoose.Schema({
   // Password reset fields
   resetOtp: { type: String },
   resetOtpExpires: { type: Date },
+  // NOTE: these two fields MUST exist in the schema — Mongoose strict mode
+  // silently drops undeclared fields, which previously broke password reset.
+  passwordResetToken: { type: String },
+  passwordResetTokenExpires: { type: Date },
 
   // OAuth providers (e.g., Google, GitHub)
   oauthProviders: [{
@@ -60,14 +100,36 @@ const userSchema = new mongoose.Schema({
 
 // 🔹 Ensure email uniqueness is enforced at DB level too
 userSchema.index({ email: 1 }, { unique: true });
+// 🔹 Username lookups (public profile URLs /profile/[username])
+userSchema.index({ username: 1 }, { unique: true, sparse: true });
 
-// 🔹 Pre-save hook to sanitize names if missing (esp. Google signups)
-userSchema.pre('save', function (next) {
+// 🔹 Pre-save hook: sanitize names and guarantee a unique @username.
+// Runs for email signups, Google OAuth users and legacy docs alike —
+// so every user is reachable at /profile/[username].
+userSchema.pre('save', async function (next) {
   if (!this.lastName) {
     this.lastName = ''; // fallback to empty string, not null
   }
   if (!this.firstName) {
     this.firstName = 'User';
+  }
+  if (!this.username) {
+    const clean = [this.firstName, this.lastName]
+      .filter(Boolean)
+      .join('_')
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '')
+      .slice(0, 24);
+    const root = clean.length >= 3 ? clean : `${clean || 'builder'}${Math.floor(100 + Math.random() * 900)}`;
+    let candidate = root.slice(0, 28);
+    let i = 0;
+    // Suffix loop guarantees uniqueness within the 30-char limit
+    while (await mongoose.model('User').exists({ username: candidate })) {
+      i += 1;
+      const suffix = `_${i}`;
+      candidate = root.slice(0, 30 - suffix.length) + suffix;
+    }
+    this.username = candidate;
   }
   next();
 });

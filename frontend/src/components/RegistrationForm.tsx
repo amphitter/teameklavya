@@ -1,25 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, FileUp, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/utils/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
-interface RegistrationField {
+export interface RegistrationField {
   label: string;
   type: "text" | "email" | "number" | "dropdown" | "checkbox" | "file";
   required: boolean;
   options?: string[];
   autoFillFromProfile?: "institution" | "course" | "year";
-  value?: any;
 }
 
 interface RegistrationFormProps {
   eventId: string;
   eventTitle: string;
-  requiredProfileFields: {
-    institution: boolean;
-    course: boolean;
-    year: boolean;
-  };
+  requiredProfileFields?: { institution: boolean; course: boolean; year: boolean };
   customFields?: RegistrationField[];
   onSuccess?: () => void;
   onCancel?: () => void;
@@ -35,284 +36,293 @@ export default function RegistrationForm({
 }: RegistrationFormProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [fileUploads, setFileUploads] = useState<Record<string, File>>({});
+  const [profile, setProfile] = useState<{
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    profile?: { institution?: string; course?: string; year?: string };
+  } | null>(null);
 
-  // Default fields that are always included
-  const defaultFields: RegistrationField[] = [
-    {
-      label: "Full Name",
-      type: "text",
-      required: true,
-      autoFillFromProfile: undefined,
-    },
-    {
-      label: "Email",
-      type: "email",
-      required: true,
-      autoFillFromProfile: undefined,
-    },
-  ];
+  // Prefill from the logged-in user's profile
+  useEffect(() => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    if (!token) return;
+    api
+      .get("/auth/me")
+      .then((r) => setProfile(r.data?.user ?? null))
+      .catch(() => {});
+  }, []);
 
-  // Add required profile fields
-  const profileFields: RegistrationField[] = [];
-  if (requiredProfileFields.institution) {
-    profileFields.push({
-      label: "Institution/Organization",
-      type: "text",
-      required: true,
-      autoFillFromProfile: "institution",
+  const allFields: RegistrationField[] = useMemo(() => {
+    const base: RegistrationField[] = [
+      { label: "Full Name", type: "text", required: true },
+      { label: "Email", type: "email", required: true },
+    ];
+    if (requiredProfileFields?.institution)
+      base.push({ label: "Institution/Organization", type: "text", required: true, autoFillFromProfile: "institution" });
+    if (requiredProfileFields?.course)
+      base.push({ label: "Course/Program", type: "text", required: true, autoFillFromProfile: "course" });
+    if (requiredProfileFields?.year)
+      base.push({ label: "Academic Year", type: "text", required: true, autoFillFromProfile: "year" });
+    return [...base, ...customFields];
+  }, [requiredProfileFields, customFields]);
+
+  // Apply prefill values once profile is loaded
+  useEffect(() => {
+    if (!profile) return;
+    setFormData((prev) => {
+      const next = { ...prev };
+      if (!next["Full Name"] && profile.firstName) {
+        next["Full Name"] = `${profile.firstName} ${profile.lastName || ""}`.trim();
+      }
+      if (!next["Email"] && profile.email) next["Email"] = profile.email;
+      allFields.forEach((f) => {
+        if (f.autoFillFromProfile && !next[f.label]) {
+          const v = (profile.profile as any)?.[f.autoFillFromProfile];
+          if (v) next[f.label] = v;
+        }
+      });
+      return next;
     });
-  }
-  if (requiredProfileFields.course) {
-    profileFields.push({
-      label: "Course/Program",
-      type: "text",
-      required: true,
-      autoFillFromProfile: "course",
-    });
-  }
-  if (requiredProfileFields.year) {
-    profileFields.push({
-      label: "Academic Year",
-      type: "text",
-      required: true,
-      autoFillFromProfile: "year",
-    });
-  }
+  }, [profile, allFields]);
 
-  // Combine all fields: default + profile + custom
-  const allFields = [...defaultFields, ...profileFields, ...customFields];
-
-  const handleInputChange = (fieldLabel: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      [fieldLabel]: value,
-    }));
-  };
-
-  const handleFileChange = (fieldLabel: string, file: File) => {
-    setFileUploads(prev => ({
-      ...prev,
-      [fieldLabel]: file,
-    }));
-  };
+  const setValue = (label: string, value: any) =>
+    setFormData((prev) => ({ ...prev, [label]: value }));
 
   const uploadFile = async (file: File): Promise<string> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    
-    const response = await api.post("/upload/local?folder=registration-files", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+    const fd = new FormData();
+    fd.append("file", file);
+    const response = await api.post("/upload/image?folder=registration-files", fd, {
+      headers: { "Content-Type": "multipart/form-data" },
     });
-    
-    if (response.data.success) {
-      return response.data.filePath;
-    }
+    if (response.data?.success && response.data.url) return response.data.url;
     throw new Error("File upload failed");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError(null);
 
+    // Client-side required validation
+    for (const field of allFields) {
+      if (field.required) {
+        const v = formData[field.label];
+        const empty = field.type === "checkbox" && !field.options ? !v : v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
+        if (empty) {
+          setError(`Please fill in: ${field.label}`);
+          return;
+        }
+      }
+    }
+
+    setLoading(true);
     try {
-      // Process file uploads first
-      const processedFormData = { ...formData };
-      
-      for (const [fieldLabel, file] of Object.entries(fileUploads)) {
+      // Upload files first
+      const processed = { ...formData };
+      for (const [label, file] of Object.entries(fileUploads)) {
         try {
-          const fileUrl = await uploadFile(file);
-          processedFormData[fieldLabel] = fileUrl;
-        } catch (error) {
-          console.error(`Failed to upload file for ${fieldLabel}:`, error);
-          setError(`Failed to upload file for ${fieldLabel}. Please try again.`);
+          processed[label] = await uploadFile(file);
+        } catch {
+          setError(`Failed to upload file for "${label}". Please try again.`);
           setLoading(false);
           return;
         }
       }
 
-      // Convert form data to answers format
-      const answers = Object.entries(processedFormData).map(([fieldLabel, value]) => ({
+      const answers = Object.entries(processed).map(([fieldLabel, value]) => ({
         fieldLabel,
-        fieldType: allFields.find(f => f.label === fieldLabel)?.type || "text",
+        fieldType: allFields.find((f) => f.label === fieldLabel)?.type || "text",
         value,
       }));
 
-      const response = await api.post("/registration/responses", {
-        eventId,
-        answers,
-      });
+      const response = await api.post("/registration/responses", { eventId, answers });
 
       if (response.data.success) {
+        setSuccessMsg(
+          response.data.message ||
+            "Registration successful! Your ticket has been emailed to you."
+        );
+        toast.success("You're registered!");
         onSuccess?.();
       } else {
         setError(response.data.message || "Registration failed");
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to register for event");
+      const msg = err.response?.data?.message || "Failed to register for event";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  const renderField = (field: RegistrationField) => {
-    const commonProps = {
-      required: field.required,
-      value: formData[field.label] || "",
-      onChange: (e: React.ChangeEvent<any>) => 
-        handleInputChange(field.label, e.target.value),
-      className: "w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
-    };
+  // ── Success state ─────────────────────────────────────
+  if (successMsg) {
+    return (
+      <div className="flex flex-col items-center py-6 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success-light">
+          <CheckCircle2 className="h-9 w-9 text-success" />
+        </div>
+        <h3 className="mt-4 text-lg font-bold text-foreground">You&apos;re in!</h3>
+        <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{successMsg}</p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          You can view your ticket anytime from{" "}
+          <span className="font-semibold text-foreground">My Registrations</span>.
+        </p>
+      </div>
+    );
+  }
 
-    switch (field.type) {
-      case "email":
-        return <input type="email" {...commonProps} />;
-      
-      case "number":
-        return <input type="number" {...commonProps} />;
-      
-      case "dropdown":
-        return (
-          <select {...commonProps}>
-            <option value="">Select an option</option>
-            {field.options?.map(option => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        );
-      
-      case "checkbox":
-        return (
-          <div className="flex items-center space-x-3">
-            <input
-              type="checkbox"
-              checked={!!formData[field.label]}
-              onChange={(e) => handleInputChange(field.label, e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-5 w-5"
-            />
-            <span className="text-sm text-gray-700">
-              {field.required && <span className="text-red-500 mr-1">*</span>}
+  // ── Form ──────────────────────────────────────────────
+  return (
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="max-h-[55vh] space-y-5 overflow-y-auto pr-1">
+        {allFields.map((field) => (
+          <div key={field.label} className="space-y-1.5">
+            <Label htmlFor={`field-${field.label}`} className="text-sm font-medium">
               {field.label}
-            </span>
-          </div>
-        );
-      
-      case "file":
-        return (
-          <div className="space-y-2">
-            <input
-              type="file"
-              onChange={(e) => handleFileChange(field.label, e.target.files?.[0]!)}
-              className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-              required={field.required}
-            />
-            {fileUploads[field.label] && (
-              <p className="text-sm text-green-600">
-                ✓ {fileUploads[field.label].name} selected
-              </p>
+              {field.required && <span className="ml-0.5 text-destructive">*</span>}
+            </Label>
+
+            {field.type === "text" && (
+              <Input
+                id={`field-${field.label}`}
+                value={formData[field.label] ?? ""}
+                onChange={(e) => setValue(field.label, e.target.value)}
+                placeholder={field.label}
+                required={field.required}
+              />
+            )}
+
+            {field.type === "email" && (
+              <Input
+                id={`field-${field.label}`}
+                type="email"
+                value={formData[field.label] ?? ""}
+                onChange={(e) => setValue(field.label, e.target.value)}
+                placeholder="you@example.com"
+                required={field.required}
+              />
+            )}
+
+            {field.type === "number" && (
+              <Input
+                id={`field-${field.label}`}
+                type="number"
+                value={formData[field.label] ?? ""}
+                onChange={(e) => setValue(field.label, e.target.value)}
+                required={field.required}
+              />
+            )}
+
+            {field.type === "dropdown" && (
+              <select
+                id={`field-${field.label}`}
+                value={formData[field.label] ?? ""}
+                onChange={(e) => setValue(field.label, e.target.value)}
+                required={field.required}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none transition-all focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+              >
+                <option value="">Select…</option>
+                {(field.options ?? []).map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {field.type === "checkbox" && !field.options && (
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-muted/40 px-3.5 py-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData[field.label])}
+                  onChange={(e) => setValue(field.label, e.target.checked)}
+                  className="h-4 w-4 rounded border-input accent-[#0070f0]"
+                />
+                <span className="text-muted-foreground">I agree to the above</span>
+              </label>
+            )}
+
+            {field.type === "checkbox" && field.options && (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {field.options.map((opt) => {
+                  const arr: string[] = formData[field.label] ?? [];
+                  const checked = arr.includes(opt);
+                  return (
+                    <label
+                      key={opt}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm transition-colors",
+                        checked ? "border-primary/50 bg-brand-light" : "border-border bg-background"
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setValue(
+                            field.label,
+                            checked ? arr.filter((v) => v !== opt) : [...arr, opt]
+                          )
+                        }
+                        className="h-4 w-4 rounded border-input accent-[#0070f0]"
+                      />
+                      {opt}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            {field.type === "file" && (
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-input bg-muted/40 px-4 py-3.5 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary">
+                <FileUp className="h-4 w-4 shrink-0" />
+                <span className="truncate">
+                  {fileUploads[field.label]
+                    ? fileUploads[field.label].name
+                    : "Choose a file (JPEG/PNG/WebP, max 5 MB)"}
+                </span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) setFileUploads((prev) => ({ ...prev, [field.label]: f }));
+                  }}
+                />
+              </label>
             )}
           </div>
-        );
-      
-      default:
-        return <input type="text" {...commonProps} />;
-    }
-  };
-
-  const getFieldLabel = (field: RegistrationField) => {
-    if (field.type === 'checkbox') {
-      return null; // Checkbox includes its own label
-    }
-    return (
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {field.label} {field.required && <span className="text-red-500">*</span>}
-      </label>
-    );
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">Register for {eventTitle}</h2>
-          <p className="text-gray-600 mt-1">Please fill out the registration form</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* Default and Profile Fields */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
-              Personal Information
-            </h3>
-            {[...defaultFields, ...profileFields].map((field) => (
-              <div key={field.label}>
-                {getFieldLabel(field)}
-                {renderField(field)}
-              </div>
-            ))}
-          </div>
-
-          {/* Custom Fields */}
-          {customFields.length > 0 && (
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
-                Additional Information
-              </h3>
-              {customFields.map((field) => (
-                <div key={field.label}>
-                  {getFieldLabel(field)}
-                  {renderField(field)}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Required Fields Note */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <p className="text-xs text-blue-700">
-              <span className="text-red-500">*</span> indicates required fields
-            </p>
-          </div>
-
-          <div className="flex space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={loading}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center"
-            >
-              {loading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Registering...
-                </>
-              ) : (
-                "Register"
-              )}
-            </button>
-          </div>
-        </form>
+        ))}
       </div>
-    </div>
+
+      {error && (
+        <p className="rounded-lg bg-destructive/10 px-3.5 py-2.5 text-sm font-medium text-destructive">
+          {error}
+        </p>
+      )}
+
+      <div className="flex gap-3">
+        <Button type="submit" className="flex-1 font-semibold" disabled={loading}>
+          {loading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Registering…
+            </>
+          ) : (
+            `Register for ${eventTitle.length > 28 ? "this event" : eventTitle}`
+          )}
+        </Button>
+        {onCancel && (
+          <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
+            Cancel
+          </Button>
+        )}
+      </div>
+    </form>
   );
 }

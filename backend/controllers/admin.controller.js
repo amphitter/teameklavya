@@ -140,3 +140,86 @@ exports.getRecentActivity = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+/* ── Platform analytics (Part 3, Phase 11) ─────────────────── */
+
+// GET /api/admin/analytics — trends + breakdowns, all computed server-side
+exports.getAnalytics = async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const window = Math.min(90, Math.max(7, days));
+    const since = new Date(Date.now() - window * 24 * 60 * 60 * 1000);
+
+    const [registrationTrend, userGrowth, topEventsAgg, categoryAgg] = await Promise.all([
+      // Daily registrations
+      RegistrationResponse.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } },
+      ]),
+      // Daily new users
+      User.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } },
+      ]),
+      // Top events by registrations (all time)
+      RegistrationResponse.aggregate([
+        { $group: { _id: "$eventId", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 5 },
+        {
+          $lookup: {
+            from: "events",
+            localField: "_id",
+            foreignField: "_id",
+            as: "event",
+          },
+        },
+        { $unwind: "$event" },
+        {
+          $project: {
+            count: 1,
+            title: "$event.title",
+            slug: "$event.slug",
+            startDate: "$event.startDate",
+            category: "$event.category",
+          },
+        },
+      ]),
+      // Events by category
+      Event.aggregate([
+        { $group: { _id: "$category", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ]),
+    ]);
+
+    // Cumulative users within the window (nice line)
+    let running = 0;
+    const usersCumulative = userGrowth.map((d) => {
+      running += d.count;
+      return { day: d._id, newUsers: d.count, total: running };
+    });
+
+    res.json({
+      success: true,
+      analytics: {
+        windowDays: window,
+        registrationTrend: registrationTrend.map((d) => ({ day: d._id, count: d.count })),
+        userGrowth: usersCumulative,
+        topEvents: topEventsAgg.map((e) => ({
+          _id: e._id,
+          title: e.title,
+          slug: e.slug,
+          startDate: e.startDate,
+          category: e.category,
+          registrations: e.count,
+        })),
+        categoryBreakdown: categoryAgg.map((c) => ({ category: c._id || "General", count: c.count })),
+      },
+    });
+  } catch (err) {
+    console.error("getAnalytics error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};

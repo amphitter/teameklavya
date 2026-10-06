@@ -24,6 +24,43 @@ const partnerSchema = new mongoose.Schema({
   logoUrl: String,
 });
 
+/**
+ * Live engine settings (Part 4, spec §74). Scoring values are NEVER
+ * hard-coded into the engine — organizers configure them here.
+ */
+const scoringSchema = new mongoose.Schema(
+  {
+    basePoints: { type: Number, default: 100, min: 0, max: 10000 },
+    speedBonus: { type: Number, default: 0, min: 0, max: 10000 },
+    negativeMarking: { type: Number, default: 0, min: 0, max: 10000 }, // penalty magnitude
+    partialScoring: { type: Boolean, default: false },
+    questionWeighting: { type: Boolean, default: false }, // use per-question points
+  },
+  { _id: false }
+);
+
+const liveSettingsSchema = new mongoose.Schema(
+  {
+    allowLateJoin: { type: Boolean, default: true },
+    requireRegistration: { type: Boolean, default: false },
+    requireCheckIn: { type: Boolean, default: false },
+    leaderboardVisibility: {
+      type: String,
+      enum: ["never", "every_question", "every_n", "after_activity", "checkpoints", "final"],
+      default: "after_activity",
+    },
+    leaderboardInterval: { type: Number, default: 1, min: 1, max: 50 }, // for every_n
+    allowAnswerChanges: { type: Boolean, default: false },
+    chatEnabled: { type: Boolean, default: true },
+    qaEnabled: { type: Boolean, default: true },
+    pollsEnabled: { type: Boolean, default: true },
+    teamMode: { type: Boolean, default: false },
+    requireFullScreen: { type: Boolean, default: false }, // optional (spec §67) — not a real anti-cheat
+    scoring: { type: scoringSchema, default: () => ({}) },
+  },
+  { _id: false }
+);
+
 const eventSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
@@ -47,10 +84,9 @@ const eventSchema = new mongoose.Schema(
       }
     },
     venueIframeLink: { 
+      // Map embed URL — optional (an event can have a venue without a map embed)
       type: String,
-      required: function() {
-        return (this.eventType === 'offline' || this.eventType === 'hybrid') && !this.isOnline;
-      }
+      default: ""
     },
     
     // Online event details (for online/hybrid events)
@@ -85,6 +121,7 @@ const eventSchema = new mongoose.Schema(
     
     // Media and branding
     bannerUrl: String,
+    bannerPublicId: String, // Cloudinary public id (used to replace/delete the asset)
     organizer: String,
     
     // Attendance limits
@@ -99,6 +136,57 @@ const eventSchema = new mongoose.Schema(
       default: "Fire",
     },
     isFeatured: { type: Boolean, default: false },
+
+    // Visibility (backwards compatible — existing events default to public)
+    // public   → discoverable in search/discovery
+    // unlisted → accessible via direct link only, hidden from discovery
+    removedAt: { type: Date, default: null },
+    removedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+
+    // ── LIVE EVENT ENGINE (Part 4, Phase 1) ──────────────────────────────
+    // Explicit operational state machine (spec §13). The display-lifecycle
+    // virtual (upcoming/ongoing/past) is separate and untouched.
+    liveState: {
+      type: String,
+      enum: [
+        "DRAFT",
+        "PUBLISHED",
+        "REGISTRATION_OPEN",
+        "REGISTRATION_CLOSED",
+        "CHECK_IN",
+        "WAITING",
+        "LIVE",
+        "PAUSED",
+        "COMPLETED",
+        "CANCELLED",
+      ],
+      default: "PUBLISHED", // legacy events behave exactly as before
+      index: true,
+    },
+    // Short human-friendly join code (HACKCRAFT 3.0 → HCF30 style).
+    // Never contains authentication material — the QR encodes a safe URL.
+    joinCode: {
+      type: String,
+      default: () => {
+        const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+        let code = "";
+        for (let i = 0; i < 6; i += 1) code += chars[Math.floor(Math.random() * chars.length)];
+        return code;
+      },
+      index: { unique: true },
+    },
+    // Live engine configuration (spec §74) — all server-enforced
+    liveSettings: {
+      type: liveSettingsSchema,
+      default: () => ({}),
+    },
+    // private  → accessible to organizer/admin and invited participants only
+    visibility: {
+      type: String,
+      enum: ["public", "unlisted", "private"],
+      default: "public",
+      index: true,
+    },
 
     // Registration form
     registrationForm: [{
@@ -136,6 +224,15 @@ const eventSchema = new mongoose.Schema(
 
     // Creator
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    // Owning organization (colleges, clubs, communities)
+    organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", default: null },
+    // Community hosting this event (Phase 6) — shown on the community page
+    community: { type: mongoose.Schema.Types.ObjectId, ref: "Community", default: null },
+    // Reminder scheduler dedupe (Phase 8) — set once the reminder went out
+    reminderSent: {
+      h24: { type: Date, default: null },
+      h1: { type: Date, default: null },
+    },
 
     // Profile requirements
     requiredProfileFields: {
@@ -178,6 +275,15 @@ eventSchema.virtual('isLive').get(function() {
 });
 
 // Virtual for event status
+/** New unique join code (organizer action, Part 4). Retries on collision. */
+eventSchema.methods.regenerateJoinCode = function regenerateJoinCode() {
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i += 1) code += chars[Math.floor(Math.random() * chars.length)];
+  this.joinCode = code;
+  return code;
+};
+
 eventSchema.virtual('status').get(function() {
   const now = new Date();
   if (now < this.startDate) return 'upcoming';
@@ -205,6 +311,8 @@ eventSchema.index({ slug: 1 });
 eventSchema.index({ startDate: 1 });
 eventSchema.index({ isFeatured: 1 });
 eventSchema.index({ createdBy: 1 });
+eventSchema.index({ organization: 1 }, { sparse: true });
+eventSchema.index({ community: 1 }, { sparse: true });
 eventSchema.index({ "ticketSettings.autoGenerate": 1 });
 eventSchema.index({ eventType: 1 }); // New index for event type filtering
 

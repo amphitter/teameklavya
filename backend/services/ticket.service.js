@@ -3,7 +3,7 @@ const QRCode = require("qrcode");
 const Ticket = require("../models/ticket.model");
 const Event = require("../models/event.model");
 const User = require("../models/user.model");
-const { sendEmailWithAttachment } = require("../utils/email");
+const emailService = require("./email.service");
 const { generateToken } = require("../utils/crypto");
 const path = require("path");
 const fs = require("fs");
@@ -522,7 +522,7 @@ class TicketService {
 </html>
       `;
 
-      await sendEmailWithAttachment({
+      await emailService.send({
         to: user.email,
         subject: `🎫 Your Ticket for ${event.title} - Team Eklavya`,
         html: htmlContent,

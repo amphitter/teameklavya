@@ -2,13 +2,14 @@ const { validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
-const { sendEmail } = require('../utils/email');
+const emailService = require('../services/email.service');
+const templates = require('../services/emailTemplates');
 const { generateToken, generateOTP } = require('../utils/crypto');
 
 const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES || 10);
 
 function signJwt(user) {
-  return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+  return jwt.sign({ id: user._id, role: user.role, email: user.email, purpose: 'auth' }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
 }
 
 exports.signup = async (req, res) => {
@@ -39,108 +40,23 @@ exports.signup = async (req, res) => {
 
     // send verification email
     const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verifyToken}&email=${encodeURIComponent(email)}`;
-    await this.sendVerificationEmail(user, verifyUrl);
+    await exports.sendVerificationEmail(user, verifyUrl);
     return res.status(201).json({ message: 'User registered. Please verify your email.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });
   }
 };
+// Send the signup verification email
 exports.sendVerificationEmail = async (user, verifyUrl) => {
-  const htmlContent = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Verify Your Email - Team Eklavya</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fa;font-family:'Inter',Helvetica,Arial,sans-serif;">
-
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-    Verify your Team Eklavya account to complete registration.
-  </div>
-
-  <div style="width:100%;padding:0;background-color:#f5f7fa;">
-    <div style="max-width:600px;margin:0 auto;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,0.05);overflow:hidden;">
-      
-      <div style="background:#004aad;padding:20px 30px;text-align:center;">
-        <img src="https://i.ibb.co/v6H3n86S/logo.png" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
-        <h1 style="color:#fff;margin:0;font-size:22px;font-weight:600;">Verify Your Email</h1>
-      </div>
-
-      <div style="padding:30px;">
-        <h2 style="color:#004aad;margin-bottom:10px;">Hey ${user.firstName} ${user.lastName},</h2>
-        <p style="color:#333;font-size:15px;line-height:1.6;margin-bottom:25px;">
-          Thanks for signing up with <strong>Team Eklavya</strong>!<br/>
-          Please confirm your email address to activate your account.
-        </p>
-
-        <div style="text-align:center;margin:30px 0;">
-          <a href="${verifyUrl}" 
-             style="background:#004aad;color:#fff;padding:12px 28px;text-decoration:none;border-radius:6px;font-weight:600;display:inline-block;">
-            Verify Email
-          </a>
-        </div>
-
-        <p style="color:#555;font-size:13px;text-align:center;margin-bottom:0;">
-          This link will expire in <strong>24 hours</strong>. If you didn’t sign up, just ignore this email.
-        </p>
-      </div>
-
-      <div style="background:#f8f9fb;text-align:center;padding:20px;">
-        <p style="color:#888;font-size:13px;margin-bottom:10px;">Follow us for updates</p>
-        <table role="presentation" align="center" style="margin:0 auto 15px auto;">
-          <tr>
-            <td style="padding:0 6px;">
-              <a href="https://www.instagram.com/iteameklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/2111/2111463.png" alt="Instagram" width="24" height="24" />
-              </a>
-            </td>
-            <td style="padding:0 6px;">
-              <a href="https://x.com/iteameklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/5968/5968830.png" alt="X" width="24" height="24" />
-              </a>
-            </td>
-            <td style="padding:0 6px;">
-              <a href="https://www.linkedin.com/company/i-team-eklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" alt="LinkedIn" width="24" height="24" />
-              </a>
-            </td>
-            <td style="padding:0 6px;">
-              <a href="https://chat.whatsapp.com/L7HvHNOatFbHIWM7EGBaaA" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/733/733585.png" alt="WhatsApp" width="24" height="24" />
-              </a>
-            </td>
-          </tr>
-        </table>
-        <p style="color:#888;font-size:13px;margin:0;">Team Eklavya</p>
-        <p style="color:#aaa;font-size:12px;margin-top:5px;">If you have any questions, contact the event organizers.</p>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
-`;
-
-  const textContent = `
-Hi ${user.firstName},
-
-Thanks for signing up with Team Eklavya!
-Please verify your email by clicking the link below:
-${verifyUrl}
-
-This link expires in 24 hours.
-`;
-
-  await sendEmail({
+  const { html, text } = templates.verifyEmail({ user, verifyUrl });
+  await emailService.send({
     to: user.email,
-    subject: "Verify Your Team Eklavya Account",
-    html: htmlContent,
-    text: textContent,
+    subject: "Verify your EventHub email",
+    html,
+    text,
   });
-
-  console.log(`✅ Verification email sent to ${user.email}`);
+  console.log(`Verification email sent to ${user.email}`);
 };
 
 exports.verifyEmail = async (req, res) => {
@@ -182,6 +98,16 @@ exports.login = async (req, res) => {
       return res.status(403).json({ message: 'Please verify your email before logging in.' });
     }
 
+    // Moderation (Part 3, Phase 10): suspended accounts can't log in
+    if (user.suspendedAt) {
+      return res.status(403).json({
+        suspended: true,
+        message: user.suspensionReason
+          ? `Your account has been suspended: ${user.suspensionReason}`
+          : 'Your account has been suspended.',
+      });
+    }
+
     const token = signJwt(user);
     return res.json({ token, user: { id: user._id, firstName: user.firstName, lastName: user.lastName, email: user.email } });
   } catch (err) {
@@ -203,105 +129,23 @@ exports.requestPasswordReset = async (req, res) => {
     user.resetOtp = otp;
     user.resetOtpExpires = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
     await user.save();
-    await this.sendResetOtpEmail(user, otp, OTP_TTL_MINUTES);
+    await exports.sendResetOtpEmail(user, otp, OTP_TTL_MINUTES);
     return res.json({ message: 'If the email exists, an OTP has been sent.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });
   }
 };
+// Send the password-reset OTP email
 exports.sendResetOtpEmail = async (user, otp, ttlMinutes) => {
-  const htmlContent = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Password Reset OTP - Team Eklavya</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fa;font-family:'Inter',Helvetica,Arial,sans-serif;">
-
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-    Your OTP for Team Eklavya password reset.
-  </div>
-
-  <div style="width:100%;padding:0;background-color:#f5f7fa;">
-    <div style="max-width:600px;margin:0 auto;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,0.05);overflow:hidden;">
-
-      <div style="background:#004aad;padding:20px 30px;text-align:center;">
-        <img src="https://i.ibb.co/v6H3n86S/logo.png" alt="Team Eklavya Logo" style="max-height:55px;margin-bottom:10px;" />
-        <h1 style="color:#fff;margin:0;font-size:22px;font-weight:600;">Password Reset OTP</h1>
-      </div>
-
-      <div style="padding:30px;text-align:center;">
-        <h2 style="color:#004aad;margin-bottom:10px;">Hey ${user.firstName},</h2>
-        <p style="color:#333;font-size:15px;line-height:1.6;margin-bottom:25px;">
-          You requested to reset your password.<br/>
-          Use the OTP below to complete the process.
-        </p>
-
-        <div style="background:#f0f6ff;border-left:4px solid #004aad;padding:15px 20px;border-radius:6px;display:inline-block;margin-bottom:25px;">
-          <h3 style="margin:0;color:#004aad;font-size:24px;letter-spacing:3px;">${otp}</h3>
-        </div>
-
-        <p style="color:#555;font-size:13px;margin-bottom:0;">
-          This OTP expires in <strong>${ttlMinutes} minutes</strong>.<br/>
-          If you didn’t request this, please ignore this email.
-        </p>
-      </div>
-
-      <div style="background:#f8f9fb;text-align:center;padding:20px;">
-        <p style="color:#888;font-size:13px;margin-bottom:10px;">Follow us for updates</p>
-        <table role="presentation" align="center" style="margin:0 auto 15px auto;">
-          <tr>
-            <td style="padding:0 6px;">
-              <a href="https://www.instagram.com/iteameklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/2111/2111463.png" alt="Instagram" width="24" height="24" />
-              </a>
-            </td>
-            <td style="padding:0 6px;">
-              <a href="https://x.com/iteameklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/5968/5968830.png" alt="X" width="24" height="24" />
-              </a>
-            </td>
-            <td style="padding:0 6px;">
-              <a href="https://www.linkedin.com/company/i-team-eklavya" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" alt="LinkedIn" width="24" height="24" />
-              </a>
-            </td>
-            <td style="padding:0 6px;">
-              <a href="https://chat.whatsapp.com/L7HvHNOatFbHIWM7EGBaaA" target="_blank">
-                <img src="https://cdn-icons-png.flaticon.com/512/733/733585.png" alt="WhatsApp" width="24" height="24" />
-              </a>
-            </td>
-          </tr>
-        </table>
-        <p style="color:#888;font-size:13px;margin:0;">Team Eklavya</p>
-        <p style="color:#aaa;font-size:12px;margin-top:5px;">If you have any questions, contact the event organizers.</p>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
-`;
-
-  const textContent = `
-Hi ${user.firstName},
-
-Your Team Eklavya password reset OTP is: ${otp}
-It expires in ${ttlMinutes} minutes.
-
-If you didn’t request this, please ignore this email.
-`;
-
-  await sendEmail({
+  const { html, text } = templates.passwordResetOtp({ user, otp, ttlMinutes });
+  await emailService.send({
     to: user.email,
-    subject: "Your Team Eklavya Password Reset OTP",
-    html: htmlContent,
-    text: textContent,
+    subject: "Your EventHub password reset code",
+    html,
+    text,
   });
-
-  console.log(`✅ Password reset OTP email sent to ${user.email}`);
+  console.log(`Password reset OTP email sent to ${user.email}`);
 };
 
 exports.verifyResetOtp = async (req, res) => {

@@ -1,138 +1,126 @@
+import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/context/ThemeContext";
-import Navbar from "../components/Navbar";
+import { Toaster } from "sonner";
+import Script from "next/script";
 import "./globals.css";
-import Script from "next/script"; // ✅ for structured data
 
-export const metadata = {
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+
+export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: "Team Eklavya | Empowering Students, Enriching Futures",
-    template: "%s | Team Eklavya",
+    default: "EventHub — Discover events, participate, grow",
+    template: "%s | EventHub",
   },
   description:
-    "Team Eklavya empowers students through innovation, hackathons, and mentorship—building a community of future tech leaders across India.",
+    "EventHub is the social platform for events. Discover what's happening around you, register in seconds, get your QR ticket, and build your event identity.",
 
-  // ✅ Icon and branding
+  applicationName: "EventHub",
+  authors: [{ name: "EventHub" }],
+  keywords: [
+    "EventHub",
+    "events",
+    "event discovery",
+    "event registration",
+    "tickets",
+    "workshops",
+    "hackathons",
+    "conferences",
+    "meetups",
+  ],
+
   icons: {
-    icon: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/brand/favicon-32.png", type: "image/png", sizes: "32x32" },
+    ],
     shortcut: "/favicon.ico",
-    apple: "/apple-touch-icon.png",
+    apple: "/brand/apple-touch-icon.png",
   },
 
-  // ✅ Author info
-  authors: [{ name: "Team Eklavya", url: "https://www.teameklavya.xyz" }],
-
-  // ✅ Open Graph (for Facebook, LinkedIn, Bing previews)
   openGraph: {
-    title: "Team Eklavya | Empowering Students, Enriching Futures",
+    title: "EventHub — Discover events, participate, grow",
     description:
-      "Join Team Eklavya - a community of learners, innovators, and leaders empowering the next generation through technology, creativity, and collaboration.",
-    url: "https://www.teameklavya.xyz",
-    siteName: "Team Eklavya",
+      "Discover what's happening around you, register in seconds, get your QR ticket, and build your event identity.",
+    url: SITE_URL,
+    siteName: "EventHub",
     images: [
       {
-        url: "https://www.teameklavya.xyz/og-image.png",
+        url: "/brand/og-image.png",
         width: 1200,
         height: 630,
-        alt: "Team Eklavya - Empowering Students, Enriching Futures",
+        alt: "EventHub — the social platform for events",
       },
     ],
     locale: "en_US",
     type: "website",
   },
 
-  // ✅ Twitter Cards
   twitter: {
     card: "summary_large_image",
-    title: "Team Eklavya | Empowering Students, Enriching Futures",
+    title: "EventHub — Discover events, participate, grow",
     description:
-      "Team Eklavya connects students and innovators through real-world projects, AR workshops, and technology-driven learning experiences.",
-    creator: "@teameklavya",
-    site: "@teameklavya",
-    images: ["https://www.teameklavya.xyz/og-image.png"],
+      "Discover what's happening around you, register in seconds, get your QR ticket, and build your event identity.",
+    images: ["/brand/og-image.png"],
   },
 
-  // ✅ Base URL for canonical & OG tags
-  metadataBase: new URL("https://www.teameklavya.xyz"),
-
-  // ✅ SEO Keywords
-  keywords: [
-    "Team Eklavya",
-    "Eklavya India",
-    "Student Innovation",
-    "Technology Education",
-    "Hackathons India",
-    "Workshops",
-    "Mentorship Programs",
-    "AR VR Education",
-    "STEM Students",
-    "Educational Community",
-    "Student Empowerment",
-  ],
-
-  // ✅ Robots & indexing rules
   robots: {
     index: true,
     follow: true,
     googleBot: {
       index: true,
       follow: true,
-      maxSnippet: -1,
-      maxImagePreview: "large",
-      maxVideoPreview: -1,
+      "max-snippet": -1,
+      "max-image-preview": "large",
+      "max-video-preview": -1,
     },
   },
 
-  // ✅ Canonical URL
   alternates: {
-    canonical: "https://www.teameklavya.xyz",
+    canonical: "/",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#ffffff",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
-        {/* ✅ Site name & favicon setup for Google Discover */}
-        <meta property="og:site_name" content="Team Eklavya" />
-        <meta name="application-name" content="Team Eklavya" />
-        <meta name="apple-mobile-web-app-title" content="Team Eklavya" />
-        <link rel="icon" href="/favicon.ico" sizes="any" />
-        <link rel="icon" type="image/png" href="/favicon.png" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <meta property="og:site_name" content="EventHub" />
+        <meta name="apple-mobile-web-app-title" content="EventHub" />
+        {/* Material Symbols Outlined — same icon set as the home-feed reference */}
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+        />
       </head>
+      <body className={`${inter.variable} font-sans antialiased`}>
+        <ThemeProvider>{children}</ThemeProvider>
 
-      <body className="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-        <ThemeProvider>
-          <Navbar />
-          <main>{children}</main>
-        </ThemeProvider>
-
-        {/* ✅ Organization structured data */}
-        <Script
-          id="organization-schema"
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              "@context": "https://schema.org",
-              "@type": "Organization",
-              name: "Team Eklavya",
-              url: "https://www.teameklavya.xyz",
-              logo: "https://www.teameklavya.xyz/favicon.png",
-              sameAs: [
-                "https://www.linkedin.com/company/team-eklavya/",
-                "https://www.instagram.com/iteameklavya/",
-              ],
-              description:
-                "Team Eklavya is a student-driven organization promoting innovation, collaboration, and technical excellence through workshops, hackathons, and mentorship across India.",
-              founder: {
-                "@type": "Person",
-                name: "Team Eklavya Members",
-              },
-            }),
+        <Toaster
+          position="top-center"
+          richColors
+          toastOptions={{
+            style: {
+              borderRadius: "10px",
+              fontFamily: "var(--font-inter)",
+            },
           }}
         />
 
-        {/* ✅ WebSite schema for site name (controls 'teameklavya.xyz' text) */}
+        {/* WebSite structured data */}
         <Script
           id="website-schema"
           type="application/ld+json"
@@ -140,9 +128,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             __html: JSON.stringify({
               "@context": "https://schema.org",
               "@type": "WebSite",
-              name: "Team Eklavya", // ← what shows above title
-              alternateName: "Eklavya",
-              url: "https://www.teameklavya.xyz/",
+              name: "EventHub",
+              alternateName: "EventHub",
+              url: SITE_URL,
+              description:
+                "EventHub — the social platform for events. Discover, participate, create, connect, grow.",
             }),
           }}
         />

@@ -1,29 +1,28 @@
-// routes/user.routes.js
+/**
+ * EventHub User Routes (public profiles + social identity)
+ * ──────────────────────────────────────
+ *  GET  /api/users/me/social          own social profile + privacy settings
+ *  PUT  /api/users/me/social          update username/bio/avatar/cover/interests/privacy
+ *  GET  /api/users/:idOrUsername/profile   public profile + real stats (viewer-aware)
+ *  GET  /api/users/:idOrUsername/posts     user's feed posts (privacy-enforced)
+ *  GET  /api/users/:idOrUsername/events    profile event history (attendance-aware)
+ *
+ *  :idOrUsername accepts both legacy ObjectIds and @usernames.
+ */
 const express = require("express");
 const router = express.Router();
-const { requireAuth } = require("../middleware/auth.middleware");
-const registrationController = require("../controllers/registration.controller");
+const userController = require("../controllers/user.controller");
+const { optionalUser, requireAuth } = require("../middleware/auth.middleware");
 
-// Get user's registered events
-router.get("/events", requireAuth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    
-    console.log("🔍 Fetching events for user:", userId);
-    
-    const responses = await RegistrationResponse.find({ userId })
-      .populate("eventId")
-      .sort({ createdAt: -1 });
+router.get("/me/social", requireAuth, userController.getMySocial);
+router.put("/me/social", requireAuth, userController.updateMySocial);
 
-    console.log(`✅ Found ${responses.length} registrations`);
-    
-    const events = responses.map(response => response.eventId);
+router.get("/suggested", requireAuth, userController.getSuggestedUsers);
 
-    res.json({ success: true, events });
-  } catch (error) {
-    console.error("❌ Get user events error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
+router.get("/:id/achievements", optionalUser, userController.getUserAchievements);
+
+router.get("/:id/profile", optionalUser, userController.getPublicProfile);
+router.get("/:id/posts", optionalUser, userController.getUserPosts);
+router.get("/:id/events", optionalUser, userController.getUserEvents);
 
 module.exports = router;

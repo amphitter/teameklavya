@@ -1,17 +1,28 @@
-"use client";
-import React from "react";
-export const dynamic = 'force-dynamic';
+import type { Metadata } from "next";
+import Link from "next/link";
+import { CheckCircle2 } from "lucide-react";
+import { AuthCard } from "@/components/auth/auth-card";
+import { Button } from "@/components/ui/button";
+
+export const metadata: Metadata = {
+  title: "Email verified",
+  description: "Your EventHub email has been verified.",
+};
 
 export default function VerifySuccessPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded-2xl shadow-md text-center">
-        <h1 className="text-2xl font-bold mb-4">Email Verified ✅</h1>
-        <p>Your account has been verified. You can now log in.</p>
-        <a href="/login" className="mt-4 inline-block bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
-          Go to Login
-        </a>
+    <AuthCard title="Email verified!">
+      <div className="flex flex-col items-center py-4 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success-light">
+          <CheckCircle2 className="h-9 w-9 text-success" />
+        </div>
+        <p className="mt-4 max-w-xs text-sm text-muted-foreground">
+          Your email is verified and your account is active. Log in to start discovering events.
+        </p>
+        <Button asChild className="mt-6 w-full py-2.5 font-semibold">
+          <Link href="/login">Log in to EventHub</Link>
+        </Button>
       </div>
-    </div>
+    </AuthCard>
   );
 }

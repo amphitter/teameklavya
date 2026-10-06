@@ -149,11 +149,66 @@ These were masked by suites that never actually ran, or by assertions written ag
    matching `GET /users/:id/posts`.
 
 
-## Phase 6 — Realtime hardening
+## Phase 6 — Realtime hardening  ✅ **DONE**
 - Socket connection caps: max sockets per user (e.g. 5) + per-IP (e.g. 20), room join cap per event (config), stale-socket sweep (§43).
 - Backpressure verification (§44): existing throttles documented (leaderboard 1s / poll 1s / QA 400ms); answer/score/final-results correctness never coalesced.
 - State reconstruction already correct (§45) — add regression test.
 - Document Redis-adapter + sticky-session scale-out path (no implementation).
+
+### Phase 6 results
+
+**`docs/REALTIME-HARDENING.md`** is the full reference (caps, sweep, backpressure
+inventory, state reconstruction, scale-out path). Summary:
+
+**§43 — Connection caps.** Two *different* axes, which is the whole point:
+Phase 2's rate windows bound how OFTEN a client may connect; these new
+concurrency caps bound how many sockets may exist AT ONCE. A client reconnecting
+every 8s never trips a per-minute rate window yet still accumulates sockets
+forever. Defaults: **5 sockets/user, 20/IP, 500 participants/room**, all
+env-overridable (`REALTIME_CAP_*`). Enforced in `io.on("connection")`, with the
+structured error emitted *before* the close so the client can say "close another
+tab" rather than a generic slow-down.
+
+- `TOO_MANY_CONNECTIONS` and `ROOM_FULL` are deliberately distinct from
+  `RATE_LIMITED` — collapsing them would leave the client unable to explain what
+  the user should do.
+- **Room caps count distinct participants, not sockets**, so a user already in
+  the room can always re-join from another tab. A naive `size >= cap` would let
+  users lock themselves out by reconnecting.
+- New `connectionRegistry` (socketId → {userId, ip} plus the reverse indexes)
+  exists separately from the `rooms` map because they answer different questions:
+  `rooms` is per-event, the caps are global.
+
+**§43 — Stale-socket sweep.** A socket that dies without a clean `disconnect`
+left a participant marked `"connected"` forever. The authoritative answer to "is
+this socket alive" is the transport, so anything in a room but missing from the
+registry is by definition stale. Runs every 5 min (unref'd). Critically, a
+freshly-orphaned participant is **marked disconnected but kept**, so a fast
+reconnect still restores score/ready state; it is only dropped once idle past
+the 30-min TTL. Empty idle rooms are reaped. Nothing writes to MongoDB (§42).
+
+**§44 — Backpressure.** Documented and verified: **broadcasts are throttled,
+correctness never is.** Leaderboard 1s · poll distribution 1s · Q&A list 400ms ·
+answer 400ms/socket · organizer command 250ms · join 1.2s/socket. The score is
+persisted and acked *before* any throttled board refresh is considered, so a
+coalesced board can never cost a participant points. Final results are rebuilt
+from persisted sessions, never replayed from throttled broadcasts.
+
+**§45 — State reconstruction.** Regression tests added. Notably they pin the
+`currentActivityOf()` projection fix from Phase 5: a mid-question reconnect must
+return the open question, not `question: null`.
+
+**Scale-out:** documented, not implemented. Sticky sessions → Redis adapter →
+Redis presence → Redis limiters. The durable half (sessions, scores, results) is
+already multi-instance safe; only volatile presence is not — which is precisely
+why presence was kept out of MongoDB.
+
+**Selftest:** `backend/tests/phase6.selftest.js` — **87/87**. Boots the real
+server + Socket.IO against in-memory Mongo with lowered caps, then proves the
+per-user ceiling, the per-IP ceiling (one network cannot occupy every slot),
+room-full refusal + re-join allowance, sweep behaviour at each stage, the
+throttle inventory, and that a duplicate answer never double-scores.
+
 
 ## Phase 7 — Observability & admin infrastructure dashboard
 - `/api/admin/infrastructure` (admin-only, §59–60): DB storage/counts, cache hit rate/size/evictions, API latency percentiles, rate-limit event counts, socket connections, provider health (Cloudinary/email ping), upload failures, thresholds (80/90/95 = WARNING/HIGH/CRITICAL).

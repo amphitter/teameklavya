@@ -25,7 +25,7 @@ const { validateActivity } = require("../services/quizValidation.service");
 const { canManageEvent } = require("../middleware/auth.middleware");
 // Part 5, Phase 2 — cross-socket rate guards (§24 REALTIME)
 const { SlidingWindow } = require("../utils/frequency-limiter");
-const { LIMITS, isRateLimitingDisabled } = require("../config/rate-limits");
+const { LIMITS, REALTIME_CAPS, isRateLimitingDisabled } = require("../config/rate-limits");
 const metrics = require("../services/metrics.service");
 const { EVENTS, ERROR_CODES, socketError } = require("../config/socket-protocol");
 
@@ -51,6 +51,9 @@ function roomOf(eventId) {
   if (typeof room.leaderboardVisible !== "boolean") room.leaderboardVisible = false;
   if (typeof room.questionsClosed !== "number") room.questionsClosed = 0;
   if (typeof room.lastBoardAt !== "number") room.lastBoardAt = 0;
+  // Phase 6 (§43) — idle clock for the stale-socket sweep. Bumped on every
+  // join so a room in continuous use is never mistaken for abandoned.
+  if (typeof room.lastActivityAt !== "number") room.lastActivityAt = Date.now();
   return room;
 }
 
@@ -60,6 +63,198 @@ function roomKey(eventId) {
 
 function activityRoomKey(eventId, activityId) {
   return `event:${String(eventId)}:activity:${String(activityId)}`;
+}
+
+/* ══ Connection registry + stale-socket sweep (Part 5, Phase 6 — §43) ══════
+ *
+ * WHY THIS EXISTS SEPARATELY FROM THE ROOMS MAP
+ *   `rooms` is keyed by event and tracks one user's sockets *within that
+ *   event*. The per-user and per-IP caps are global — a user's five tabs
+ *   span events, and a NAT'd IP's phones span users. Neither number can be
+ *   derived from the other, so the totals live here.
+ *
+ * WHY BOTH RATE WINDOWS AND CONCURRENCY CAPS
+ *   The Phase 2 SlidingWindows bound how OFTEN a client may connect. A
+ *   client reconnecting every 8 seconds never trips a per-minute window yet
+ *   still piles up sockets forever. These caps bound how many may exist AT
+ *   ONCE, which is the number that actually costs memory and event-loop
+ *   time on a single small instance.
+ *
+ * IN-MEMORY BY DESIGN (§42): none of this is persisted. Presence is
+ * volatile; only ParticipantSession is durable.
+ */
+const connectionRegistry = {
+  /** socketId → { userId, ip, connectedAt } */
+  bySocket: new Map(),
+  /** userId → Set<socketId> */
+  byUser: new Map(),
+  /** ip → Set<socketId> */
+  byIp: new Map(),
+
+  add(socketId, userId, ip) {
+    this.bySocket.set(socketId, { userId: userId || null, ip: ip || null, connectedAt: Date.now() });
+    if (userId) {
+      if (!this.byUser.has(userId)) this.byUser.set(userId, new Set());
+      this.byUser.get(userId).add(socketId);
+    }
+    if (ip) {
+      if (!this.byIp.has(ip)) this.byIp.set(ip, new Set());
+      this.byIp.get(ip).add(socketId);
+    }
+  },
+
+  /** @returns the removed record, or null if the socket was never tracked. */
+  remove(socketId) {
+    const rec = this.bySocket.get(socketId);
+    if (!rec) return null;
+    this.bySocket.delete(socketId);
+    if (rec.userId) {
+      const set = this.byUser.get(rec.userId);
+      if (set) {
+        set.delete(socketId);
+        if (!set.size) this.byUser.delete(rec.userId);
+      }
+    }
+    if (rec.ip) {
+      const set = this.byIp.get(rec.ip);
+      if (set) {
+        set.delete(socketId);
+        if (!set.size) this.byIp.delete(rec.ip);
+      }
+    }
+    return rec;
+  },
+
+  countForUser(userId) {
+    return userId ? this.byUser.get(userId)?.size || 0 : 0;
+  },
+  countForIp(ip) {
+    return ip ? this.byIp.get(ip)?.size || 0 : 0;
+  },
+  total() {
+    return this.bySocket.size;
+  },
+  has(socketId) {
+    return this.bySocket.has(socketId);
+  },
+  stats() {
+    return {
+      sockets: this.bySocket.size,
+      users: this.byUser.size,
+      ips: this.byIp.size,
+      capPerUser: REALTIME_CAPS.SOCKETS_PER_USER,
+      capPerIp: REALTIME_CAPS.SOCKETS_PER_IP,
+    };
+  },
+  /** Test seam — most tests need a clean slate more than they need isolation. */
+  reset() {
+    this.bySocket.clear();
+    this.byUser.clear();
+    this.byIp.clear();
+  },
+};
+
+/**
+ * Reap presence that outlived its sockets.
+ *
+ * A socket that dies without a clean `disconnect` (laptop lid, dead mobile
+ * radio, killed tab) leaves a "connected" participant behind forever. The
+ * presence map then drifts from reality: counts inflate, and a participant
+ * who is really gone still occupies the room. The authoritative source of
+ * truth for "is this socket alive" is the registry, which is maintained by
+ * the transport — so anything missing from it is by definition stale.
+ *
+ * Safe to run repeatedly; it only removes entries the transport has already
+ * forgotten about.
+ */
+function sweepStaleSockets(now = Date.now()) {
+  let staleSockets = 0;
+  let markedDisconnected = 0;
+  let droppedParticipants = 0;
+  let droppedRooms = 0;
+
+  for (const [eventId, room] of rooms) {
+    // ── participants ──
+    for (const [userId, entry] of room.participants) {
+      const live = [];
+      for (const socketId of entry.socketIds) {
+        if (connectionRegistry.has(socketId)) live.push(socketId);
+        else staleSockets += 1;
+      }
+      if (live.length !== entry.socketIds.size) entry.socketIds = new Set(live);
+
+      if (entry.socketIds.size === 0) {
+        const lastSeen = entry.lastSeenAt ? new Date(entry.lastSeenAt).getTime() : now;
+        if (entry.state !== "disconnected") {
+          entry.state = "disconnected";
+          markedDisconnected += 1;
+        }
+        // Keep the entry briefly so a fast reconnect restores score/ready
+        // state; drop it once it has been idle past the TTL.
+        if (now - lastSeen > REALTIME_CAPS.IDLE_ROOM_TTL_MS) {
+          room.participants.delete(userId);
+          room.lastRanks?.delete(userId);
+          droppedParticipants += 1;
+        }
+      }
+    }
+
+    // ── organizers ──
+    for (const [userId, org] of room.organizers) {
+      const live = [];
+      for (const socketId of org.socketIds) {
+        if (connectionRegistry.has(socketId)) live.push(socketId);
+        else staleSockets += 1;
+      }
+      if (!live.length) room.organizers.delete(userId);
+      else org.socketIds = new Set(live);
+    }
+
+    // ── reap empty, idle rooms ──
+    if (room.participants.size === 0 && room.organizers.size === 0) {
+      if (now - (room.lastActivityAt || now) > REALTIME_CAPS.IDLE_ROOM_TTL_MS) {
+        rooms.delete(eventId);
+        droppedRooms += 1;
+      }
+    }
+  }
+
+  return {
+    staleSockets,
+    markedDisconnected,
+    droppedParticipants,
+    droppedRooms,
+    rooms: rooms.size,
+    sockets: connectionRegistry.total(),
+  };
+}
+
+let sweepTimer = null;
+
+/** Start the periodic sweep. `unref()` so it never holds the process open. */
+function startStaleSocketSweep() {
+  if (sweepTimer) return sweepTimer;
+  const intervalMs = REALTIME_CAPS.SWEEP_INTERVAL_MS;
+  sweepTimer = setInterval(() => {
+    try {
+      const result = sweepStaleSockets();
+      const touched = result.staleSockets + result.droppedParticipants + result.droppedRooms;
+      if (touched > 0) {
+        console.log(`[realtime] stale-socket sweep: ${JSON.stringify(result)}`);
+      }
+    } catch (error) {
+      // A sweep failure must never take the server down.
+      console.error("[realtime] stale-socket sweep failed:", error.message);
+    }
+  }, intervalMs);
+  if (typeof sweepTimer.unref === "function") sweepTimer.unref();
+  return sweepTimer;
+}
+
+function stopStaleSocketSweep() {
+  if (!sweepTimer) return;
+  clearInterval(sweepTimer);
+  sweepTimer = null;
 }
 
 /** Current (LIVE or PAUSED) activity of an event — DB is the source of truth. */
@@ -966,6 +1161,17 @@ function registerHandlers(socket) {
         return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Invalid event");
       }
 
+      /* Room capacity cap (§43). Re-joining from another tab is always
+       * allowed — the cap counts DISTINCT participants, so a user already in
+       * the room never locks themselves out by reconnecting. */
+      const roomForCap = rooms.get(eventId);
+      if (roomForCap &&
+          !roomForCap.participants.has(String(user?.id || "")) &&
+          roomForCap.participants.size >= REALTIME_CAPS.PARTICIPANTS_PER_ROOM) {
+        metrics.recordRateLimit("REALTIME_CAP_ROOM");
+        return emitError(socket, ERROR_CODES.ROOM_FULL, "This event room is full");
+      }
+
       /* Projector / display mode (Phase 7 — spec §46): a READ-ONLY mirror of
        * participant broadcasts. No session, no presence, no scores of its
        * own, no controls — and it can NEVER receive organizer-only data
@@ -992,6 +1198,7 @@ function registerHandlers(socket) {
       }
       const { event, isOrganizer } = result;
       const room = roomOf(eventId);
+      room.lastActivityAt = Date.now(); // keeps an active room out of the reaper
       socket.join(roomKey(eventId));
       socket.data.eventId = eventId;
       socket.data.isOrganizer = Boolean(isOrganizer);
@@ -2063,16 +2270,47 @@ function init(socketIo) {
   io.use(socketAuth);
 
   io.on("connection", (socket) => {
+    const uid = socket.data?.user?.id || socket.data?.user?._id || null;
+    const ip = socket.handshake?.address || "unknown";
+
     // Reconnect-storm guard (§24 REALTIME): per-user + per-IP connect rate.
     if (!isRateLimitingDisabled()) {
-      const uid = socket.data?.user?.id || socket.data?.user?._id || socket.id;
-      const ip = socket.handshake?.address || "unknown";
-      if (!connectGuardUser.allow(`u:${uid}`).allowed || !connectGuardIp.allow(`ip:${ip}`).allowed) {
+      if (!connectGuardUser.allow(`u:${uid || socket.id}`).allowed ||
+          !connectGuardIp.allow(`ip:${ip}`).allowed) {
         metrics.recordRateLimit("REALTIME_CONNECT");
         socket.disconnect(true);
         return;
       }
     }
+
+    /* ── Concurrency caps (§43) ──
+     * Distinct from the rate windows above: those stop a client connecting
+     * too often, these stop a client holding too many sockets at once. The
+     * error is emitted BEFORE the disconnect so the client can tell the user
+     * "close a tab" rather than showing a generic slow-down. */
+    if (!isRateLimitingDisabled() && uid &&
+        connectionRegistry.countForUser(uid) >= REALTIME_CAPS.SOCKETS_PER_USER) {
+      metrics.recordRateLimit("REALTIME_CAP_USER");
+      socket.emit(EVENTS.S_ERROR, socketError(
+        ERROR_CODES.TOO_MANY_CONNECTIONS,
+        "Too many open connections for this account — close another tab or device."
+      ));
+      socket.disconnect(true);
+      return;
+    }
+    if (!isRateLimitingDisabled() &&
+        connectionRegistry.countForIp(ip) >= REALTIME_CAPS.SOCKETS_PER_IP) {
+      metrics.recordRateLimit("REALTIME_CAP_IP");
+      socket.emit(EVENTS.S_ERROR, socketError(
+        ERROR_CODES.TOO_MANY_CONNECTIONS,
+        "Too many connections from this network."
+      ));
+      socket.disconnect(true);
+      return;
+    }
+
+    connectionRegistry.add(socket.id, uid, ip);
+    metrics.recordSocketConnect();
 
     // Clock synchronization baseline (spec §17) — full offset use in Phase 4
     socket.emit(EVENTS.S_SERVER_TIME, { serverTime: Date.now() });
@@ -2080,11 +2318,15 @@ function init(socketIo) {
     registerHandlers(socket);
 
     socket.on("disconnect", () => {
+      connectionRegistry.remove(socket.id);
+      metrics.recordSocketDisconnect();
       if (socket.data?.eventId) {
         handleLeave(socket, socket.data.eventId, "disconnected").catch(() => {});
       }
     });
   });
+
+  startStaleSocketSweep();
 
   console.log("✅ EventHub realtime engine attached (Socket.IO)");
 }
@@ -2098,4 +2340,40 @@ async function liveStateFor(eventId, user) {
   return { participant: await stateForParticipant(eventId, user.id) };
 }
 
-module.exports = { init, liveStateFor, roomOf, connectedCount, readyCount };
+/**
+ * Per-room occupancy snapshot (§43 diagnostics). Counts only sockets the
+ * transport still knows about, so it reflects reality rather than whoever
+ * last happened to fire a `disconnect` handler.
+ */
+function roomStats() {
+  const out = [];
+  for (const [eventId, room] of rooms) {
+    let liveSockets = 0;
+    for (const p of room.participants.values()) liveSockets += p.socketIds.size;
+    for (const o of room.organizers.values()) liveSockets += o.socketIds.size;
+    out.push({
+      eventId,
+      participants: room.participants.size,
+      organizers: room.organizers.size,
+      sockets: liveSockets,
+      cap: REALTIME_CAPS.PARTICIPANTS_PER_ROOM,
+      leaderboardVisible: room.leaderboardVisible,
+      idleMs: Date.now() - (room.lastActivityAt || 0),
+    });
+  }
+  return out;
+}
+
+module.exports = {
+  init,
+  liveStateFor,
+  roomOf,
+  connectedCount,
+  readyCount,
+  // Phase 6 (§43) — exported for the selftest and the admin diagnostics.
+  connectionRegistry,
+  sweepStaleSockets,
+  startStaleSocketSweep,
+  stopStaleSocketSweep,
+  roomStats,
+};

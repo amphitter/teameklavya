@@ -73,6 +73,42 @@ function envOverride(domain, cfg) {
   };
 }
 
+/**
+ * Realtime CONCURRENCY caps (Part 5, Phase 6 — spec §43).
+ * ─────────────────────────────────────────────────────────────────────────
+ * The rate windows above bound how OFTEN a client may connect. These bound
+ * how many connections may exist AT ONCE. Both are required: a client that
+ * reconnects every 8 seconds never trips a per-minute rate window, yet it
+ * still accumulates sockets without bound — and every socket costs memory
+ * and event-loop time on a single small instance.
+ *
+ * Deliberately NOT in `DEFAULTS`: that table is iterated into `{limit,
+ * windowMs}` limiter configs, and these are plain counts. Kept separate and
+ * env-overridable on the same pattern.
+ */
+const CAP_DEFAULTS = {
+  /** Tabs/devices one authenticated user may hold open simultaneously. */
+  SOCKETS_PER_USER: 5,
+  /**
+   * Sockets from one IP at once. Higher than per-user because a classroom,
+   * office or carrier NAT legitimately shares an address — but bounded, so
+   * one NAT cannot occupy every slot.
+   */
+  SOCKETS_PER_IP: 20,
+  /** Participants that may sit in one event room (config per §43). */
+  PARTICIPANTS_PER_ROOM: 500,
+  /** A room with zero sockets is reaped once idle this long. */
+  IDLE_ROOM_TTL_MS: 30 * MINUTE,
+  /** How often the stale-socket sweep runs. */
+  SWEEP_INTERVAL_MS: 5 * MINUTE,
+};
+
+const REALTIME_CAPS = {};
+for (const [name, value] of Object.entries(CAP_DEFAULTS)) {
+  const raw = Number(process.env[`REALTIME_CAP_${name}`]);
+  REALTIME_CAPS[name] = Number.isFinite(raw) && raw > 0 ? raw : value;
+}
+
 const LIMITS = {};
 for (const [domain, cfg] of Object.entries(DEFAULTS)) {
   LIMITS[domain] = envOverride(domain, cfg);
@@ -141,4 +177,12 @@ function applyGlobalRateLimits(app) {
   app.use("/api/upload", limiters.uploadBurst, limiters.uploadHourly);
 }
 
-module.exports = { LIMITS, limiters, applyGlobalRateLimits, createLimiter, defaultKeyGenerator, isRateLimitingDisabled };
+module.exports = {
+  LIMITS,
+  REALTIME_CAPS,
+  limiters,
+  applyGlobalRateLimits,
+  createLimiter,
+  defaultKeyGenerator,
+  isRateLimitingDisabled,
+};

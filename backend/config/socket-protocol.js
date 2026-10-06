@@ -84,6 +84,11 @@ const ERROR_CODES = {
   REGISTRATION_REQUIRED: "REGISTRATION_REQUIRED",
   CHECK_IN_REQUIRED: "CHECK_IN_REQUIRED",
   RATE_LIMITED: "RATE_LIMITED",
+  /* Phase 6 (§43) — concurrency caps, distinct from RATE_LIMITED so a client
+   * can tell "you are going too fast" from "you have too many tabs open" and
+   * show the right message instead of a generic slow-down. */
+  TOO_MANY_CONNECTIONS: "TOO_MANY_CONNECTIONS",
+  ROOM_FULL: "ROOM_FULL",
   ALREADY_ANSWERED: "ALREADY_ANSWERED",
   NOT_LIVE: "NOT_LIVE",
   QUESTION_CLOSED: "QUESTION_CLOSED",

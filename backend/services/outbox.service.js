@@ -167,20 +167,82 @@ async function fail(entry, err) {
   // them synchronise into a herd when the upstream recovers.
   const delay = Math.round(expo / 2 + Math.random() * (expo / 2));
 
+  // §5: a STABLE code of ours, never the upstream's. A Postgres SQLSTATE or a
+  // raw provider message would leak schema detail and is not stable enough to
+  // alert on. The message is scrubbed and truncated for the same reason.
+  const code = err?.code || (err?.name === "AbortError" ? "TIMEOUT" : "UPSTREAM");
+
   await Outbox.updateOne(
     { _id: entry._id },
     {
       $set: {
         status: exhausted ? "dead" : "pending",
         lastError: String(err?.message || err).slice(0, 400),
+        lastErrorCode: String(code).slice(0, 64),
+        lastErrorAt: new Date(),
         lastAttemptAt: new Date(),
         ...(exhausted
-          ? { processedAt: new Date() }
+          ? { processedAt: new Date(), deadLetteredAt: new Date() }
           : { availableAt: new Date(Date.now() + delay) }),
       },
     }
   );
   return { exhausted, retryInMs: exhausted ? null : delay };
+}
+
+/**
+ * §5 dead-letter report for the dashboard.
+ *
+ * `oldestMs` drives severity: a dead letter is silent data loss, so it is not
+ * merely counted — its AGE is what distinguishes "just happened, the retry
+ * sweep may still recover it" from "has been losing data for an hour".
+ */
+async function deadLetters({ limit = 50 } = {}) {
+  const rows = await Outbox.find({ status: "dead" })
+    .sort({ deadLetteredAt: -1 })
+    .limit(Math.min(limit, 200))
+    .lean()
+    .catch(() => []);
+
+  const now = Date.now();
+  const items = rows.map((r) => ({
+    id: String(r._id),
+    entityType: r.entityType,
+    entityId: r.entityId,
+    operation: r.op,
+    attempts: r.attempts,
+    lastErrorCode: r.lastErrorCode || null,
+    lastErrorAt: r.lastErrorAt || null,
+    createdAt: r.createdAt,
+    deadLetteredAt: r.deadLetteredAt || null,
+    ageMs: r.deadLetteredAt ? now - new Date(r.deadLetteredAt).getTime() : null,
+  }));
+
+  const oldestMs = items.reduce((m, i) => Math.max(m, i.ageMs || 0), 0);
+  return { count: items.length, oldestMs, items };
+}
+
+/**
+ * Processing rate — entries completed recently. The dashboard needs this to
+ * distinguish "backlog is large but draining" from "backlog is large and
+ * stuck", which a raw count cannot express.
+ */
+async function processingRate({ windowMs = 5 * 60 * 1000 } = {}) {
+  const since = new Date(Date.now() - windowMs);
+  const [done, failedOrDead] = await Promise.all([
+    Outbox.countDocuments({ status: "done", processedAt: { $gte: since } }).catch(() => 0),
+    Outbox.countDocuments({
+      status: { $in: ["failed", "dead"] },
+      updatedAt: { $gte: since },
+    }).catch(() => 0),
+  ]);
+  const minutes = windowMs / 60000;
+  return {
+    windowMs,
+    done,
+    failedOrDead,
+    donePerMinute: Math.round((done / minutes) * 100) / 100,
+  };
 }
 
 /* ══ Backoff (exported for tests) ═════════════════════════════════════════ */
@@ -229,6 +291,8 @@ module.exports = {
   fail,
   backoffFor,
   stats,
+  deadLetters,
+  processingRate,
   LEASE_MS,
   DEFAULT_MAX_ATTEMPTS,
 };

@@ -372,6 +372,87 @@ function createFakePostgrest() {
      /Never automatically repair ambiguous/i.test(
        read("services/reconciliation.service.js")));
 
+  /* ══ §5 Dead-letter record ══════════════════════════════════════════════ */
+  sec("7. Dead-letter record & dashboard severity (§5)");
+
+  {
+    await Outbox.deleteMany({});
+    const entry = await outboxService.enqueue({
+      entityType: "post", entityId: "dead-letter-test", op: "upsert",
+    });
+    ok("an entry starts with no dead-letter metadata",
+       entry.deadLetteredAt === null || entry.deadLetteredAt === undefined);
+
+    // Exhaust the retries with a coded error.
+    let cur = await Outbox.findById(entry._id);
+    for (let i = 0; i < 12; i++) {
+      cur = await Outbox.findById(entry._id);
+      if (cur.status === "dead") break;
+      cur.attempts = (cur.attempts || 0) + 1;
+      await Outbox.updateOne({ _id: cur._id }, { $set: { attempts: cur.attempts } });
+      const e = new Error("upstream database unreachable");
+      e.code = "UNREACHABLE";
+      await outboxService.fail(cur, e);
+    }
+    const dead = await Outbox.findById(entry._id);
+    ok("§5: the entry is dead-lettered after a bounded retry count",
+       dead.status === "dead", dead.status);
+    ok("§5: it stores entityType", dead.entityType === "post");
+    ok("§5: it stores entityId", dead.entityId === "dead-letter-test");
+    ok("§5: it stores the operation", dead.op === "upsert");
+    ok("§5: it stores the attempt count", dead.attempts >= 8, `${dead.attempts}`);
+    ok("§5: it stores a stable lastErrorCode", dead.lastErrorCode === "UNREACHABLE", `${dead.lastErrorCode}`);
+    ok("§5: it stores lastErrorAt", !!dead.lastErrorAt);
+    ok("§5: it stores createdAt", !!dead.createdAt);
+    ok("§5: it stores deadLetteredAt", !!dead.deadLetteredAt);
+
+    const blob = JSON.stringify(dead.toObject());
+    ok("§5: the dead-letter record stores NO credential-shaped value",
+       !/eyJ[A-Za-z0-9_-]{10,}\.|password|apikey|service_role/i.test(blob));
+    ok("§5: it stores no request body", !/"payload"|"body"/.test(blob));
+
+    const dl = await outboxService.deadLetters({ limit: 10 });
+    ok("§5: deadLetters() reports the count", dl.count === 1, `${dl.count}`);
+    ok("§5: …and the oldest dead-letter age", typeof dl.oldestMs === "number" && dl.oldestMs >= 0);
+    ok("§5: …with the required fields per entry",
+       dl.items[0] && "entityType" in dl.items[0] && "operation" in dl.items[0] &&
+       "attempts" in dl.items[0] && "lastErrorCode" in dl.items[0] &&
+       "createdAt" in dl.items[0] && "deadLetteredAt" in dl.items[0]);
+
+    const rate = await outboxService.processingRate();
+    ok("§5: processing rate is reported", typeof rate.donePerMinute === "number");
+
+    // Dashboard severity escalation.
+    const infra = require("../services/infrastructure.service");
+    const rep = await infra.collect({ fresh: true });
+    ok("§5: the dashboard exposes an outbox panel", !!rep.sections.outbox);
+    ok("§5: …with backlog", "backlog" in rep.sections.outbox);
+    ok("§5: …with processing rate", "ratePerMinute" in rep.sections.outbox);
+    ok("§5: …with retrying count", "retrying" in rep.sections.outbox);
+    ok("§5: …with dead-lettered count", rep.sections.outbox.deadLettered === 1);
+    ok("§5: …with oldest pending entry age", "oldestPendingMs" in rep.sections.outbox);
+    ok("§5: …with oldest dead-letter age", "oldestDeadLetterMs" in rep.sections.outbox);
+    ok("§5: a fresh dead letter escalates to HIGH",
+       rep.sections.outbox.level === "HIGH", rep.sections.outbox.level);
+
+    // Age it past the stale threshold → CRITICAL.
+    await Outbox.updateOne(
+      { _id: entry._id },
+      { $set: { deadLetteredAt: new Date(Date.now() - 20 * 60 * 1000) } }
+    );
+    const rep2 = await infra.collect({ fresh: true });
+    ok("§5: an old dead letter escalates to CRITICAL",
+       rep2.sections.outbox.level === "CRITICAL", rep2.sections.outbox.level);
+    ok("§5: …and raises a dashboard alert",
+       rep2.alerts.some((a) => a.section === "outbox" && a.level === "CRITICAL"));
+
+    await Outbox.deleteMany({});
+    const rep3 = await infra.collect({ fresh: true });
+    ok("§5: with no dead letters the outbox reports no level",
+       rep3.sections.outbox.deadLettered === 0 && rep3.sections.outbox.level === null,
+       `${rep3.sections.outbox.level}`);
+  }
+
   await mongoose.disconnect();
   await mongo.stop();
   await new Promise((r) => pg.server.close(r));

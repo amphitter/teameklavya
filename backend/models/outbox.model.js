@@ -96,8 +96,28 @@ const outboxSchema = new mongoose.Schema(
     maxAttempts: { type: Number, default: 8 },
     availableAt: { type: Date, default: () => new Date() }, // backoff: not before
     lastError: { type: String, default: null },
+    /** Lease marker. `requeueStalled` reclaims an entry whose worker died by
+     *  looking for status=processing with a lastAttemptAt older than the lease.
+     *  WITHOUT THIS FIELD A STALLED ENTRY IS NEVER RECOVERED — it would stay
+     *  "processing" forever and the change would never reach Supabase. */
     lastAttemptAt: { type: Date, default: null },
     processedAt: { type: Date, default: null },
+
+    /* Part 7, §5: the dead-letter record. A dead-lettered entry is KEPT, not
+     * discarded, and these four fields are what an operator needs to triage
+     * it without opening a log:
+     *   lastErrorCode   — our stable code (TIMEOUT / UNREACHABLE / UPSTREAM…),
+     *                     never a raw Postgres SQLSTATE
+     *   lastErrorAt     — when it last failed
+     *   createdAt       — when the change happened (so lag is computable)
+     *   deadLetteredAt  — when we gave up
+     *
+     * NEVER STORED HERE (§5): passwords, access tokens, refresh tokens, the
+     * Supabase service-role key, Redis credentials, or request bodies. Only
+     * the entity reference and a bounded, scrubbed error string. */
+    lastErrorCode: { type: String, default: null },
+    lastErrorAt: { type: Date, default: null },
+    deadLetteredAt: { type: Date, default: null },
 
     /**
      * Where this entry came from. Recorded so reconciliation can tell a
@@ -148,6 +168,10 @@ outboxSchema.index(
 // Housekeeping: completed entries are swept by the retention policy, and the
 // sweep needs to find old terminal rows without scanning the live queue.
 outboxSchema.index({ status: 1, processedAt: 1 });
+
+// §5: the dashboard sorts dead letters by AGE — a dead letter that has been
+// sitting for an hour is a different incident from one that just happened.
+outboxSchema.index({ status: 1, deadLetteredAt: 1 });
 
 const Outbox =
   mongoose.models.Outbox || mongoose.model("Outbox", outboxSchema);

@@ -555,6 +555,70 @@ async function collectSupabase() {
   };
 }
 
+/**
+ * Outbox panel (Part 7, Phase 2 — §5)
+ * ─────────────────────────────────────────────────────────────────────────
+ * A dead-lettered entry is SILENT DATA LOSS: the change happened in MongoDB
+ * and will never reach Supabase. It is therefore not merely counted — its
+ * AGE drives severity, because a dead letter that just appeared may still be
+ * recovered by a retry sweep, while one that has sat for an hour means the
+ * two databases have been diverging for an hour.
+ *
+ *   dead = 0                    → no level
+ *   dead > 0, age < 15 min      → HIGH
+ *   dead > 0, age >= 15 min     → CRITICAL
+ *
+ * The backlog is reported alongside the processing RATE, because a large
+ * backlog that is draining is fine and a small one that is stuck is an
+ * incident. A raw count cannot express that difference.
+ */
+async function collectOutbox() {
+  let stats = null;
+  let dead = null;
+  let rate = null;
+  try {
+    [stats, dead, rate] = await Promise.all([
+      outboxService.stats(),
+      outboxService.deadLetters({ limit: 50 }),
+      outboxService.processingRate(),
+    ]);
+  } catch {
+    // No Mongo / outbox unavailable — report it rather than hiding the panel.
+    return { level: null, unavailable: true, backlog: null };
+  }
+
+  const deadCount = Number(dead?.count || 0);
+  const oldestDeadMs = Number(dead?.oldestMs || 0);
+  const STALE_DEAD_MS = 15 * 60 * 1000;
+
+  let level = null;
+  if (deadCount > 0) level = oldestDeadMs >= STALE_DEAD_MS ? "CRITICAL" : "HIGH";
+  else if (Number(stats?.pending || 0) > 10_000) level = "WARNING";
+
+  return {
+    level,
+    unavailable: false,
+    backlog: Number(stats?.pending || 0),
+    processing: Number(stats?.processing || 0),
+    done: Number(stats?.done || 0),
+    retrying: Number(stats?.failed || 0),
+    deadLettered: deadCount,
+    oldestPendingMs: Number(stats?.oldestPendingMs || 0),
+    oldestDeadLetterMs: oldestDeadMs,
+    ratePerMinute: rate?.donePerMinute ?? null,
+    // Bounded sample for the UI. Contains no credentials and no payloads —
+    // only the entity reference and a stable error code (§5, §14).
+    recentDead: (dead?.items || []).slice(0, 20).map((i) => ({
+      entityType: i.entityType,
+      entityId: i.entityId,
+      operation: i.operation,
+      attempts: i.attempts,
+      lastErrorCode: i.lastErrorCode,
+      ageMs: i.ageMs,
+    })),
+  };
+}
+
 function collectRateLimits(snap) {
   const buckets = Object.entries(snap.rateLimits || {})
     .map(([bucket, count]) => ({ bucket, count }))
@@ -586,6 +650,8 @@ async function collect({ fresh = false } = {}) {
     // Part 6, Phase 7 (§16): the two new panels.
     redis: collectRedis(),
     supabase: await collectSupabase(),
+    // Part 7, Phase 2 (§5): outbox backlog, rate and dead letters.
+    outbox: await collectOutbox(),
   };
 
   const levels = Object.values(sections)
@@ -646,6 +712,11 @@ function alertMessage(name, section) {
       return `Supabase slow queries: ${section.slowQueries}`;
     case "process":
       return `Heap usage at ${section.percent}% of budget`;
+    case "outbox":
+      if (section.deadLettered > 0) {
+        return `${section.deadLettered} outbox entries are dead-lettered (oldest ${Math.round(section.oldestDeadLetterMs / 60000)}m) — changes are not reaching Supabase`;
+      }
+      return `Outbox backlog is ${section.backlog} entries`;
     default:
       return `${name} needs attention (${section.percent}%)`;
   }

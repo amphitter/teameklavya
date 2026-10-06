@@ -732,6 +732,25 @@ chains pass. The 561-assertion floor from Part 5 is exceeded many times over.
 ### Phase 9 — Final report
 - `PART6_FINAL_REPORT.md`.
 
+### Phase 9 — RESULT: ✅ **DONE**
+
+`PART6_FINAL_REPORT.md` — 12 sections: executive summary, phase table, Redis
+as shared infrastructure, Supabase for the relational domain, consistency
+without distributed transactions, failure behaviour & observability, testing,
+bugs found and fixed, configuration surface, known limitations, delivery
+inventory, build status.
+
+Final state: **12 Part 6 commits, 27 new files, 924 assertions across 10
+suites (0 failed), 6/6 e2e, zero new dependencies.**
+
+The §17 regression floor is held exactly: the 9 pre-existing suites still total
+**561 assertions, unchanged**, with phase10 adding 363 on top.
+
+The report's headline caveat, stated in three places (executive summary,
+§5, §10): **no data has migrated.** The Supabase side is prepared and tested
+end to end; running the migration is a human decision gated by the 8-step
+runbook in `docs/SUPABASE-MIGRATION.md`.
+
 ---
 
 # PART D — STANDING RULES

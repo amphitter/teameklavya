@@ -23,6 +23,19 @@ architecture; it makes the existing architecture production-safe.
 |---|---|---|---|
 | 0 | Audit & plan | — | ✅ |
 | 1 | Reconciliation service + script | §2, §3, §4, §6 | ✅ |
+| 2 | Dead-letter system + migration safety | §5, §7 | ✅ |
+| 3 | Real-provider test suite | §1 | pending |
+| 4 | Security audits (Supabase, Redis, cache) | §8, §9, §11, §13 | pending |
+| 5 | Community ownership & Super Admin protection | §10 | pending |
+| 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | pending |
+| 7 | Provider failure matrix + preflight | §12, §31 | pending |
+| 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | pending |
+| 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | pending |
+| 10 | Error taxonomy | §30 | pending |
+| 11 | Frontend + upload + rate-limit review | §27, §28, §29 | pending |
+| 12 | Restore drill, backups, secret separation | §18, §19 | pending |
+| 13 | Documentation set | §32 | pending |
+| 14 | Final report | §33 | pending |
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 
@@ -59,19 +72,45 @@ what reconciliation fixes is exactly what the live path would have produced.
 source-deletion flag, and none calls `deleteMany`/`deleteOne`/`drop`.
 
 Regression: 924 → **970 assertions, 0 failed**; 6/6 e2e.
-| 2 | Dead-letter system + migration safety | §5, §7 | pending |
-| 3 | Real-provider test suite | §1 | pending |
-| 4 | Security audits (Supabase, Redis, cache) | §8, §9, §11, §13 | pending |
-| 5 | Community ownership & Super Admin protection | §10 | pending |
-| 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | pending |
-| 7 | Provider failure matrix + preflight | §12, §31 | pending |
-| 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | pending |
-| 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | pending |
-| 10 | Error taxonomy | §30 | pending |
-| 11 | Frontend + upload + rate-limit review | §27, §28, §29 | pending |
-| 12 | Restore drill, backups, secret separation | §18, §19 | pending |
-| 13 | Documentation set | §32 | pending |
-| 14 | Final report | §33 | pending |
+| 2 | Dead-letter system + migration safety | §5, §7 | ✅ |
+
+### Phase 2 — RESULT: ✅ **DONE** (73 assertions in tests/phase11.selftest.js)
+
+- `models/outbox.model.js` — ADDED `lastErrorCode` · `lastErrorAt` ·
+  `deadLetteredAt`, plus index `{status:1, deadLetteredAt:1}` for the dashboard
+  age sort.
+- `services/outbox.service.js` — `fail()` populates all four §5 fields and maps
+  the failure to a **stable code of ours** (`err.code`, `TIMEOUT` on abort, else
+  `UPSTREAM`) — never a raw Postgres SQLSTATE, which leaks schema detail and is
+  not stable enough to alert on. Added `deadLetters()` + `processingRate()`.
+- `services/infrastructure.service.js` — new `collectOutbox()` panel: backlog ·
+  ratePerMinute · retrying · deadLettered · oldestPendingMs ·
+  oldestDeadLetterMs · bounded `recentDead` sample (entity reference + code
+  only).
+- Severity: `dead > 0` and age < 15 min → **HIGH**; age ≥ 15 min →
+  **CRITICAL**; `pending > 10 000` → WARNING. Rate sits next to backlog because
+  a large draining backlog is fine and a small stuck one is an incident.
+
+**§5 fields stored (asserted):** id · entityType · entityId · operation ·
+attempts · lastErrorCode · lastErrorAt · createdAt · deadLetteredAt.
+**Asserted absent:** any credential-shaped value, any request body.
+
+**REGRESSION CAUGHT AND FIXED — worth remembering.** The first model edit
+dropped `lastAttemptAt` and `processedAt` while adding the §5 fields.
+`requeueStalled` filters on `lastAttemptAt`, so stalled entries would have
+stayed `processing` forever and never reached Supabase. The pre-existing Phase
+10 assertion *"a stalled entry is recovered rather than lost"* caught it. Both
+fields restored. **Lesson: when adding fields to a schema, diff the field list
+against every query in the service that uses it — the tests only catch it after
+the fact.**
+
+**ENVIRONMENT.** `/tmp` is a 993M tmpfs. Leaked `mongo-mem-*` data dirs filled
+it to 93% and mongod began fasserting on no space. Symptom:
+`StdoutInstanceError: Mongod internal error (fassert() failure)` — it reads
+like a code failure but is disk pressure. Fix: `rm -rf /tmp/mongo-mem-*`
+between full runs.
+
+Regression: 970 → **997 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ---
 

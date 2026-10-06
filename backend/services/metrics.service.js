@@ -68,6 +68,9 @@ function recordProvider(name, ok) {
   inc("provider:" + name + (ok ? ":ok" : ":error"));
 }
 const recordUploadFailure = () => inc("upload:failures");
+// Part 5 Phase 4 (§57): paired with failures so the Phase 7 dashboard can
+// show an upload FAILURE RATE, not just a raw failure count.
+const recordUploadSuccess = () => inc("upload:successes");
 
 /* ── Percentiles ── */
 function percentile(sorted, p) {
@@ -111,7 +114,17 @@ function snapshot() {
     },
     sockets: { connected: socketsConnected, peak: socketsPeak, errors: counters.get("socket:errors") || 0 },
     providers: Object.fromEntries(entriesByPrefix("provider:")),
-    uploads: { failures: counters.get("upload:failures") || 0 },
+    uploads: {
+      failures: counters.get("upload:failures") || 0,
+      successes: counters.get("upload:successes") || 0,
+      // failures per 100 attempts — the number that actually matters
+      failureRate: (() => {
+        const f = counters.get("upload:failures") || 0;
+        const s2 = counters.get("upload:successes") || 0;
+        const total = f + s2;
+        return total ? +((f / total) * 100).toFixed(2) : 0;
+      })(),
+    },
     counters: Object.fromEntries(counters), // raw view for debugging
   };
   return out;
@@ -152,6 +165,7 @@ module.exports = {
   recordSocketError,
   recordProvider,
   recordUploadFailure,
+  recordUploadSuccess,
   snapshot,
   reset,
 };

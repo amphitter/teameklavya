@@ -12,6 +12,8 @@
  */
 const mongoose = require("mongoose");
 const Event = require("../models/event.model");
+const { clampQuery } = require("../utils/regex");
+const { parseLimit } = require("../repositories/cursor");
 const Community = require("../models/community.model");
 const User = require("../models/user.model");
 const Post = require("../models/post.model");
@@ -29,9 +31,16 @@ function escapeRegex(q) {
 // GET /api/search?q=&type=
 exports.globalSearch = async (req, res) => {
   try {
-    const q = String(req.query.q || "").trim();
+    // §63 — cap the query string BEFORE it reaches a regex or the database.
+    // An unbounded search string is both a CPU risk (catastrophic backtracking
+    // on a large corpus) and a request-size vector.
+    const q = clampQuery(req.query.q, 100);
     const type = TYPES.includes(req.query.type) ? req.query.type : "all";
-    const limit = type === "all" ? 5 : 20;
+
+    // §63 — client-requested page size is clamped server-side, never trusted.
+    // "all" is the nav type-ahead (tiny); a specific tab may ask for more.
+    const defaultLimit = type === "all" ? 5 : 20;
+    const limit = parseLimit(req.query.limit, { def: defaultLimit, max: 50 });
 
     if (q.length < 2) {
       return res.json({ success: true, q, events: [], communities: [], people: [], posts: [] });

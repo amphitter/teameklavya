@@ -6,6 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { CalendarDays, LogOut, Pencil, Ticket } from "lucide-react";
 import { api } from "@/utils/api";
+import { compressFor } from "@/utils/compress-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -123,8 +124,10 @@ export default function ProfileView() {
     const setBusy = kind === "avatar" ? setAvatarBusy : setCoverBusy;
     setBusy(true);
     try {
+      // §20 — an avatar is rendered at ≤400px; a cover at ≤1920px.
+      const { file: toUpload } = await compressFor(file, kind === "avatar" ? "avatar" : "poster");
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", toUpload);
       const res = await api.post(`/upload/image?folder=${kind === "avatar" ? "avatars" : "covers"}`, fd);
       if (res.data?.success && res.data.url) {
         setSocialForm((f) => ({ ...f, [kind === "avatar" ? "avatar" : "coverImage"]: res.data.url }));

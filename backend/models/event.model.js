@@ -307,7 +307,10 @@ eventSchema.pre("validate", function (next) {
 });
 
 // Indexes for better query performance
-eventSchema.index({ slug: 1 });
+// NOTE (Part 5, Phase 3): `slug` already declares `unique: true` at the field
+// level, which creates this exact index. Declaring it a second time built a
+// DUPLICATE index on every deployment — wasted storage plus a second B-tree
+// to update on every write. Removed intentionally; do not re-add.
 eventSchema.index({ startDate: 1 });
 eventSchema.index({ isFeatured: 1 });
 eventSchema.index({ createdBy: 1 });

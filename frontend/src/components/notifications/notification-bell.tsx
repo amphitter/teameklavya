@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCheck, Eraser, Settings2 } from "lucide-react";
@@ -15,8 +15,15 @@ import {
 import { NotificationRow, type NotificationData } from "@/components/notifications/notification-item";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { cn } from "@/lib/utils";
+import { usePolling } from "@/lib/query";
 
+/**
+ * §6 (audit) / §51 — the bell used to poll every 30s forever, including
+ * while the tab sat hidden all day. These ranges adapt: the interval
+ * stretches when nothing changes and snaps back the moment it does.
+ */
 const POLL_MS = 30_000;
+const MAX_POLL_MS = 5 * 60_000;
 
 /**
  * Header bell: unread badge, dropdown with the latest notifications,
@@ -56,13 +63,29 @@ export function NotificationBell() {
     [user]
   );
 
-  // Poll unread count while signed in
-  useEffect(() => {
-    if (!ready || !user) return;
-    refresh(true);
-    const t = setInterval(() => refresh(true), POLL_MS);
-    return () => clearInterval(t);
-  }, [ready, user, refresh]);
+  // Poll unread count while signed in — visibility-aware + adaptive (§51).
+  const unreadRef = useRef(0);
+  const reportRef = useRef<(changed: boolean) => void>(() => {});
+
+  const refreshUnread = useCallback(async () => {
+    if (!user) return;
+    try {
+      const r = await api.get("/notifications/unread-count");
+      const next = r.data?.unreadCount || 0;
+      reportRef.current(next !== unreadRef.current);
+      unreadRef.current = next;
+      setUnread(next);
+    } catch {
+      /* a failed badge poll must never surface as an error */
+    }
+  }, [user]);
+
+  const { reportResult } = usePolling(refreshUnread, {
+    intervalMs: POLL_MS,
+    maxIntervalMs: MAX_POLL_MS,
+    enabled: ready && Boolean(user),
+  });
+  reportRef.current = reportResult;
 
   // Load full items when the dropdown opens
   useEffect(() => {
@@ -212,17 +235,29 @@ export function NotificationsNavLink({ active, onClick }: { active: boolean; onC
   const { user } = useSessionUser();
   const [unread, setUnread] = useState(0);
 
-  useEffect(() => {
+  const unreadRef = useRef(0);
+  const reportRef = useRef<(changed: boolean) => void>(() => {});
+
+  const pull = useCallback(async () => {
     if (!user) return;
-    const pull = () =>
-      api
-        .get("/notifications/unread-count")
-        .then((r) => setUnread(r.data?.unreadCount || 0))
-        .catch(() => {});
-    pull();
-    const t = setInterval(pull, POLL_MS);
-    return () => clearInterval(t);
+    try {
+      const r = await api.get("/notifications/unread-count");
+      const next = r.data?.unreadCount || 0;
+      reportRef.current(next !== unreadRef.current);
+      unreadRef.current = next;
+      setUnread(next);
+    } catch {
+      /* silent */
+    }
   }, [user]);
+
+  // Adaptive + paused while hidden (§51 — this runs on mobile all day).
+  const { reportResult } = usePolling(pull, {
+    intervalMs: POLL_MS,
+    maxIntervalMs: MAX_POLL_MS,
+    enabled: Boolean(user),
+  });
+  reportRef.current = reportResult;
 
   return (
     <Link

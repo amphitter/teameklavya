@@ -3,6 +3,7 @@ const User = require("../models/user.model");
 const Block = require("../models/block.model");
 const { notify } = require("../services/notification.service");
 const { isBlockedBetween, severFollows } = require("../services/social.service");
+const { PostRepository } = require("../repositories");
 
 const USER_LIST_FIELDS = "firstName lastName username verified profile.avatar profile.institution";
 
@@ -34,12 +35,16 @@ exports.toggleFollow = async (req, res) => {
     if (existing) {
       const wasPending = existing.status === "pending";
       await existing.deleteOne();
+      // §13 — the follower's cached social graph just changed; without this the
+      // feed keeps ranking as if they still followed this author.
+      PostRepository.invalidateFeedContext(followerId);
       return res.json({ success: true, following: false, requested: false, wasPending });
     }
 
     const isPrivate = target.socialSettings?.profileVisibility === "private";
     const status = isPrivate ? "pending" : "accepted";
     await Follow.create({ follower: followerId, followee: followeeId, status });
+    PostRepository.invalidateFeedContext(followerId);
 
     if (status === "pending") {
       notify({ user: followeeId, actor: followerId, type: "follow_request" });
@@ -169,6 +174,8 @@ exports.acceptRequest = async (req, res) => {
 
     edge.status = "accepted";
     await edge.save();
+    // The requester's cached graph is what changes — they now follow someone.
+    PostRepository.invalidateFeedContext(requesterId);
     notify({ user: requesterId, actor: req.user.id, type: "follow_accepted" });
     // Achievements: crowd_favorite (10 accepted followers — for the followed user)
     require("../services/achievement.service").checkAchievements(req.user.id);
@@ -191,6 +198,7 @@ exports.declineRequest = async (req, res) => {
     if (!edge) return res.status(404).json({ success: false, message: "No pending request from this user" });
 
     await edge.deleteOne();
+    PostRepository.invalidateFeedContext(requesterId);
     res.json({ success: true, following: false });
   } catch (error) {
     console.error("Decline request error:", error.message);

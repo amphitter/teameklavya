@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { CalendarDays, Globe, ImagePlus, Loader2, MapPin, Plus, Send, Users, Video, Vote, X } from "lucide-react";
 import { api } from "@/utils/api";
+import { compressFor } from "@/utils/compress-image";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,8 +57,12 @@ export function CreatePost({ onCreated, composerRef }: { onCreated: (post: FeedP
           toast.error(`${file.name} is larger than 5 MB`);
           continue;
         }
+        // §20 — compress on-device before spending the user's mobile data.
+        // A 10 MB phone photo becomes a ~1.5 MB / 1400px image; if compression
+        // fails or doesn't help we upload the original (never block the user).
+        const { file: toUpload } = await compressFor(file, "post");
         const fd = new FormData();
-        fd.append("file", file);
+        fd.append("file", toUpload);
         const res = await api.post("/upload/image?folder=posts", fd, {
           headers: { "Content-Type": "multipart/form-data" },
         });

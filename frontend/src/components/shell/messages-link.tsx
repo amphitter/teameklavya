@@ -1,27 +1,42 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { MessageCircle } from "lucide-react";
 import { api } from "@/utils/api";
 import { useSessionUser } from "@/components/shell/use-session-user";
+import { usePolling } from "@/lib/query";
 
 /** Header messages icon with unread badge → /messages. */
 export function MessagesNavLink() {
   const { user, ready } = useSessionUser();
   const [unread, setUnread] = useState(0);
 
-  useEffect(() => {
+  // §6 (audit) / §51 — was a fixed 30s interval that kept firing on hidden
+  // tabs. Now: paused while hidden, and the interval stretches up to 5min
+  // whenever consecutive polls return the same count.
+  const unreadRef = useRef(0);
+  const reportRef = useRef<(changed: boolean) => void>(() => {});
+
+  const pull = useCallback(async () => {
     if (!user) return;
-    const pull = () =>
-      api
-        .get("/messages/unread-count")
-        .then((r) => setUnread(r.data?.unreadCount || 0))
-        .catch(() => {});
-    pull();
-    const t = setInterval(pull, 30_000);
-    return () => clearInterval(t);
+    try {
+      const r = await api.get("/messages/unread-count");
+      const next = r.data?.unreadCount || 0;
+      reportRef.current(next !== unreadRef.current);
+      unreadRef.current = next;
+      setUnread(next);
+    } catch {
+      /* silent — the badge is not worth an error toast */
+    }
   }, [user]);
+
+  const { reportResult } = usePolling(pull, {
+    intervalMs: 30_000,
+    maxIntervalMs: 5 * 60_000,
+    enabled: Boolean(user),
+  });
+  reportRef.current = reportResult;
 
   if (ready && !user) return null;
 

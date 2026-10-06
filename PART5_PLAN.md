@@ -22,7 +22,39 @@
 - **Abuse guards** (§27): follow/unfollow + like/unlike loop limits (action-frequency caps on top of unique indexes), comment flood, community-create cooldown, live-join spam (socket-side already partly done — add per-user caps), upload session limits (§23).
 - **Idempotency audit** (§28): registration (unique response per user+event — verify), check-in (idempotent scan), follow/like/save (unique compound indexes — verify each), event interest (unique), post double-click (client disable + optional client-request-id dedup window). Fix any gap found.
 
-## Phase 3 — Database layer: repositories, queries, pagination, counters
+## Phase 3 — Database layer: repositories, queries, pagination, counters ✅ DONE (44/44 selftest)
+**New surface:** `backend/repositories/` (7 repositories + `cursor.js`), `backend/utils/regex.js`, `backend/utils/csv-stream.js`, `backend/tests/phase3.selftest.js`.
+
+All results below are **proven against a live (in-memory) MongoDB** by counting the actual commands Mongoose issues — not asserted from source.
+
+| # | Fix | Before | After |
+|---|---|---|---|
+| P0-1 | Participant list (`getEventResponses`) | **UNBOUNDED** — every registration loaded + populated | Cursor-paginated, hard-capped at `MAX_LIMIT` 100, server-side `q` + `status` (§7, §41) |
+| P0-2 | CSV export | Whole event in RAM + full CSV string in memory | **Streams** in 200-row batches — memory is O(batch), not O(event) (§40) |
+| P0-3 | `getRegistrationCounts` | **2 queries per event id** (2N) | **ONE aggregation** for the whole batch (§36) |
+| P0-4 | `getRegistrationStats` | 5 queries (3 counts + 2 aggregates) | **ONE `$facet`** aggregation (§40) |
+| P0-5 | Feed | `Follow.find` ran **3×** per request + a per-page `countDocuments` | Social graph resolved **once** per user and cached (PRIVATE, identity-scoped key); `hasMore` derived from an over-fetched slice (§35) |
+| P0-6 | Public event detail | Fresh Mongo read for every visitor | Cache-first via `cache.peek()` → **0 DB queries on a hit**; private events **never** cached; missing events never cached as `null` (§9, §10) |
+| P0-7 | Duplicate indexes | 4 duplicate B-trees (event.slug, user.email, user.username, ticket.token) | Removed — measured against the **compiled** schema, not source text |
+
+Also shipped: `MAX_LIMIT` centralised in `repositories/cursor.js` (§7 — `limit > 100` can never be accepted); server-side search caps (§63); **CSV formula-injection guard** (§62); `cache.peek()` added to `CacheService` so cache-first reads can't poison a key with `null`.
+
+Frontend: `admin/events/[id]/registrations` moved from client-side filtering to **server-side** debounced search + status filter with cursor "Load more" — required, because paginating the endpoint while filtering client-side would have searched only the first 100 rows.
+
+**Cache invalidation matrix (§13) — every write that feeds a cached read:**
+
+| Write | Invalidates |
+|---|---|
+| follow / unfollow / accept / decline request | `followlist:{actorId}` |
+| org follow / unfollow | `followlist:{userId}` + `org:{id}` + `counts:org:{id}` |
+| event interest toggle (both directions) | `followlist:{userId}` + `event:{id}` + interest count |
+| registration submitted | `counts:event:{id}` + `stats:event:{id}` + `followlist:{userId}` |
+| event update / delete | `event:{id}` + `event:slug:{slug}` + counts + `explore:*` + `trending:*` |
+
+> One regression was caught and fixed during verification: org follows initially did **not** invalidate the feed context, so the "Following" tab kept showing orgs the user had just unfollowed. Invalidation is now wired on every path above.
+
+**Not yet optimised (deferred, deliberately):** `getEvents` (browse/explore) still uses a 4-field case-insensitive `$regex` and ~24 `countDocuments` call sites — that is Phase 4/5 work and needs care, since changing it alters search semantics.
+
 - **`repositories/`** (§4): EventRepository, RegistrationRepository, PostRepository, OrganizationRepository, CommunityRepository, MessageRepository, NotificationRepository (+ shared cursor helpers). Controllers stop owning query construction for these domains; domain ownership (event vs social) enforced here (§2).
 - **Cursor pagination everywhere it's list-shaped** (§7): registrations/participants (currently UNBOUNDED — P0), feed (already cursor — keep), comments, followers/following, notifications, messages, community members, search results. Response shape `{ items, nextCursor, hasMore }`; server-side max limit (≤100) everywhere (§63).
 - **Feed optimization** (§38): single follow-list fetch per request (reuse via 30–60s per-user cache), drop per-page `countDocuments` (derive `hasMore` from slice), reduce pool hydration cost (populate only what cards render), keep deterministic ranking (already follows §38 priorities).
@@ -33,7 +65,26 @@
 - **CSV export** (P0): stream via cursor → json2csv transform → res stream; never buffer whole export.
 - **Batching audit** (§36): reminder fan-out, notification fan-out (already insertMany), org/member lookups — batch where >1 round trip remains.
 
-## Phase 4 — Storage & image optimization
+## Phase 4 — Storage & image optimization ✅ DONE (37/37 selftest)
+**New surface:** `services/storage.provider.js`, `models/mediaAsset.model.js`, `scripts/media-sweeper.js`, `tests/phase4.selftest.js`; frontend `components/ui/optimized-image.tsx`, `utils/compress-image.ts`.
+
+| # | Fix | Before | After |
+|---|---|---|---|
+| §66 | Storage access | Cloudinary specifics lived in `media.service.js` | **StorageProvider interface** (6 members) with Cloudinary + local implementations; provider chosen in one place |
+| §19 | Image delivery | One `getOptimizedImageUrl()` helper, barely used; 56 raw `<img>` tags pulling originals | `imageVariants()` (thumb/small/medium/large per preset) + `OptimizedImage` with responsive `srcset`, `f_auto`, lazy loading, CLS-safe dimensions |
+| §19/§20 | Presets | ad-hoc pixel values | Canonical presets (avatar/logo/poster/post/banner) mirrored **exactly** between backend `VARIANT_PRESETS` and frontend `PRESET_WIDTHS` |
+| §20 | Upload size | Flat 5 MB for everything | **Per-folder ceilings** (avatars 2 MB, posters 8 MB, posts 5 MB) + on-device canvas compression before upload |
+| §62 | Upload trust | `file.mimetype` from the browser was believed | **Magic-byte sniffing** — a PNG labelled `image/jpeg` is rejected |
+| §55 | Orphaned assets | Upload-then-failed-write leaked bytes forever | `MediaAsset` lifecycle (`pending → active → cleanup_pending`) + `scripts/media-sweeper.js` (dry-run by default, 24h grace) |
+| §57 | Upload metrics | failures only | successes + **failure rate** for the Phase 7 dashboard |
+| §49 | Assets | `next.config.ts` empty | AVIF/WebP, Cloudinary remote pattern, `optimizePackageImports` tree-shaking |
+
+**Bug found and fixed:** the inherited Cloudinary URL regex used a single `\/[^\/]*` group that swallowed whichever path segment came first — it silently **deleted the version marker** (`/v1712345678/`) on every transform, and stacked transformations instead of replacing them. Rewritten with explicit segment parsing: transformation is replaced, version and asset path are always preserved.
+
+**Sweeper verified end-to-end:** with 3 assets in the DB (stale `pending`, `active` carrying a stale timestamp, fresh `pending` inside its grace window) the reclaimable query returned exactly the one stale `pending` asset. An `active` asset is never reclaimed, even with an expired `cleanupAfter` — the §53 "user content is permanent" rule holds structurally, not by convention.
+
+Frontend: `OptimizedImage` migrated into the 6 hot paths (event card, user avatar, feed post, posts grid, event post card, profile cover); compression wired into the 3 highest-volume uploaders (create post, event poster, avatar/cover).
+
 - **Cloudinary variants** (§19–20): `imageVariants()` helper (thumb 160 / small 400 / medium 800 / large 1200, f_auto q_auto); store `media.variants` or transform-on-delivery URLs; API responses return sized URLs (never originals for cards).
 - **Upload pre-optimization** (§20): client-side canvas resize (max 1600px poster / 400px avatar) + size guard before POST; server keeps 5MB cap + MIME checks.
 - **Upload rate/session limits** (§23): init cooldown per user; stricter than generic upload bucket.

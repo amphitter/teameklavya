@@ -5,7 +5,7 @@
  */
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, Loader2, MessageSquare, Search, Users } from "lucide-react";
 import { api } from "@/utils/api";
 import { EmptyState, ErrorState, Skeleton } from "@/components/states";
@@ -64,6 +64,7 @@ export default function SearchPage() {
 
 function SearchView() {
   const params = useSearchParams();
+  const router = useRouter();
   const q = (params.get("q") || "").trim();
 
   const [input, setInput] = useState(q);
@@ -77,6 +78,18 @@ function SearchView() {
 
   useEffect(() => setInput(q), [q]);
 
+  /* §39 — debounce typing into the URL. Previously every submit did a full
+   * document reload; now it is a soft navigation, and pausing for 350ms means
+   * a 12-character query costs one request instead of twelve. */
+  useEffect(() => {
+    if (input === q) return;
+    const t = setTimeout(() => {
+      const next = input.trim();
+      router.replace(next ? `/search?q=${encodeURIComponent(next)}` : "/search", { scroll: false });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [input, q, router]);
+
   const run = useCallback(() => {
     if (q.length < 2) {
       setEvents([]);
@@ -87,21 +100,26 @@ function SearchView() {
     }
     setLoading(true);
     setError(false);
+    // §39 — abort the previous search when the query or tab changes so a slow
+    // response can never overwrite a newer one.
+    const controller = new AbortController();
     api
-      .get("/search", { params: { q, type: tab } })
+      .get("/search", { params: { q, type: tab }, signal: controller.signal })
       .then((r) => {
         setEvents(r.data?.events || []);
         setCommunities(r.data?.communities || []);
         setPeople(r.data?.people || []);
         setPosts(r.data?.posts || []);
       })
-      .catch(() => setError(true))
+      .catch((e: any) => {
+        if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
+        setError(true);
+      })
       .finally(() => setLoading(false));
+    return () => controller.abort();
   }, [q, tab]);
 
-  useEffect(() => {
-    run();
-  }, [run]);
+  useEffect(() => run(), [run]);
 
   const counts: Record<Tab, number> = {
     events: events.length,
@@ -121,7 +139,7 @@ function SearchView() {
         onSubmit={(e) => {
           e.preventDefault();
           const value = input.trim();
-          window.location.href = value ? `/search?q=${encodeURIComponent(value)}` : "/search";
+          router.push(value ? `/search?q=${encodeURIComponent(value)}` : "/search");
         }}
         className="mt-4"
       >

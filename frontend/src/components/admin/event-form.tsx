@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Cropper from "react-easy-crop";
 import { toast } from "sonner";
 import { api } from "@/utils/api";
+import { compressFor } from "@/utils/compress-image";
 import { getImageUrl } from "@/utils/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -327,8 +328,10 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
     try {
       let bannerUrl = existingBanner || "";
       if (posterFile) {
+        // §20 — posters render at ≤1920px; upload that, not the 12 MB original.
+        const { file: posterToUpload } = await compressFor(posterFile, "poster");
         const fd = new FormData();
-        fd.append("file", posterFile);
+        fd.append("file", posterToUpload);
         const up = await api.post("/upload/image?folder=posters", fd, {
           headers: { "Content-Type": "multipart/form-data" },
         });

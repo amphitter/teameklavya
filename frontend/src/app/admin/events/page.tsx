@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   BarChart3,
   CalendarDays,
@@ -47,6 +48,7 @@ const STATUS_OPTIONS = [
 ];
 
 export default function AdminEventsPage() {
+  const router = useRouter();
   const [events, setEvents] = useState<AdminEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -150,7 +152,7 @@ export default function AdminEventsPage() {
             title="No events found"
             description={search ? "Try a different search term." : "Create your first event to get started."}
             actionLabel="Create Event"
-            onAction={() => (window.location.href = "/admin/events/create")}
+            onAction={() => router.push("/admin/events/create")}
           />
         ) : (
           <div className="space-y-3">

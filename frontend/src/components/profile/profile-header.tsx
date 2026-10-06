@@ -4,6 +4,7 @@ import Link from "next/link";
 import { BadgeCheck, CalendarDays, MapPin } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { handleOf, compactCount } from "@/lib/social";
+import { OptimizedImage } from "@/components/ui/optimized-image";
 
 export interface ProfileStats {
   posts: number;
@@ -52,7 +53,16 @@ export function ProfileHeader({
       <div className="relative h-28 w-full bg-gradient-to-r from-[#2563FF] via-[#6C35FF] to-[#D946EF] sm:h-36">
         {p.coverImage ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={p.coverImage} alt="" className="h-full w-full object-cover" />
+          <OptimizedImage
+            src={p.coverImage}
+            alt=""
+            preset="banner"
+            size="large"
+            priority
+            sizes="100vw"
+            className="h-full w-full object-cover"
+            style={{ height: "100%" }}
+          />
         ) : null}
       </div>
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   ArrowRight,
@@ -41,6 +42,7 @@ interface ActivityItem {
 }
 
 export default function AdminDashboardPage() {
+  const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
@@ -202,7 +204,7 @@ export default function AdminDashboardPage() {
                 title="No upcoming events"
                 description="Create your next event and it will appear here."
                 actionLabel="Create event"
-                onAction={() => (window.location.href = "/admin/events/create")}
+                onAction={() => router.push("/admin/events/create")}
               />
             </div>
           ) : (

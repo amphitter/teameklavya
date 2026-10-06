@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { ArrowLeft, CheckCircle2, Loader2, Radio, Target, Trophy, XCircle } from "lucide-react";
 import { api } from "@/utils/api";
+import { usePolling } from "@/lib/query";
 import { Button } from "@/components/ui/button";
 import { PageLoader, ErrorState, EmptyState } from "@/components/states";
 import { Leaderboard, type LeaderboardEntry } from "@/components/quiz/leaderboard";
@@ -78,17 +79,29 @@ export default function QuizPage() {
 
   useEffect(load, [load]);
 
-  // Live leaderboard refresh while the quiz is live
-  useEffect(() => {
-    if (quiz?.status !== "live") return;
-    const t = setInterval(() => {
-      api
-        .get(`/quizzes/${id}/leaderboard`)
-        .then((r) => r.data?.success && setBoard({ entries: r.data.entries || [], me: r.data.me, total: r.data.total || 0 }))
-        .catch(() => {});
-    }, 10_000);
-    return () => clearInterval(t);
-  }, [quiz?.status, id]);
+  // Live leaderboard refresh while the quiz is live.
+  // §6 (audit) — was a flat 10s interval even when nobody had moved. Now it
+  // pauses on hidden tabs and stretches to 45s while the board is static, so
+  // a live quiz that stalls stops hammering the leaderboard endpoint.
+  const boardSigRef = useRef("");
+  const reportBoardRef = useRef<(changed: boolean) => void>(() => {});
+
+  const loadBoard = useCallback(async () => {
+    const r = await api.get(`/quizzes/${id}/leaderboard`);
+    if (!r.data?.success) return;
+    const entries: LeaderboardEntry[] = r.data.entries || [];
+    const sig = entries.map((e) => `${e.user?._id ?? ""}:${e.score}`).join(",");
+    reportBoardRef.current(sig !== boardSigRef.current);
+    boardSigRef.current = sig;
+    setBoard({ entries, me: r.data.me, total: r.data.total || 0 });
+  }, [id]);
+
+  const { reportResult: reportBoard } = usePolling(loadBoard, {
+    intervalMs: 10_000,
+    maxIntervalMs: 45_000,
+    enabled: quiz?.status === "live",
+  });
+  reportBoardRef.current = reportBoard;
 
   const submit = async () => {
     if (selected === null || submitting || !quiz) return;

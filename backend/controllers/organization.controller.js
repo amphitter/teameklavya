@@ -3,6 +3,7 @@ const Organization = require("../models/organization.model");
 const User = require("../models/user.model");
 const OrgFollow = require("../models/orgFollow.model");
 const { notify } = require("../services/notification.service");
+const { PostRepository, OrganizationRepository } = require("../repositories");
 const Event = require("../models/event.model");
 const RegistrationResponse = require("../models/registrationResponse.model");
 const AuditLog = require("../models/auditLog.model");
@@ -247,9 +248,16 @@ exports.toggleFollowOrg = async (req, res) => {
     const existing = await OrgFollow.findOne({ user: req.user.id, organization: org._id });
     if (existing) {
       await existing.deleteOne();
+      // §13 — the follower's cached social graph holds their org follows;
+      // without this the "Following" tab keeps showing org posts they just
+      // unfollowed (and hides orgs they just followed).
+      PostRepository.invalidateFeedContext(req.user.id);
+      OrganizationRepository.invalidate(org); // follower count changed
       return res.json({ success: true, following: false });
     }
     await OrgFollow.create({ user: req.user.id, organization: org._id });
+    PostRepository.invalidateFeedContext(req.user.id);
+    OrganizationRepository.invalidate(org);
     notify({ user: org.createdBy, actor: req.user.id, type: "org_follow", organization: org._id });
     res.json({ success: true, following: true });
   } catch (error) {

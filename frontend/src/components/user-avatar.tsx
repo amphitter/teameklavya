@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { getImageUrl } from "@/utils/image";
+import { OptimizedImage } from "@/components/ui/optimized-image";
 
 /**
  * Consistent circular avatar everywhere (initials fallback).
@@ -24,12 +24,16 @@ export function UserAvatar({
 
   if (avatar) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={getImageUrl(avatar)}
+      // §19 — avatars render at 24–96 px but were downloading full-resolution
+      // originals. This requests the avatar variant family (64/160/400/800)
+      // and lets the browser pick via srcset.
+      <OptimizedImage
+        src={avatar}
         alt={user?.firstName || "User"}
+        preset="avatar"
         width={size}
         height={size}
+        sizes={`${size}px`}
         className={cn("shrink-0 rounded-full object-cover", className)}
         style={{ width: size, height: size }}
       />

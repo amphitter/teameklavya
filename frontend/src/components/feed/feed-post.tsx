@@ -18,6 +18,7 @@ import {
   Users,
 } from "lucide-react";
 import { api } from "@/utils/api";
+import { OptimizedImage } from "@/components/ui/optimized-image";
 import { UserAvatar } from "@/components/user-avatar";
 import { ReportDialog } from "@/components/moderation/report-dialog";
 import { RichContent } from "@/components/feed/rich-content";
@@ -33,7 +34,6 @@ import { EventPostCard } from "@/components/feed/event-post-card";
 import { FollowAuthorButton } from "@/components/feed/follow-author-button";
 import { Comments } from "@/components/feed/comments";
 import { compactCount, handleOf, timeAgo } from "@/lib/social";
-import { cloudinaryUrl } from "@/utils/image";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import type { FeedPostData } from "@/components/feed/types";
 import { cn } from "@/lib/utils";
@@ -219,19 +219,27 @@ export function FeedPost({
             post.images.length === 1 ? "grid-cols-1" : "grid-cols-2"
           )}
         >
-          {post.images.map((img, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={i}
-              src={cloudinaryUrl(img, post.images.length === 1 ? { w: 800 } : { w: 500, h: 500 })}
-              alt={`Photo ${i + 1} by ${post.author?.firstName || "user"}`}
-              className={cn(
-                "w-full object-cover",
-                post.images.length === 1 ? "max-h-[520px] rounded-xl" : "aspect-square rounded-lg"
-              )}
-              loading="lazy"
-            />
-          ))}
+          {post.images.map((img, i) => {
+            const single = post.images.length === 1;
+            return (
+              /* §19 — feed photos now get a responsive srcset (320/640/1024/1400)
+                 instead of one fixed 800px (or 500px) request, so a mid-range
+                 phone on 4G pulls the smallest variant that fills its screen. */
+              <OptimizedImage
+                key={i}
+                src={img}
+                alt={`Photo ${i + 1} by ${post.author?.firstName || "user"}`}
+                preset="post"
+                size={single ? "medium" : "small"}
+                aspectRatio={single ? undefined : "1 / 1"}
+                sizes={single ? "(max-width: 640px) 100vw, 600px" : "(max-width: 640px) 50vw, 300px"}
+                className={cn(
+                  "w-full object-cover",
+                  single ? "max-h-[520px] rounded-xl" : "aspect-square rounded-lg"
+                )}
+              />
+            );
+          })}
         </div>
       )}
 

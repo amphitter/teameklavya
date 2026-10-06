@@ -1,7 +1,7 @@
 {
   "name": "eventhub-backend",
   "version": "1.0.0",
-  "description": "EventHub API — events, registrations, tickets, check-in",
+  "description": "EventHub API \u2014 events, registrations, tickets, check-in",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
@@ -12,11 +12,15 @@
     "test:quiz": "node tests/quiz.e2e.js",
     "test:memories": "node tests/memories.e2e.js",
     "test:mgmt": "node tests/mgmt.e2e.js",
-    "test:all": "node tests/platform.selftest.js && node tests/phase2.selftest.js && node tests/social.e2e.js && node tests/community.e2e.js && node tests/quiz.e2e.js && node tests/memories.e2e.js && node tests/mgmt.e2e.js && node tests/live.e2e.js",
+    "test:all": "node tests/platform.selftest.js && node tests/phase2.selftest.js && node tests/phase3.selftest.js && node tests/phase4.selftest.js && node tests/social.e2e.js && node tests/community.e2e.js && node tests/quiz.e2e.js && node tests/memories.e2e.js && node tests/mgmt.e2e.js && node tests/live.e2e.js",
     "test:live": "node tests/live.e2e.js",
     "test:load": "node tests/live.load.js",
     "seed:demo": "node scripts/seed-demo.js",
-    "test:platform": "node tests/platform.selftest.js && node tests/phase2.selftest.js"
+    "test:platform": "node tests/platform.selftest.js && node tests/phase2.selftest.js",
+    "test:phase3": "node tests/phase3.selftest.js",
+    "test:phase4": "node tests/phase4.selftest.js",
+    "media:sweep": "node scripts/media-sweeper.js",
+    "media:sweep:apply": "node scripts/media-sweeper.js --apply"
   },
   "keywords": [],
   "author": "",

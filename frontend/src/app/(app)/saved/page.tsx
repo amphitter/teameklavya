@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bookmark } from "lucide-react";
 import { api } from "@/utils/api";
 import { PageLoader, ErrorState, EmptyState } from "@/components/states";
@@ -12,6 +13,7 @@ import type { FeedPostData } from "@/components/feed/types";
  * Real saved posts only; deleted/hidden originals drop out server-side.
  */
 export default function SavedPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [posts, setPosts] = useState<FeedPostData[]>([]);
@@ -53,7 +55,7 @@ export default function SavedPage() {
           title="Nothing saved yet"
           description="Tap the bookmark on any post to keep it here for later."
           actionLabel="Back to feed"
-          onAction={() => window.location.assign("/")}
+          onAction={() => router.push("/")}
         />
       ) : (
         posts.map((p) => <FeedPost key={p._id} post={p} onDeleted={remove} />)

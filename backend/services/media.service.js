@@ -1,194 +1,241 @@
 /**
- * EventHub Media Service — Cloudinary
- * ───────────────────────────────────
- * The ONLY place in the codebase that talks to Cloudinary.
- * Application code calls uploadImage / deleteImage / getOptimizedImageUrl
- * and never depends on upload-provider specifics.
+ * EventHub Media Service — the ONLY place application code touches storage.
+ * ─────────────────────────────────────────────────────────────────────────
+ * Application code calls uploadImage / deleteImage / getOptimizedImageUrl /
+ * imageVariants and never depends on provider specifics (§66). The concrete
+ * provider lives in `services/storage.provider.js`.
  *
- * Env vars (backend only — secrets are never exposed to the browser):
- *   CLOUDINARY_CLOUD_NAME
- *   CLOUDINARY_API_KEY
- *   CLOUDINARY_API_SECRET
+ * Part 5 Phase 4 additions:
+ *   • §19  `imageVariants()` — canonical responsive sets (thumb/small/medium/
+ *          large) so list and card UIs NEVER load a full-resolution original.
+ *   • §20  per-folder size ceilings, so an avatar upload can't burn the same
+ *          budget as an event banner.
+ *   • §55  `trackAsset()` / `markAttached()` / `markCleanupPending()` — orphan
+ *          tracking. If an upload succeeds but the database write fails, the
+ *          asset is marked `cleanup_pending` and reclaimed later by
+ *          `scripts/media-sweeper.js` instead of leaking forever.
+ *   • §62  magic-byte validation — the browser-supplied MIME type is not
+ *          trusted; the real file signature must agree.
  *
- * If Cloudinary is not configured (e.g. local dev), uploads fall back to
- * local disk storage under /uploads so the app keeps working.
+ * Env vars (backend only — secrets never reach the browser):
+ *   CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET
+ *
+ * Without credentials the app falls back to local disk so dev still works.
  */
-const cloudinary = require("cloudinary").v2;
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-// Part 5, Phase 1 (§31/§68): Cloudinary sits behind a circuit breaker with
-// a hard timeout. Provider failures surface as StorageUploadError — clean,
-// retryable, never leaking provider internals (§61). Metrics feed the
-// admin infrastructure dashboard (Phase 7).
-const { createCircuitBreaker } = require("../utils/with-timeout");
+
+const {
+  provider,
+  CloudinaryProvider,
+  VARIANT_PRESETS,
+  ALLOWED_MIME_TYPES,
+  folderLimit,
+  sniffMime,
+} = require("./storage.provider");
+
 const { StorageUploadError } = require("../utils/app-error");
 const metrics = require("./metrics.service");
 
-function rawCloudinaryUpload(buffer, options) {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(options, (error, result) =>
-      error ? reject(error) : resolve(result)
-    );
-    stream.end(buffer);
-  });
-}
+const MediaAsset = require("../models/mediaAsset.model");
 
-const cloudinaryBreaker = createCircuitBreaker("cloudinary", rawCloudinaryUpload, {
-  failureThreshold: 4,
-  cooldownMs: 30_000,
-  timeoutMs: 20_000,
-});
+const MAX_FILE_BYTES = 8 * 1024 * 1024; // hard ceiling for any single upload
 
-const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
+/* ── Validation (§62, §63) ───────────────────────────────────────────── */
 
-const isConfigured = () =>
-  Boolean(
-    process.env.CLOUDINARY_CLOUD_NAME &&
-    process.env.CLOUDINARY_API_KEY &&
-    process.env.CLOUDINARY_API_SECRET
-  );
-
-if (isConfigured()) {
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-    secure: true,
-  });
-}
-
-const ALLOWED_MIME_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-]);
-
-const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
-
-/** Validate an incoming file before anything else touches it. */
-function validateImageFile({ mimetype, size }) {
-  if (!mimetype || !ALLOWED_MIME_TYPES.has(mimetype)) {
+/**
+ * Validate a buffer's real content against its declared type.
+ * Returns a user-facing message, or null when the file is acceptable.
+ *
+ * Two checks:
+ *   1. declared MIME must be one we support
+ *   2. the magic bytes must actually match that type (anti-spoofing)
+ */
+function validateImageBuffer(buffer, mimetype, folder = "misc") {
+  if (!ALLOWED_MIME_TYPES.has(mimetype)) {
     return "Only JPEG, PNG, WebP or GIF images are allowed";
   }
-  if (!size || size > MAX_FILE_BYTES) {
-    return "Image must be 5 MB or smaller";
+  if (!buffer || !buffer.length) {
+    return "Empty file";
+  }
+
+  const limit = folderLimit(folder);
+  if (buffer.length > limit) {
+    const mb = (limit / (1024 * 1024)).toFixed(0);
+    return `Image is too large for this upload type (max ${mb} MB)`;
+  }
+
+  const actual = sniffMime(buffer);
+  if (!actual) {
+    return "That file doesn't look like a valid image";
+  }
+  if (actual !== mimetype) {
+    // Not leaked to the client in detail — just a clean rejection (§61).
+    return "File contents don't match the declared image type";
   }
   return null;
 }
 
-/**
- * Validate mimetype only — for multer's fileFilter, where the file object
- * carries no `size` yet (bytes haven't been read). Size is enforced separately
- * by multer's `limits.fileSize` and re-checked on the buffer in uploadImage.
- */
+/** Validate for multer's fileFilter, which runs before bytes are read. */
 function validateImageMimetype(mimetype) {
   return mimetype && ALLOWED_MIME_TYPES.has(mimetype)
     ? null
     : "Only JPEG, PNG, WebP or GIF images are allowed";
 }
 
-const EXT_BY_MIME = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "image/gif": "gif",
-};
+/** Legacy signature kept for compatibility with existing call sites. */
+function validateImageFile({ mimetype, size }) {
+  if (!mimetype || !ALLOWED_MIME_TYPES.has(mimetype)) {
+    return "Only JPEG, PNG, WebP or GIF images are allowed";
+  }
+  if (!size || size > MAX_FILE_BYTES) {
+    return "Image must be 8 MB or smaller";
+  }
+  return null;
+}
+
+const isConfigured = () => provider.name !== "local";
+
+/* ── Upload (§20, §55) ───────────────────────────────────────────────── */
 
 /**
- * Upload an image buffer.
- * @returns {Promise<{provider:'cloudinary', url:string, publicId:string, width:number, height:number}>|
- *           {provider:'local', url:string, publicId:string}>}
+ * Upload an image and register it for orphan tracking.
+ *
+ * The asset is recorded as `pending` BEFORE the upload. Callers that attach
+ * it to a domain object then call `markAttached()`; if they never do (the
+ * request failed, the DB write threw), the record stays `pending` and the
+ * sweeper reclaims it. This is the §55 rule: never delete immediately, mark
+ * and reclaim safely later.
+ *
+ * @returns {Promise<{provider, url, publicId, width?, height?, bytes?}>}
  */
-async function uploadImage({ buffer, mimetype, folder = "misc", publicId }) {
-  const validationError = validateImageFile({ mimetype, size: buffer.length });
+async function uploadImage({
+  buffer,
+  mimetype,
+  folder = "misc",
+  publicId,
+  uploadedBy = null,
+  purpose = "default",
+}) {
+  const validationError = validateImageBuffer(buffer, mimetype, folder);
   if (validationError) {
     const err = new Error(validationError);
     err.status = 400;
     throw err;
   }
 
-  const safeFolder = String(folder).replace(/[^a-z0-9/_-]/gi, "") || "misc";
-  const id = publicId || `${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
-
-  if (isConfigured()) {
-    let result;
-    try {
-      result = await cloudinaryBreaker.invoke(buffer, {
-        folder: `eventhub/${safeFolder}`,
-        public_id: id,
-        resource_type: "image",
-      });
-    } catch (error) {
-      // Breaker open / timeout / provider error → clean surface, real
-      // cause stays in server logs (§61), upload metric recorded (§57).
-      console.error("Cloudinary upload failed:", error?.message || error);
-      metrics.recordUploadFailure();
-      throw new StorageUploadError();
-    }
-    return {
-      provider: "cloudinary",
-      url: result.secure_url,
-      publicId: result.public_id,
-      width: result.width,
-      height: result.height,
-    };
-  }
-
-  // Local fallback (dev only) — keep the app usable without Cloudinary creds
-  console.warn("⚠ Cloudinary not configured — storing upload on local disk (dev fallback)");
-  const dir = path.join(UPLOADS_DIR, safeFolder);
-  fs.mkdirSync(dir, { recursive: true });
-  const filename = `${id}.${EXT_BY_MIME[mimetype] || "jpg"}`;
-  fs.writeFileSync(path.join(dir, filename), buffer);
-  return {
-    provider: "local",
-    url: `/uploads/${safeFolder}/${filename}`,
-    publicId: `local/${safeFolder}/${filename}`,
-  };
-}
-
-/**
- * Delete an uploaded image by its public id (Cloudinary only; local files
- * are ephemeral dev artifacts).
- */
-async function deleteImage(publicId) {
-  if (!publicId || !isConfigured() || publicId.startsWith("local/")) return { ok: true };
+  let result;
   try {
-    await cloudinary.uploader.destroy(publicId);
-    return { ok: true };
+    result = await provider.upload({ buffer, mimetype, folder, publicId });
   } catch (error) {
-    console.error("Cloudinary delete error:", error.message);
-    return { ok: false, error: error.message };
+    console.error(`[media] upload failed (${provider.name}):`, error?.message || error);
+    metrics.recordUploadFailure();
+    throw new StorageUploadError();
+  }
+
+  metrics.recordUploadSuccess?.();
+
+  // Orphan tracking — best effort, never blocks the upload.
+  try {
+    await MediaAsset.create({
+      publicId: result.publicId,
+      provider: result.provider,
+      folder,
+      purpose,
+      url: result.url,
+      bytes: result.bytes || buffer.length,
+      uploadedBy: uploadedBy || null,
+      status: "pending",
+      // Reclaim anything still unattached after 24h.
+      cleanupAfter: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+  } catch (assetErr) {
+    // §68 — asset bookkeeping must never fail a successful upload.
+    console.warn("[media] asset tracking failed:", assetErr?.message || assetErr);
+  }
+
+  return result;
+}
+
+/** Delete an uploaded image by public id. */
+async function deleteImage(publicId) {
+  if (!publicId) return { ok: true };
+  const outcome = await provider.remove(publicId);
+  if (outcome.ok) {
+    try {
+      await MediaAsset.updateOne(
+        { publicId },
+        { $set: { status: "deleted", deletedAt: new Date() } }
+      );
+    } catch (_err) {
+      /* bookkeeping only */
+    }
+  }
+  return outcome;
+}
+
+/* ── Delivery (§19) ──────────────────────────────────────────────────── */
+
+/**
+ * Optimized single-URL transform.
+ * @param {string} urlOrId
+ * @param {{width?:number,height?:number,crop?:string,quality?:string,format?:string}} opts
+ */
+function getOptimizedImageUrl(urlOrId, opts = {}) {
+  return provider.optimizeUrl(urlOrId, opts);
+}
+
+/**
+ * The responsive variant set for one image (§19).
+ *
+ * Cards and lists should use `thumb` or `small`; detail views use `medium`
+ * or `large`. `original` exists only for explicit "view full size" actions —
+ * serving it inside a feed is exactly the waste this phase removes.
+ *
+ * @param {string} urlOrId
+ * @param {"avatar"|"logo"|"poster"|"post"|"banner"|"default"} preset
+ * @returns {{thumb:string|null, small:string|null, medium:string|null,
+ *            large:string|null, original:string|null}}
+ */
+function imageVariants(urlOrId, preset = "default") {
+  return provider.variants(urlOrId, preset);
+}
+
+/* ── Orphan lifecycle (§55) ──────────────────────────────────────────── */
+
+/** Confirm an asset is in use by a domain object (event, post, user…). */
+async function markAttached(publicId, attachedTo) {
+  if (!publicId) return;
+  try {
+    await MediaAsset.updateOne(
+      { publicId },
+      { $set: { status: "active", attachedTo: String(attachedTo || null), cleanupAfter: null } }
+    );
+  } catch (err) {
+    console.warn("[media] markAttached failed:", err?.message || err);
   }
 }
 
 /**
- * Get an optimized/transformed image URL.
- * Pass a full Cloudinary URL or a public id; non-Cloudinary URLs are
- * returned untouched (with a cache-busting-free passthrough).
+ * Flag an asset for safe reclamation — used when the upload succeeded but the
+ * subsequent database write failed. We never delete immediately: a transient
+ * DB blip shouldn't destroy a user's upload, so it gets a grace window and is
+ * removed by the sweeper instead.
  */
-function getOptimizedImageUrl(urlOrId, { width = 800, height, quality = "auto", format = "auto" } = {}) {
-  if (!urlOrId) return urlOrId;
-
-  // Already a Cloudinary delivery URL → inject/replace transformations
-  const match = urlOrId.match(
-    /^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload)(?:\/[^/]*)(\/.+)$/
-  );
-  const transformation = `c_limit,w_${width}${height ? `,h_${height}` : ""},q_${quality},f_${format}`;
-
-  if (match) {
-    return `${match[1]}/${transformation}${match[2]}`;
+async function markCleanupPending(publicId, reason = "attach_failed") {
+  if (!publicId) return;
+  try {
+    await MediaAsset.updateOne(
+      { publicId },
+      {
+        $set: {
+          status: "cleanup_pending",
+          cleanupReason: String(reason).slice(0, 200),
+          cleanupAfter: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      }
+    );
+  } catch (err) {
+    console.warn("[media] markCleanupPending failed:", err?.message || err);
   }
-  if (isConfigured() && !urlOrId.startsWith("http") && !urlOrId.startsWith("/")) {
-    // Bare public id
-    return cloudinary.url(urlOrId, {
-      secure: true,
-      transformation: [{ width, crop: "limit", quality, fetch_format: format }],
-    });
-  }
-  return urlOrId;
 }
 
 module.exports = {
@@ -196,8 +243,14 @@ module.exports = {
   uploadImage,
   deleteImage,
   getOptimizedImageUrl,
+  imageVariants,
   validateImageFile,
+  validateImageBuffer,
   validateImageMimetype,
+  markAttached,
+  markCleanupPending,
   ALLOWED_MIME_TYPES,
   MAX_FILE_BYTES,
+  VARIANT_PRESETS,
+  CloudinaryProvider,
 };

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   Users,
   UsersRound,
@@ -82,6 +82,7 @@ const POLICY_META: Record<string, { label: string; icon: typeof Globe }> = {
  * hosted events and the member list. Every count shown is real.
  */
 export default function CommunityPage() {
+  const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
   const { user } = useSessionUser();
 
@@ -266,7 +267,7 @@ export default function CommunityPage() {
     api
       .delete(`/communities/${slug}`)
       .then((r) => {
-        if (r.data?.success) window.location.assign("/communities");
+        if (r.data?.success) router.push("/communities");
         else toast.error(r.data?.message || "Delete failed");
       })
       .catch((e: any) => toast.error(e.response?.data?.message || "Delete failed"));

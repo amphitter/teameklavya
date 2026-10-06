@@ -15,7 +15,10 @@ const communitySchema = new mongoose.Schema(
       minlength: [3, "Community name is too short"],
       maxlength: [60, "Community name is too long"],
     },
-    slug: { type: String, required: true, unique: true, index: true },
+    // NOTE (Part 5, Phase 3): `index: true` was removed here. `unique: true`
+    // already creates the {slug:1} index; the extra declaration built a
+    // duplicate B-tree on every deployment.
+    slug: { type: String, required: true, unique: true },
     description: {
       type: String,
       trim: true,

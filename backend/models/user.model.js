@@ -98,10 +98,14 @@ const userSchema = new mongoose.Schema({
   pastTickets: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Ticket' }]
 });
 
-// 🔹 Ensure email uniqueness is enforced at DB level too
-userSchema.index({ email: 1 }, { unique: true });
-// 🔹 Username lookups (public profile URLs /profile/[username])
-userSchema.index({ username: 1 }, { unique: true, sparse: true });
+// 🔹 Email uniqueness IS enforced at DB level — via `unique: true` on the
+// field itself, which already builds this index.
+// NOTE (Part 5, Phase 3): these two schema.index() calls used to duplicate
+// the field-level `unique` indexes (Mongoose warned on every boot). Two
+// wasted indexes on the largest hot collection in the app. The field-level
+// declarations are canonical — keep those, not these.
+//   userSchema.index({ email: 1 }, { unique: true });
+//   userSchema.index({ username: 1 }, { unique: true, sparse: true });
 
 // 🔹 Pre-save hook: sanitize names and guarantee a unique @username.
 // Runs for email signups, Google OAuth users and legacy docs alike —

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { CalendarDays, MapPin, Video } from "lucide-react";
 import type { FeedEventData } from "@/components/feed/types";
-import { cloudinaryUrl } from "@/utils/image";
+import { OptimizedImage } from "@/components/ui/optimized-image";
 import { eventStatus } from "@/lib/events";
 
 /**
@@ -26,10 +26,14 @@ export function EventPostCard({ event }: { event: FeedEventData }) {
       <div className="relative h-[84px] w-[84px] shrink-0 overflow-hidden rounded-lg bg-muted sm:h-[100px] sm:w-[100px]">
         {event.bannerUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={cloudinaryUrl(event.bannerUrl, { w: 240, h: 240 })}
+          <OptimizedImage
+            src={event.bannerUrl}
             alt={event.title}
+            preset="poster"
+            size="thumb"
+            sizes="240px"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            style={{ height: "100%" }}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand-light to-purple-light text-primary">

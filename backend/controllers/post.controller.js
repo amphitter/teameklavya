@@ -15,6 +15,7 @@ const OrgFollow = require("../models/orgFollow.model");
 const Event = require("../models/event.model");
 const Organization = require("../models/organization.model");
 const User = require("../models/user.model");
+const { PostRepository } = require("../repositories");
 
 const AUTHOR_FIELDS = "firstName lastName username verified email profile.avatar profile.institution";
 const EVENT_FIELDS = "title slug bannerUrl startDate endDate venue eventType category organizer price visibility isLive";
@@ -23,54 +24,30 @@ const COMMUNITY_FIELDS = "name slug avatarUrl";
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
+/**
+ * Feed helpers now DELEGATE to PostRepository (Part 5, Phase 3 — §4, §35).
+ *
+ * The viewer's social graph (follows, org follows, registrations, interests,
+ * community memberships) used to be queried inline here, which meant it was
+ * re-queried on every call. A single feed request ran `Follow.find` up to
+ * THREE times: once to build the visibility filter, once for ranking, and
+ * once inside the counter attach for the "following" badge.
+ *
+ * `getFeedContext()` resolves that graph ONCE per user and caches it under a
+ * PRIVATE, identity-scoped key (never shared, never stale-revalidated).
+ * These wrappers keep the original signatures so every call site below is
+ * unchanged — but each call is now a cache lookup, not a database query.
+ */
+
 /** Attach likeCount / commentCount / likedByMe / savedByMe to a page of posts. */
 async function attachCounts(posts, viewerId) {
-  if (!posts.length) return [];
-  const ids = posts.map((p) => p._id);
-
-  const [likeAgg, commentAgg, myReactions, mySaves, myFollows] = await Promise.all([
-    Reaction.aggregate([
-      { $match: { post: { $in: ids } } },
-      { $group: { _id: "$post", count: { $sum: 1 } } },
-    ]),
-    Comment.aggregate([
-      // Moderation-removed comments never count (Part 3, Phase 10)
-      { $match: { post: { $in: ids }, removedAt: null } },
-      { $group: { _id: "$post", count: { $sum: 1 } } },
-    ]),
-    viewerId
-      ? Reaction.find({ post: { $in: ids }, user: viewerId }).select("post").lean()
-      : Promise.resolve([]),
-    viewerId
-      ? Save.find({ post: { $in: ids }, user: viewerId }).select("post").lean()
-      : Promise.resolve([]),
-    viewerId
-      ? Follow.find({ follower: viewerId, status: "accepted" }).select("followee").lean()
-      : Promise.resolve([]),
-  ]);
-
-  const likeMap = new Map(likeAgg.map((r) => [String(r._id), r.count]));
-  const commentMap = new Map(commentAgg.map((r) => [String(r._id), r.count]));
-  const likedSet = new Set(myReactions.map((r) => String(r.post)));
-  const savedSet = new Set(mySaves.map((r) => String(r.post)));
-  const followingSet = new Set(myFollows.map((f) => String(f.followee)));
-
-  return posts.map((p) => ({
-    ...p,
-    likeCount: likeMap.get(String(p._id)) || 0,
-    commentCount: commentMap.get(String(p._id)) || 0,
-    likedByMe: likedSet.has(String(p._id)),
-    savedByMe: savedSet.has(String(p._id)),
-    authorFollowing: p.author ? followingSet.has(String(p.author._id || p.author)) : false,
-  }));
+  const ctx = await PostRepository.getFeedContext(viewerId);
+  return PostRepository.attachCounts(posts, ctx, viewerId);
 }
 
 /** Hide non-public events from populated posts (unless they were never public). */
 function sanitizeEvent(post) {
-  if (post.event && post.event.visibility !== "public") {
-    post.event = null;
-  }
-  return post;
+  return PostRepository.sanitizeEvent(post);
 }
 
 /* ── Topics & mentions (Part 3) ──────────────────────────── */
@@ -110,28 +87,9 @@ async function parseMentions(content, excludeUserId) {
  *   (soft-deleted communities are excluded, so their posts vanish)
  */
 async function visibilityFilter(viewerId) {
-  if (!viewerId) return { visibility: "public" };
-  const [following, registrations, communities] = await Promise.all([
-    Follow.find({ follower: viewerId, status: "accepted" }).select("followee").lean(),
-    RegistrationResponse.find({ userId: viewerId }).select("eventId").lean(),
-    // Active memberships in non-deleted communities (deleted ones vanish)
-    CommunityMember.find({ user: viewerId, status: "active" })
-      .select("community")
-      .populate({ path: "community", select: "_id", match: { deletedAt: null, status: { $ne: "suspended" } } })
-      .lean(),
-  ]);
-  const followedAuthors = following.map((f) => f.followee);
-  const eventIds = registrations.map((r) => r.eventId);
-  const communityIds = communities.filter((m) => m.community).map((m) => m.community._id);
-  return {
-    $or: [
-      { visibility: "public" },
-      { visibility: "followers", author: { $in: followedAuthors } },
-      { visibility: "event_participants", event: { $in: eventIds } },
-      { visibility: "community", community: { $in: communityIds } },
-      { author: viewerId },
-    ],
-  };
+  // Cached social-graph lookup — see the Helpers note above.
+  const ctx = await PostRepository.getFeedContext(viewerId);
+  return PostRepository.visibilityFilter(ctx, viewerId);
 }
 
 /** Point-check: may this viewer see this specific post? */
@@ -197,12 +155,10 @@ exports.getFeed = async (req, res) => {
       if (!viewerId) {
         return res.json({ success: true, posts: [], page, hasMore: false, nextCursor: null, tab });
       }
-      const [following, followedOrgs] = await Promise.all([
-        Follow.find({ follower: viewerId, status: "accepted" }).select("followee").lean(),
-        OrgFollow.find({ user: viewerId }).select("organization").lean(),
-      ]);
-      const authors = following.map((f) => f.followee);
-      const orgs = followedOrgs.map((f) => f.organization);
+      // ONE cached social-graph load replaces two per-request queries.
+      const ctx = await PostRepository.getFeedContext(viewerId);
+      const authors = ctx.following;
+      const orgs = ctx.orgs;
       if (!authors.length && !orgs.length) {
         return res.json({ success: true, posts: [], page, hasMore: false, nextCursor: null, tab });
       }
@@ -212,7 +168,7 @@ exports.getFeed = async (req, res) => {
           ...(orgs.length ? [{ organization: { $in: orgs } }] : []),
         ],
       };
-      const visible = await visibilityFilter(viewerId);
+      const visible = PostRepository.visibilityFilter(ctx, viewerId);
       const filter = { status: "published", $and: [scope, visible] };
 
       // Cursor mode (createdAt|_id) with offset fallback for old clients
@@ -226,58 +182,55 @@ exports.getFeed = async (req, res) => {
         }
       }
 
-      const [posts, total] = await Promise.all([
-        Post.find(filter)
-          .sort({ createdAt: -1, _id: -1 })
-          .skip(cursor ? 0 : (page - 1) * limit)
-          .limit(limit)
-          .populate("author", AUTHOR_FIELDS)
-          .populate("event", EVENT_FIELDS)
-          .populate("organization", ORG_FIELDS)
-          .lean(),
-        Post.countDocuments(filter),
-      ]);
+      // Over-fetch by one row and derive `hasMore` from the slice. This
+      // replaces the per-page `countDocuments()` — one fewer round trip on
+      // the hottest screen in the app (§5).
+      const rows = await Post.find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(cursor ? 0 : (page - 1) * limit)
+        .limit(limit + 1)
+        .populate("author", AUTHOR_FIELDS)
+        .populate("event", EVENT_FIELDS)
+        .populate("organization", ORG_FIELDS)
+        .lean();
+
+      const hasMore = rows.length > limit;
+      const posts = hasMore ? rows.slice(0, limit) : rows;
       const enriched = (await attachCounts(posts, viewerId)).map(sanitizeEvent);
       const last = posts[posts.length - 1];
-      const shown = cursor ? limit : page * limit;
       return res.json({
         success: true,
         posts: enriched,
         page,
-        hasMore: shown < total,
+        hasMore,
         nextCursor: last ? `${new Date(last.createdAt).toISOString()}|${last._id}` : null,
         tab,
       });
     }
 
     /* ── for-you: weighted pool + cursor ── */
-    const [pool, following, followedOrgs, registrations, interests, myCommunities] = await Promise.all([
-      Post.find({ status: "published", ...(await visibilityFilter(viewerId)) })
-        .sort({ createdAt: -1, _id: -1 })
-        .limit(FEED_POOL)
-        .populate("author", AUTHOR_FIELDS)
-        .populate("event", EVENT_FIELDS)
-        .populate("organization", ORG_FIELDS)
-        .populate("community", COMMUNITY_FIELDS)
-        .lean(),
-      viewerId
-        ? Follow.find({ follower: viewerId, status: "accepted" }).select("followee").lean()
-        : Promise.resolve([]),
-      viewerId ? OrgFollow.find({ user: viewerId }).select("organization").lean() : Promise.resolve([]),
-      viewerId
-        ? RegistrationResponse.find({ userId: viewerId }).select("eventId").lean()
-        : Promise.resolve([]),
-      viewerId ? EventInterest.find({ user: viewerId }).select("event").lean() : Promise.resolve([]),
-      viewerId
-        ? CommunityMember.find({ user: viewerId, status: "active" }).select("community").lean()
-        : Promise.resolve([]),
-    ]);
+    // ONE cached social-graph load replaces FIVE per-request queries
+    // (follows, org follows, registrations, interests, memberships) — the
+    // audit's "semi-N+1": the same data was being fetched 3× per feed page.
+    const ctx = await PostRepository.getFeedContext(viewerId);
 
-    const followedUserSet = new Set(following.map((f) => String(f.followee)));
-    const followedOrgSet = new Set(followedOrgs.map((f) => String(f.organization)));
-    const registeredEventSet = new Set(registrations.map((r) => String(r.eventId)));
-    const interestedEventSet = new Set(interests.map((i) => String(i.event)));
-    const communitySet = new Set(myCommunities.map((m) => String(m.community)));
+    const pool = await Post.find({
+      status: "published",
+      ...PostRepository.visibilityFilter(ctx, viewerId),
+    })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(FEED_POOL)
+      .populate("author", AUTHOR_FIELDS)
+      .populate("event", EVENT_FIELDS)
+      .populate("organization", ORG_FIELDS)
+      .populate("community", COMMUNITY_FIELDS)
+      .lean();
+
+    const followedUserSet = new Set(ctx.following);
+    const followedOrgSet = new Set(ctx.orgs);
+    const registeredEventSet = new Set(ctx.events);
+    const interestedEventSet = new Set(ctx.interests);
+    const communitySet = new Set(ctx.communities);
 
     const scored = pool.map((post) => {
       const authorId = String(post.author?._id || post.author);
@@ -363,21 +316,23 @@ exports.getEventPosts = async (req, res) => {
       ...(await visibilityFilter(req.user?.id || null)),
     };
 
-    const [posts, total] = await Promise.all([
-      Post.find(filter)
-        .sort({ createdAt: -1, _id: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .populate("author", AUTHOR_FIELDS)
-        .populate("event", EVENT_FIELDS)
-        .populate("organization", ORG_FIELDS)
-        .populate("community", COMMUNITY_FIELDS)
-        .lean(),
-      Post.countDocuments(filter),
-    ]);
+    // Over-fetch by one row and derive `hasMore` from the slice, instead of
+    // paying for a second `countDocuments()` round trip on every scroll (§5).
+    const rows = await Post.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit + 1)
+      .populate("author", AUTHOR_FIELDS)
+      .populate("event", EVENT_FIELDS)
+      .populate("organization", ORG_FIELDS)
+      .populate("community", COMMUNITY_FIELDS)
+      .lean();
+
+    const hasMore = rows.length > limit;
+    const posts = hasMore ? rows.slice(0, limit) : rows;
 
     const enriched = (await attachCounts(posts, req.user?.id || null)).map(sanitizeEvent);
-    res.json({ success: true, posts: enriched, page, hasMore: page * limit < total });
+    res.json({ success: true, posts: enriched, page, hasMore });
   } catch (error) {
     console.error("Get event posts error:", error.message);
     res.status(500).json({ success: false, message: "Failed to load event posts" });
@@ -739,21 +694,23 @@ exports.getTopicPosts = async (req, res) => {
         : [{ visibility: "public" }],
     };
 
-    const [posts, total] = await Promise.all([
-      Post.find(filter)
-        .sort({ createdAt: -1, _id: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .populate("author", AUTHOR_FIELDS)
-        .populate("event", EVENT_FIELDS)
-        .populate("organization", ORG_FIELDS)
-        .populate("community", COMMUNITY_FIELDS)
-        .lean(),
-      Post.countDocuments(filter),
-    ]);
+    // Over-fetch by one row and derive `hasMore` from the slice, instead of
+    // paying for a second `countDocuments()` round trip on every scroll (§5).
+    const rows = await Post.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit + 1)
+      .populate("author", AUTHOR_FIELDS)
+      .populate("event", EVENT_FIELDS)
+      .populate("organization", ORG_FIELDS)
+      .populate("community", COMMUNITY_FIELDS)
+      .lean();
+
+    const hasMore = rows.length > limit;
+    const posts = hasMore ? rows.slice(0, limit) : rows;
 
     const enriched = (await attachCounts(posts, viewerId)).map(sanitizeEvent);
-    res.json({ success: true, topic, posts: enriched, page, hasMore: page * limit < total });
+    res.json({ success: true, topic, posts: enriched, page, hasMore });
   } catch (error) {
     console.error("Topic posts error:", error.message);
     res.status(500).json({ success: false, message: "Failed to load topic posts" });

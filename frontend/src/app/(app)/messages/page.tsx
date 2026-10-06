@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/utils/api";
+import { usePolling } from "@/lib/query";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, Skeleton } from "@/components/states";
 import { UserAvatar } from "@/components/user-avatar";
@@ -75,22 +76,37 @@ function MessagesView() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /* ── conversations list (poll every 12s) ── */
-  const loadList = useCallback((silent = false) => {
+  /* ── conversations list ──
+   * §6 (audit) — was a flat 12s interval. Now paused while the tab is hidden
+   * and stretched to 60s when consecutive polls return an identical list, so
+   * an idle tab costs a trickle instead of ~300 requests/hour. */
+  const listSigRef = useRef("");
+  const reportListRef = useRef<(changed: boolean) => void>(() => {});
+
+  const loadList = useCallback(async (silent = false) => {
     if (!silent) setListLoading(true);
-    api
-      .get("/messages/conversations")
-      .then((r) => setConversations(r.data?.conversations || []))
-      .catch(() => !silent && setListError(true))
-      .finally(() => setListLoading(false));
+    try {
+      const r = await api.get("/messages/conversations");
+      const convs: Conversation[] = r.data?.conversations || [];
+      // A conversation changed if the set of ids or any unread count moved.
+      const sig = convs.map((c) => `${c._id}:${c.unreadCount || 0}`).join(",");
+      reportListRef.current(sig !== listSigRef.current);
+      listSigRef.current = sig;
+      setConversations(convs);
+      setListError(false);
+    } catch {
+      if (!silent) setListError(true);
+    } finally {
+      setListLoading(false);
+    }
   }, []);
 
-  useEffect(() => {
-    if (!user) return;
-    loadList();
-    const t = setInterval(() => loadList(true), 12_000);
-    return () => clearInterval(t);
-  }, [user, loadList]);
+  const { reportResult: reportList } = usePolling(loadList, {
+    intervalMs: 12_000,
+    maxIntervalMs: 60_000,
+    enabled: Boolean(user),
+  });
+  reportListRef.current = reportList;
 
   /* ── ?with=userId → open (or create) that conversation ── */
   useEffect(() => {
@@ -116,30 +132,43 @@ function MessagesView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, openConv, conversations.length]);
 
-  /* ── active thread (poll every 6s) ── */
+  /* ── active thread ──
+   * §6 (audit) — was the hottest loop in the app at a flat 6s (600
+   * requests/hour per open tab). Now: paused while hidden, and the gap
+   * stretches from 6s toward 30s whenever nothing new arrives, snapping
+   * straight back to 6s the moment a message lands. */
+  const threadSigRef = useRef("");
+  const reportThreadRef = useRef<(changed: boolean) => void>(() => {});
+
   const loadThread = useCallback(
-    (silent = false) => {
+    async (silent = false) => {
       if (!activeId) return;
       if (!silent) setThreadLoading(true);
-      api
-        .get(`/messages/conversations/${activeId}`)
-        .then((r) => {
-          setMessages(r.data?.messages || []);
-          if (r.data?.other) setOther(r.data.other);
-          if (typeof r.data?.muted === "boolean") setMuted(r.data.muted);
-        })
-        .catch(() => {})
-        .finally(() => setThreadLoading(false));
+      try {
+        const r = await api.get(`/messages/conversations/${activeId}`);
+        const msgs: ChatMessage[] = r.data?.messages || [];
+        const last = msgs[msgs.length - 1];
+        const sig = `${msgs.length}:${last?._id || ""}`;
+        reportThreadRef.current(sig !== threadSigRef.current);
+        threadSigRef.current = sig;
+        setMessages(msgs);
+        if (r.data?.other) setOther(r.data.other);
+        if (typeof r.data?.muted === "boolean") setMuted(r.data.muted);
+      } catch {
+        /* silent: a dropped background poll must not blank the thread */
+      } finally {
+        setThreadLoading(false);
+      }
     },
     [activeId]
   );
 
-  useEffect(() => {
-    if (!activeId) return;
-    loadThread();
-    const t = setInterval(() => loadThread(true), 6_000);
-    return () => clearInterval(t);
-  }, [activeId, loadThread]);
+  const { reportResult: reportThread } = usePolling(loadThread, {
+    intervalMs: 6_000,
+    maxIntervalMs: 30_000,
+    enabled: Boolean(activeId),
+  });
+  reportThreadRef.current = reportThread;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: messages.length > 20 ? "auto" : "smooth" });

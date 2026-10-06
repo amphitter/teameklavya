@@ -4,6 +4,7 @@ import Link from "next/link";
 import { CalendarDays, Clock, MapPin, Users, Video, Wifi } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getImageUrl } from "@/utils/image";
+import { OptimizedImage } from "@/components/ui/optimized-image";
 
 export interface EventCardData {
   _id: string;
@@ -37,12 +38,18 @@ function Poster({ event }: { event: EventCardData }) {
   return (
     <div className="relative h-44 w-full shrink-0 overflow-hidden bg-muted">
       {url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        /* §19 — request the 640w variant, not the original poster.
+           A 1600px+ banner downloaded into a 176px-tall card was pure waste.
+           (A JS comment, not a JSX comment: a ternary branch can only
+           return ONE expression.) */
+        <OptimizedImage
           src={url}
           alt={event.title}
+          preset="poster"
+          size="small"
+          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-          loading="lazy"
+          style={{ height: "100%" }}
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-dots bg-brand-light">

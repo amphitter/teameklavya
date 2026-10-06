@@ -14,6 +14,7 @@ const { canManageEvent } = require("../middleware/auth.middleware");
 const Post = require("../models/post.model");
 const Reaction = require("../models/reaction.model");
 const Comment = require("../models/comment.model");
+const { EventRepository, PostRepository } = require("../repositories");
 
 // ─── Visibility helpers ─────────────────────────────────────
 const VISIBILITY_LEVELS = ["public", "unlisted", "private"];
@@ -21,25 +22,13 @@ const VISIBILITY_LEVELS = ["public", "unlisted", "private"];
 /**
  * Strip organizer-sensitive / credential fields before returning an event
  * through a public endpoint.
+ *
+ * Single source of truth (Part 5, Phase 3): this lives in EventRepository
+ * because the cache now stores the redacted projection. If the controller
+ * kept its own copy, a cached event and a freshly-loaded event could silently
+ * diverge in what they expose.
  */
-const toPublicEvent = (event) => {
-  const doc = event.toObject ? event.toObject() : { ...event };
-  const strip = [
-    "meetingId",
-    "passcode",
-    "checkIns",
-    "bannerPublicId",
-    "ticketSettings",
-    "whatsappGroup",
-  ];
-  strip.forEach((key) => delete doc[key]);
-  if (doc.visibility === "private") {
-    delete doc.onlineEventLink;
-    delete doc.materials;
-    delete doc.recordingLink;
-  }
-  return doc;
-};
+const toPublicEvent = EventRepository.toPublicEvent;
 
 const getEventLocationHTML = (event) => {
   switch (event.eventType) {
@@ -290,8 +279,11 @@ exports.getEventCategories = async (_req, res) => {
 // Public: get by slug (unlisted reachable by link; private needs organizer/admin rights)
 exports.getEventBySlug = async (req, res) => {
   try {
-    // Moderation takedowns (Part 3, Phase 10) are gone from detail pages too
-    const event = await Event.findOne({ slug: req.params.slug, removedAt: null }).populate("organization", "name slug logoUrl");
+    // Cache-first public lookup (Part 5, Phase 3 — §9, §14).
+    // Public event pages are the hottest read in EventHub and are identical
+    // for every viewer, so a hit costs ZERO database queries. Private events
+    // are deliberately never cached: their visibility depends on the caller.
+    const event = await EventRepository.publicBySlug(req.params.slug);
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
 
     if (event.visibility === "private") {
@@ -303,7 +295,8 @@ exports.getEventBySlug = async (req, res) => {
       return res.json({ success: true, event }); // full document for the organizer
     }
 
-    res.json({ success: true, event: toPublicEvent(event) });
+    // Already the redacted public projection — do not re-strip.
+    res.json({ success: true, event });
   } catch (error) {
     console.error("Get event by slug error:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -395,6 +388,10 @@ exports.updateEvent = async (req, res) => {
       console.error("Event update notify error:", notifyErr.message); // never fail the update itself
     }
 
+    // §13 — drop every cached view of this event, or visitors keep being
+    // served the pre-edit page until the TTL expires.
+    EventRepository.invalidate(event);
+
     res.json({ success: true, event });
   } catch (error) {
     console.error("Update event error:", error);
@@ -480,6 +477,8 @@ exports.deleteEvent = async (req, res) => {
   try {
     const event = await Event.findByIdAndDelete(req.params.id);
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    // §13 — a deleted event must vanish from discovery immediately.
+    EventRepository.invalidate(event);
     res.json({ success: true, message: "Event deleted" });
   } catch (error) {
     console.error("Delete event error:", error);
@@ -1084,11 +1083,17 @@ exports.toggleEventInterest = async (req, res) => {
     const existing = await EventInterest.findOne({ event: eventId, user: req.user.id });
     if (existing) {
       await existing.deleteOne();
+      PostRepository.invalidateFeedContext(req.user.id);
+      EventRepository.invalidate({ _id: eventId });
       const count = await EventInterest.countDocuments({ event: eventId });
       return res.json({ success: true, interested: false, count });
     }
 
     await EventInterest.create({ event: eventId, user: req.user.id });
+    // §13 — interest feeds the "Following"/"For you" ranking, so the viewer's
+    // cached social graph is now stale.
+    PostRepository.invalidateFeedContext(req.user.id);
+    EventRepository.invalidate({ _id: eventId }); // interest count changed
     const count = await EventInterest.countDocuments({ event: eventId });
     res.json({ success: true, interested: true, count });
   } catch (error) {

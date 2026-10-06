@@ -232,6 +232,26 @@ function revalidate(key, loader, ttl) {
     });
 }
 
+/**
+ * Read a FRESH value WITHOUT invoking a loader (§15).
+ *
+ * Why this exists: `getOrSet` always stores whatever the loader returns —
+ * including `null`. For lookups where "missing" is a meaningful, temporary
+ * state (an event that doesn't exist yet, a private event needing an
+ * authorization check), caching that null would poison the key until TTL.
+ * `peek` lets a caller try the cache first and only fall through to the
+ * database when there is genuinely nothing usable there.
+ *
+ * @returns {*} the cached value, or `undefined` on miss / expiry / disabled
+ */
+function peek(key) {
+  if (disabled) return undefined;
+  const entry = provider.get(key);
+  if (!entry) return undefined;
+  metrics.recordCacheHit(key);
+  return entry.value;
+}
+
 /** Invalidate one key (call on the domain's write path, §13). */
 function invalidate(key) {
   provider.del(key);
@@ -254,7 +274,7 @@ function flush() {
 }
 
 module.exports = {
-  cache: { getOrSet, invalidate, invalidatePrefix, stats, flush },
+  cache: { getOrSet, peek, invalidate, invalidatePrefix, stats, flush },
   keys,
   TTL,
   PRIVATE_PREFIXES,

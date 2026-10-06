@@ -265,6 +265,53 @@ provider, budget or internal-metric term.
 - `docs/PERFORMANCE-ARCHITECTURE.md` (§73): the full architecture doc (caching, rate limits, DB, frontend, realtime, images, API, pooling, pagination, batching, monitoring, failure handling) + §74 final architecture diagram.
 - `.env.example` updates for every new optional var.
 
+### Phase 8 — RESULT: ✅ **DONE**
+
+Delivered `docs/DATA-RETENTION.md` (§53–54), `docs/BACKUP-STRATEGY.md` (§69) and
+`docs/PERFORMANCE-ARCHITECTURE.md` (§73–74, incl. the ASCII architecture diagram),
+plus `backend/scripts/retention-sweeper.js` and the `.env.example` block.
+
+**The retention decision (§53–54): there are NO TTL indexes anywhere — on purpose.**
+A TTL index deletes the *whole document* and cannot clear a single field, so it is
+only safe on a collection whose every document is disposable. No collection here
+qualifies: a TTL on `users.resetOtpExpires` would delete the ACCOUNT the moment an
+OTP lapsed, and a TTL on `mediaassets.cleanupAfter` would orphan the remote
+Cloudinary/R2 object. Verified by audit — zero `expireAfterSeconds` across all 35 models.
+
+Classification instead:
+- **PERMANENT (never auto-deleted)** — users, events, posts, comments, reactions,
+  saves, registrationresponses, tickets, eventresults, certificates,
+  communities/members/claims, organizations/follows, follows, conversations,
+  messages, notifications, blocks, reports, auditlogs, quizzes + questions +
+  activities, liveanswers, participantsessions, quizparticipations,
+  userachievements, eventinterests, registrationforms, pollresponses.
+- **TEMPORARY** — the three auth-token field pairs on `users` (`$unset` by the
+  sweeper, field-level, account survives), pending/cleanup_pending `mediaassets`
+  (existing `media-sweeper.js`), and `livemessages`/`qaquestions` (opt-in archival
+  only, off by default).
+
+`retention-sweeper.js` — dry run by default, `--apply` to commit, `--section=`,
+`--json`, `--max=`. Section 1 `$unset`s expired `emailVerify*`/`resetOtp*`/
+`passwordResetToken*` pairs. Section 2 archives live chat/Q&A only if
+`RETENTION_LIVE_ARCHIVE_DAYS > 0` (unset = keep forever, which is the safe default);
+`EventResult` snapshots are immutable and stored separately, so archiving chat can
+never invalidate a certificate. Sections 3/4 are read-only orphan counts + inventory.
+
+**Guard, verified by fault injection:** a temporary `expireAfterSeconds` index added
+to `user.model.js` made the selftest fail 80/82 with
+`NO TTL on users (it would delete accounts when an OTP expires)` — the negative
+assertion genuinely fires. Model restored, tree clean.
+
+**Results:** phase8 selftest **82 passed, 0 failed** (6 sections: TTL-safety,
+token sweeper, opt-in archival, script ergonomics, documentation deliverables,
+configuration surface). Sweeper behavior confirmed: stale user survives, all three
+expired pairs cleared, a live `resetOtp` preserved, untouched users untouched,
+`countDocuments()` unchanged, second run finds 0 (idempotent), ~35 ms per run.
+
+**Full regression after Phase 8:** platform 21 · phase2 22 · phase3 44 · phase4 37 ·
+phase5 70 · phase6 87 · phase7 83 · **phase8 82** → **446 assertions, 0 failed**;
+e2e quiz 32 · memories 15 · mgmt ✅ · live 65 · social ✅ · community 38.
+
 ## Phase 9 — Tests, verification battery, final report
 - Extend e2e: rate-limit 429 shape + Retry-After, cursor pagination (registrations/feed/comments), cache behavior (hit/miss/invalidation/SWR/private-isolation), idempotency (double-click), compression header, ETag/304, socket caps, search guards, export streaming.
 - Load extension: 100/500-client profile on live load harness + rapid like/follow/join storm profile (§70); failure-simulation notes (§71).

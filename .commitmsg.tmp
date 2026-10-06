@@ -1,0 +1,43 @@
+Part 6 Phase 0: infrastructure audit and implementation plan
+
+Recorded before any code is modified, per step 18 of the Part 6 brief.
+
+Audit findings
+- Cache: the CacheProvider interface and the narrow getOrSet/peek/invalidate
+  facade already exist in services/cache.service.js, so Redis becomes a
+  provider implementation rather than a rewrite. Missing: provider selection,
+  the Upstash provider, key namespacing, versioning, and a registry that
+  records owner, invalidation trigger and privacy per entry.
+- Rate limiting: two independent process-local mechanisms need a shared
+  counter backend - express-rate-limit for the 21 HTTP domains, and the
+  SlidingWindow in utils/frequency-limiter.js for the action and socket
+  guards. The 429 contract itself is complete and must be preserved verbatim.
+- Idempotency: the middleware is process-local AND mounted on only two routes.
+  Ticket issuance, quiz submissions and event submissions are unprotected
+  today, which the brief explicitly calls out.
+- Identity: canonical identity is the MongoDB users ObjectId carried in a
+  JWT. Supabase Auth is not used and must not be introduced. Because an
+  ObjectId is not a Postgres uuid, relational rows will reference a
+  deterministic UUIDv5 derived from the ObjectId, so the mapping needs no
+  lookup table and no stored state.
+- Realtime: all room, participant and cap state lives in process-local Maps.
+  This is precisely why the Socket.IO Redis adapter cannot simply be enabled -
+  the adapter shares pub/sub but not that registry. Part 6 ships the
+  abstraction and a readiness checklist instead.
+- Social models: the existing Mongo unique and composite indexes map directly
+  onto Postgres constraints and are enumerated in the plan so nothing is lost
+  in translation.
+
+Decisions recorded with reasons
+- Key format eh:v1:cache:event:{id} combines the brief's cache-prefix and
+  version requirements into one string, so bumping v1 to v2 invalidates
+  everything via a single env change.
+- eventInterest stays in MongoDB even though the brief lists it under
+  Supabase: it is a (event, user) edge between the Mongo event core and a
+  user, so splitting it buys nothing and costs a cross-database relationship.
+- Consistency uses a Mongo-side outbox with retry-safe consumers. No
+  distributed transactions, and Mongo stays authoritative so projections are
+  always replayable.
+
+Nine implementation phases follow, each with its own selftest and a full
+Part 5 regression run before commit.

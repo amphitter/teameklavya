@@ -30,7 +30,7 @@ architecture; it makes the existing architecture production-safe.
 | 6 | Auth hardening, fuzzing, authorization matrix | §14, §15, §16, §17 | ✅ |
 | 7 | Provider failure matrix + preflight | §12, §31 | ✅ |
 | 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | ✅ |
-| 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | pending |
+| 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | ✅ |
 | 10 | Error taxonomy | §30 | ✅ |
 | 11 | Frontend + upload + rate-limit review | §27, §28, §29 | ✅ |
 | 12 | Restore drill, backups, secret separation | §18, §19 | pending |
@@ -465,6 +465,56 @@ The new dimension check correctly rejected it. No assertion was changed or
 weakened — the input was made a structurally valid PNG instead.
 
 Regression: 1240 → **1284 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
+### Phase 9 — RESULT: ✅ **DONE** (§20, §21, §22 — `scripts/load-test.js`, `tests/part7-scale.selftest.js`, `tests/helpers/boot-instance.js`, 44 new assertions)
+
+**§20 — a load harness that runs, replacing a doc that only described one.**
+`docs/LOAD-TESTING.md` specified profiles A–H, but nothing could execute them
+and k6 is not installed. A load test nobody can run is a load test that never
+runs, so `scripts/load-test.js` is dependency-free (Node `http` only) and
+`npm run load-test` works anywhere Node does. Verified by execution: profile A
+against a live server reported `722 requests, p50 10.4 / p95 88.6 / p99 113.9
+ms, 0% errors`.
+
+Three decisions inside it are worth naming. **A 429 is not counted as an
+error** — otherwise the harness reports failure precisely when the rate
+limiter is doing its job, which trains whoever reads it to ignore error rates.
+**The reservoir is bounded**, because profile F runs for two hours and storing
+every sample would exhaust memory halfway through a soak; an honest
+approximation beats a number that dies at the 90-minute mark. And **profiles F
+and G refuse to run without `--allow-destructive`** — verified by spawning the
+process and asserting a non-zero exit, because a two-hour soak or a Redis
+flush should never happen by accident.
+
+**Profile C delegates instead of duplicating.** I had written a hand-rolled
+Engine.IO/Socket.IO client for it. Then I found `tests/live.load.js` — Part 4
+already built a proven 500-client harness with rate-limit cap handling. Mine
+was an untested reimplementation of the hardest part of the system. I deleted
+it and made profile C spawn the existing harness, verified at 25 clients:
+**25/25 sockets, 100% joins, 100% broadcast fan-out, zero errors**. Maintaining
+two socket clients, one untested, is how realtime breaks.
+
+**§21 — two real processes, because one process cannot prove this.** `server.js`
+binds and self-starts without exporting the app, so the obvious shortcut is
+clearing `require.cache` and booting twice in-process. That would prove
+nothing: both copies would share the same module instances and therefore the
+same in-memory state — which is exactly what must be shown to be absent. So
+the test forks two processes on ports 5101/5102 against one shared Mongo and
+requires login to succeed on the instance that did *not* create the user:
+**A writes → B authenticates, B writes → A authenticates, and a token issued
+by either is accepted by the other.** That last check is the strongest, since
+it fails immediately if either instance keeps session state locally.
+
+**§22 — confirmed correct, not assumed:** the adapter package is not in
+dependencies, `realtime.service.js` wires no adapter, and the trigger
+(`replicas > 1` AND live rooms spanning replicas) is recorded in the docs.
+
+**One incidental measurement.** Profile A at 60 rps from a single IP drew
+**422 rate-limited responses out of 722**. That is the limiter working, and it
+is direct evidence for the NAT limitation recorded in §29: one source IP
+saturates a shared bucket well before the server is under any real strain.
+
+Regression: 1284 → **1328 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

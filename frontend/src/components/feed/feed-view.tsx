@@ -9,7 +9,10 @@ import { Button } from "@/components/ui/button";
 import { CreatePost } from "@/components/feed/create-post";
 import { FeedPost } from "@/components/feed/feed-post";
 import { PostSkeleton } from "@/components/feed/post-skeleton";
-import { StoryRail } from "@/components/feed/story-rail";
+import { StoryRail } from "@/components/stories/story-rail";
+import { StoryComposer } from "@/components/stories/story-composer";
+import { StoryViewer } from "@/components/stories/story-viewer";
+import { useStories, useStoryCategories, useMarkStoryViewed, type StoryGroup } from "@/hooks/use-social";
 import { HomeGreeting } from "@/components/feed/home-greeting";
 import { LiveEventHero } from "@/components/feed/live-event-hero";
 import type { LiveEventData } from "@/components/feed/live-event-hero";
@@ -293,9 +296,13 @@ export function FeedView() {
           </div>
         )}
 
-        <div className="mt-4">
-          <StoryRail onYourStory={() => composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} />
-        </div>
+        {/* §15 — real stories: people you follow + category rings. The rail
+            collapses itself when there is nothing to show, so an empty state
+            never renders as a bare top edge. */}
+        <StoryRailSection
+          canCreate={Boolean(user)}
+          onCompose={() => composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+        />
 
         <div className="mt-4 space-y-5">
           {/* Tabs — pill style per reference */}
@@ -418,4 +425,116 @@ function EmptyBlock({
       {action && <div className="mt-5">{action}</div>}
     </div>
   );
+}
+
+
+/**
+ * Story rail + composer + viewer, self-contained.
+ *
+ * State lives here rather than in FeedView so a story interaction never
+ * re-renders the feed (§7: do not reload the feed for an unrelated action)
+ * and so the feed component does not grow a fourth concern.
+ */
+function StoryRailSection({
+  canCreate,
+  onCompose,
+}: {
+  canCreate: boolean;
+  onCompose: () => void;
+}) {
+  const { groups, categories, isLoading, refetch } = useStoriesSafe();
+  const markViewed = useMarkStoryViewed();
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [openGroup, setOpenGroup] = useState<number | null>(null);
+  const [startIndex, setStartIndex] = useState(0);
+  const [categoryStories, setCategoryStories] = useState<StoryGroup[]>([]);
+  const [categoryLabel, setCategoryLabel] = useState("");
+  const [categoryView, setCategoryView] = useState<number | null>(null);
+
+  const openCategory = async (key: string, label: string) => {
+    try {
+      const r = await api.get(`/stories/category/${encodeURIComponent(key)}`);
+      const list = (r.data?.stories || []) as any[];
+      if (!list.length) return;
+      setCategoryStories([{ author: list[0].author || { _id: "category" }, stories: list, isMe: false, hasUnseen: true }]);
+      setCategoryLabel(label);
+      setCategoryView(0);
+    } catch {
+      /* a failed rail tap must not take the feed down */
+    }
+  };
+
+  const activeGroups = categoryView !== null ? categoryStories : groups;
+
+  return (
+    <>
+      <div className="mt-4">
+        <StoryRail
+          groups={groups}
+          categories={categories}
+          loading={isLoading}
+          canCreate={canCreate}
+          onYourStory={() => setComposerOpen(true)}
+          onOpenGroup={(i) => {
+            setStartIndex(0);
+            setOpenGroup(i);
+          }}
+          onOpenCategory={(key) => {
+            const c = categories.find((x) => x.key === key);
+            openCategory(key, c?.label || key);
+          }}
+        />
+      </div>
+
+      <StoryComposer
+        open={composerOpen}
+        onClose={() => setComposerOpen(false)}
+        onPublished={() => refetch()}
+      />
+
+      {openGroup !== null && groups[openGroup] ? (
+        <StoryViewer
+          stories={groups[openGroup].stories}
+          author={groups[openGroup].author}
+          startIndex={startIndex}
+          canDelete={groups[openGroup].isMe}
+          onClose={() => setOpenGroup(null)}
+          onViewed={(id) => markViewed.mutate(id)}
+          onDelete={async (id) => {
+            const r = await api.delete(`/stories/${id}`);
+            if (r.data?.success) {
+              setOpenGroup(null);
+              refetch();
+            }
+          }}
+        />
+      ) : null}
+
+      {categoryView !== null && activeGroups[0] ? (
+        <StoryViewer
+          stories={activeGroups[0].stories}
+          startIndex={startIndex}
+          contextLabel={categoryLabel}
+          onClose={() => {
+            setCategoryView(null);
+            setCategoryStories([]);
+          }}
+          onViewed={(id) => markViewed.mutate(id)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** Stories are optional infra: a failure must degrade to "no stories",
+ *  never to a feed that cannot render. */
+function useStoriesSafe() {
+  const stories = useStories();
+  const cats = useStoryCategories();
+  return {
+    groups: stories.error ? [] : stories.groups,
+    categories: cats.error ? [] : cats.categories,
+    isLoading: stories.isLoading,
+    refetch: stories.refetch,
+  };
 }

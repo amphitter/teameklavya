@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
@@ -52,6 +52,45 @@ export function FeedPost({
   const [commentCount, setCommentCount] = useState(post.commentCount);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [heartBursts, setHeartBursts] = useState<{ id: number; x: number; y: number }[]>([]);
+  const lastTapRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const lastTapTimeRef = useRef(0);
+
+  /* Touch devices do not emit dblclick dependably, so the gesture is measured
+     directly: two taps within 300ms and 30px count as a double-tap. */
+  const onMediaTap = (e: React.TouchEvent) => {
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const now = Date.now();
+    const prev = lastTapTimeRef.current;
+    if (now - prev < 300) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      lastTapRef.current = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+      lastTapTimeRef.current = 0;
+      likeFromDoubleTap();
+    } else {
+      lastTapTimeRef.current = now;
+    }
+  };
+
+  // Retire bursts so repeated taps don't accumulate DOM nodes (§63).
+  useEffect(() => {
+    if (!heartBursts.length) return;
+    const t = setTimeout(() => setHeartBursts((prev) => prev.slice(1)), 800);
+    return () => clearTimeout(t);
+  }, [heartBursts]);
+
+  /* §9/§66 — an achievement block with nothing in it is a random trophy.
+     Only rank, a non-zero score, real accuracy or a real achievement badge
+     earn the UI. Everything else renders as an ordinary post. */
+  const memory = post.memory;
+  const hasRealResult = Boolean(
+    memory &&
+      (memory.rank ||
+        (typeof memory.score === "number" && memory.score > 0) ||
+        (typeof memory.accuracy === "number" && memory.accuracy > 0) ||
+        (memory.achievements || []).length > 0)
+  );
   const [reporting, setReporting] = useState(false);
 
   const isOwn = user && post.author?._id === user._id;
@@ -76,6 +115,40 @@ export function FeedPost({
       setLiked(post.likedByMe);
       setLikeCount(post.likeCount);
       toast.error("Couldn't update like");
+    }
+  };
+
+  /**
+   * §8 — double-tap like.
+   *
+   * "If already liked: do not unlike because of accidental double tap.
+   *  Double tap should always result in liked state."
+   *
+   * So this is NOT toggleLike. It is idempotent toward "liked": if the post is
+   * already liked it only replays the animation, and never fires a request
+   * that would remove the like.
+   */
+  const likeFromDoubleTap = async () => {
+    setHeartBursts((prev) => [...prev, { id: Date.now() + Math.random(), x: lastTapRef.current.x, y: lastTapRef.current.y }]);
+    if (!user) {
+      toast.info("Sign in to like posts");
+      return;
+    }
+    if (liked) return; // already liked — animation only, never an unlike
+    setLiked(true);
+    setLikeCount((p) => p + 1);
+    try {
+      const res = await api.post(`/posts/${post._id}/like`);
+      if (res.data?.success) {
+        setLiked(res.data.liked);
+        setLikeCount(res.data.likeCount);
+      }
+    } catch {
+      // §45 — roll back, but keep the heart visible for the animation's length
+      // so the user is not told "liked" and then silently contradicted.
+      setLiked(post.likedByMe);
+      setLikeCount(post.likeCount);
+      toast.error("Couldn't save that like");
     }
   };
 
@@ -124,7 +197,7 @@ export function FeedPost({
 
   return (
     <>
-    <article className="rounded-xl border border-border bg-card p-4 sm:p-5">
+    <article className="relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5">
       {/* Header */}
       <header className="flex items-center gap-3">
         <Link href={profilePathOf(post.author)} aria-label={`View ${post.author?.firstName}'s profile`}>
@@ -211,13 +284,38 @@ export function FeedPost({
         </p>
       )}
 
-      {/* Images */}
+      {/* Double-tap hearts (§8) — scale up at the tap point, float, fade.
+          pointer-events:none so they cannot block scroll or the next tap. */}
+      {heartBursts.length ? (
+        <div className="pointer-events-none absolute inset-0 z-10" aria-hidden="true">
+          {heartBursts.map((b) => (
+            <span
+              key={b.id}
+              className="animate-heart-burst absolute"
+              style={{ left: b.x, top: b.y }}
+            >
+              <Heart className="h-20 w-20 fill-white text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.5)]" />
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Images — double-tap to like (§8). The handler lives on the wrapper so
+          it covers the whole media area, and the heart is rendered at the tap
+          point. pointer-events:none on the overlay means this can never
+          intercept a scroll or the second tap of the gesture. */}
       {post.images?.length > 0 && (
         <div
           className={cn(
             "mt-3 grid gap-1.5 overflow-hidden rounded-xl",
             post.images.length === 1 ? "grid-cols-1" : "grid-cols-2"
           )}
+          onDoubleClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            lastTapRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            likeFromDoubleTap();
+          }}
+          onTouchEnd={onMediaTap}
         >
           {post.images.map((img, i) => {
             const single = post.images.length === 1;
@@ -244,15 +342,26 @@ export function FeedPost({
       )}
 
       {/* Structured event-memory share (Phase 9 — §63): rank/score/
-          accuracy/achievements frozen server-side from EventResult */}
-      {post.memory ? (
+          accuracy/achievements frozen server-side from EventResult.
+
+          §9/§66 — this is the ONLY place achievement metadata belongs. It is
+          also gated on there being something actual to show: rendering
+          "Finished · 0 pts" for a memory with no result is exactly the
+          random-trophy / fake-metric UI the redesign forbids. A memory post
+          with no rank, no score and no achievements renders as a plain post. */}
+      {hasRealResult ? (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-primary/30 bg-brand-light px-3 py-2">
           <Trophy className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
           <span className="text-xs font-bold text-primary">
-            {post.memory.rank ? `Ranked #${post.memory.rank}` : "Finished"} · {post.memory.score ?? 0} pts
-            {post.memory.accuracy != null ? ` · ${post.memory.accuracy}% accuracy` : ""}
+            {[
+              memory?.rank ? `Ranked #${memory.rank}` : null,
+              typeof memory?.score === "number" && memory.score > 0 ? `${memory.score} pts` : null,
+              typeof memory?.accuracy === "number" && memory.accuracy > 0 ? `${memory.accuracy}% accuracy` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
-          {(post.memory.achievements || []).slice(0, 3).map((c) => (
+          {(memory?.achievements || []).slice(0, 3).map((c) => (
             <span key={c} className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
               {c.replace(/_/g, " ")}
             </span>

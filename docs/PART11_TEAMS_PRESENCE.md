@@ -245,13 +245,19 @@ nine routes × two widths   0 overflow, 0 page errors, no top bar anywhere
 
 ## Correction to my own earlier report
 
-Two things I flagged while investigating were **my test's fault, not the app's**,
-and I am recording that rather than quietly dropping them:
+Three things I flagged while investigating were **my test's fault, not the
+app's**, and I am recording that rather than quietly dropping them:
 
 * The "0 members" team sheet was my mock missing the roster endpoint. Against
   the real API the roster loads with roles.
 * The missing typing indicator in the first screenshot was my mock omitting
   `userId` from the socket payload, which the client correctly ignores.
+
+A 5px overflow in the 320px inbox — a chip reaching x=325 — sat on my
+open-defects list and does **not** reproduce against the real backend: all four
+tabs (All / Unread / Teams / Archived) at 320, 360 and 390 measure
+`overflow = 0` with no element past the right edge. It came from a mocked run,
+so nothing was broken and no fix was made.
 
 The ~4px gutter I saw in the dev-server screenshots was the Next.js dev
 overlay, not a layout bug: in a production build `body` has `margin: 0` and the

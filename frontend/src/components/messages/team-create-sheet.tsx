@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { MemberPicker } from "@/components/messages/member-picker";
 import { createTeam, seedTeamRow } from "@/lib/messages/teams";
+import { SHEET_FOOTER_PADDING, useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { cn } from "@/lib/utils";
 
 const NAME_MAX = 80;
@@ -46,6 +47,9 @@ export function TeamCreateSheet({ open, onClose, onCreated }: TeamCreateSheetPro
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<PickedUser[]>([]);
   const [busy, setBusy] = useState(false);
+  /* Keeps "Create team" above the phone keyboard instead of under it.
+     The ref is the sheet ROOT — see the note there. */
+  const panelRef = useKeyboardInset<HTMLDivElement>();
 
   const reset = useCallback(() => {
     setName("");
@@ -87,7 +91,19 @@ export function TeamCreateSheet({ open, onClose, onCreated }: TeamCreateSheetPro
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex justify-end" role="dialog" aria-modal="true" aria-label="Create a team">
+    /* The keyboard/safe-area inset goes on the ROOT, not the footer. Padding
+       the footer does nothing: the panel is `h-full` of a full-viewport
+       overlay, so it still extends under the keyboard and the footer still
+       sits behind it. Padding the root shrinks the content box the panel
+       measures itself against, which is what actually lifts the footer. */
+    <div
+      ref={panelRef}
+      style={{ paddingBottom: SHEET_FOOTER_PADDING }}
+      className="fixed inset-0 z-[80] flex justify-end"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Create a team"
+    >
       <button
         type="button"
         className="absolute inset-0 bg-[rgba(11,18,53,0.45)] backdrop-blur-[6px] animate-fade-in"

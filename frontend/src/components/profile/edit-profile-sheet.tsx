@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
 import { AvatarUploader, CoverUploader } from "@/components/profile/media-uploader";
 import { useEditProfile, useUsernameAvailability, type ProfileUser } from "@/hooks/use-social";
+import { SHEET_FOOTER_PADDING, useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
 /**
  * Edit profile sheet (§21-24, §59).
@@ -47,6 +48,8 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
   const [coverPosition, setCoverPosition] = useState(50);
   const [profileVisibility, setProfileVisibility] = useState("public");
   const [allowMessagesFrom, setAllowMessagesFrom] = useState("everyone");
+  /* The save bar must clear the phone keyboard, not hide behind it. */
+  const panelRef = useKeyboardInset<HTMLDivElement>();
 
   // Debounced username — the hook fires a request per keystroke otherwise.
   const [debouncedUsername, setDebouncedUsername] = useState("");
@@ -172,7 +175,19 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex justify-end" role="dialog" aria-modal="true" aria-label="Edit profile">
+    /* The keyboard/safe-area inset goes on the ROOT, not the footer. Padding
+       the footer does nothing: the panel is `h-full` of a full-viewport
+       overlay, so it still extends under the keyboard and the footer still
+       sits behind it. Padding the root shrinks the content box the panel
+       measures itself against, which is what actually lifts the footer. */
+    <div
+      ref={panelRef}
+      style={{ paddingBottom: SHEET_FOOTER_PADDING }}
+      className="fixed inset-0 z-[80] flex justify-end"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Edit profile"
+    >
       <button
         type="button"
         className="absolute inset-0 bg-[rgba(11,18,53,0.45)] backdrop-blur-[6px] animate-fade-in"
@@ -354,7 +369,7 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
         </div>
 
         {/* Sticky save bar (§59) */}
-        <div className="flex shrink-0 items-center gap-2 border-t border-outline-variant bg-surface-container-lowest px-4 py-3 pb-safe">
+        <div className="flex shrink-0 items-center gap-2 border-t border-outline-variant bg-surface-container-lowest px-4 py-3">
           <button type="button" onClick={requestClose} className="rounded-xl border border-outline-variant px-4 py-3 text-[15px] font-semibold text-on-surface">
             Cancel
           </button>

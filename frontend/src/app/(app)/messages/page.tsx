@@ -134,8 +134,11 @@ function MessagesInbox() {
         /* The bottom nav is `lg:hidden`, so 4.5rem must be subtracted below
          * lg and only the header above it. `100vh` is declared first as the
          * fallback for engines without `dvh`. */
-        "h-[calc(100vh-8rem-env(safe-area-inset-bottom))]",
-        "h-[calc(100dvh-8rem-env(safe-area-inset-bottom))]",
+        /* Below lg only the bottom nav is left (4.5rem) — the header is
+         * desktop-only now, so subtracting it would leave a 56px dead strip
+         * at the foot of the list. */
+        "h-[calc(100vh-4.5rem-env(safe-area-inset-bottom))]",
+        "h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))]",
         "lg:h-[calc(100vh-3.5rem)] lg:h-[calc(100dvh-3.5rem)]"
       )}
     >

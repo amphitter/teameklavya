@@ -28,6 +28,7 @@ import {
   syncThreadRoster,
 } from "@/lib/messages/teams";
 import type { TeamMember } from "@/lib/messages/store";
+import { SHEET_FOOTER_PADDING, useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
 interface PickedUser {
   _id: string;
@@ -56,6 +57,9 @@ export function TeamInfoSheet({ open, conversationId, name, onClose, onLeft }: T
   const [busy, setBusy] = useState(false);
   const [teamName, setTeamName] = useState(name || "");
   const [editingName, setEditingName] = useState(false);
+  /* The add-people footer and the leave action must clear the phone keyboard
+     and the home indicator, both of which sit over a full-height panel. */
+  const panelRef = useKeyboardInset<HTMLDivElement>();
 
   const canManage = myRole === "owner" || myRole === "admin";
 
@@ -154,7 +158,19 @@ export function TeamInfoSheet({ open, conversationId, name, onClose, onLeft }: T
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex justify-end" role="dialog" aria-modal="true" aria-label="Team info">
+    /* The keyboard/safe-area inset goes on the ROOT, not the footer. Padding
+       the footer does nothing: the panel is `h-full` of a full-viewport
+       overlay, so it still extends under the keyboard and the footer still
+       sits behind it. Padding the root shrinks the content box the panel
+       measures itself against, which is what actually lifts the footer. */
+    <div
+      ref={panelRef}
+      style={{ paddingBottom: SHEET_FOOTER_PADDING }}
+      className="fixed inset-0 z-[80] flex justify-end"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Team info"
+    >
       <button
         type="button"
         className="absolute inset-0 bg-[rgba(11,18,53,0.45)] backdrop-blur-[6px] animate-fade-in"

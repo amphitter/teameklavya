@@ -59,7 +59,10 @@ export default function ConversationPage() {
        * itself with `max(keyboard, safe-area)`. Adding it here as well would
        * double-count and float the composer a home-bar above the bottom
        * whenever the keyboard is closed (§2, §18). */
-      className="mx-auto flex h-[calc(100vh-3.5rem)] h-[calc(100dvh-3.5rem)] w-full max-w-5xl flex-col overflow-hidden"
+      /* A phone chat has NO shell chrome at all: the top bar is desktop-only
+       * and this route hides the bottom nav, so the thread owns the whole
+       * viewport. From lg the header returns and is subtracted again. */
+      className="mx-auto flex h-[100vh] h-[100dvh] w-full max-w-5xl flex-col overflow-hidden lg:h-[calc(100dvh-3.5rem)]"
     >
       <div className="flex min-h-0 flex-1 overflow-hidden bg-surface-container-lowest lg:my-3 lg:rounded-2xl lg:border lg:border-outline-variant lg:elevation-card">
         {/* Desktop only: the inbox stays visible beside the open thread. */}

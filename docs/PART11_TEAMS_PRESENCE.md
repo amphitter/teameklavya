@@ -178,3 +178,89 @@ Backend first (new routes and socket events), then the frontend:
 
 The one-off `backend/scripts/fix-conversation-index.js --apply` was already run
 in Part 10; nothing to re-run here.
+
+---
+
+# Mobile pass — "when we open stuff it's breaking things, remove the top navbar too"
+
+Reported from a phone. I stopped guessing and drove the real UI in a headless
+Chromium at 390×844, 360×800 and 320×568, against a **real backend** (seeded
+people, a team, a direct chat, live sockets). The harness is in
+`docs/mobile-qa/` and is re-runnable.
+
+## What was actually wrong
+
+**One — the chrome stacked.** On a phone the shell's 56px top bar sat above the
+thread's own 56px header, so a conversation opened with ~112px of chrome before
+the first message, plus the "Connecting…" row. That is the "breaking" that was
+visible on every screen.
+
+**Two — the sheets' action buttons were at the very bottom edge.** A full-height
+panel runs to the bottom of the layout viewport, so on a phone the button sat
+under the home indicator, and with the keyboard open it sat under the keyboard.
+Padding the *footer* does not fix this — the panel still extends underneath.
+The inset has to go on the sheet **root**, which shrinks the box the panel
+measures itself against.
+
+**Three — the viewport maths still subtracted a header that no longer exists.**
+With the top bar gone, `calc(100dvh - 8rem)` on the inbox and
+`calc(100dvh - 3.5rem)` on a thread would have left a dead strip at the foot of
+both screens. Fixed to 4.5rem (the nav) and 100dvh (a chat has no shell chrome
+at all below lg).
+
+## What changed
+
+| Change | Why |
+|--------|-----|
+| Top bar is `hidden lg:block` | No top navbar on a phone, on any route |
+| Bottom nav is six items: Home · Explore · Create · **Messages** · Alerts · Profile | The Messages icon lived in the top bar. Removing the bar without this would re-open the P0 where Messages was unreachable on a phone |
+| Account menu gained **Search** and the theme switch | Both were top-bar controls; the theme could not be changed on a phone otherwise. Search also still exists as the feed's own phone field |
+| Thread page height → `100dvh` (was `100dvh - 3.5rem`) | A chat hides both bars; it owns the whole viewport |
+| Inbox height → `100dvh - 4.5rem` (was `8rem`) | Only the bottom nav is left to reserve |
+| `top-[104px]` → `top-2` on the organizer form's chip row | It was measured down from the header's height |
+| All three sheets: keyboard/safe-area inset on the sheet root | Action buttons clear the keyboard and the home indicator |
+| `hooks/use-keyboard-inset.ts` (new) | One implementation, element-scoped CSS variable — never a document-wide one |
+
+## Evidence (production build, real backend, real sockets)
+
+```
+iphone-390 / android-360 / small-320
+  header (top bar)          none, height 0, display:none     ← gone
+  bottom nav                left=0 right=390, bottom=844     ← full width, on screen
+  nav items                 6: Home|Explore|Create|Messages (7 unread)|Notifications|Profile
+  horizontal overflow       0 on every route tested
+
+two users, live sockets
+  Ana types in the team     Ben's screen: "Ana Roy is typing…"      ← reached the peer
+  Ana stops                 indicator cleared on its own
+  Ben opens the DM          header: "Ana Roy · Active now"
+  inbox                     1 "Active now" dot, rows name the team and WHO spoke
+
+team info sheet            3 members listed from the real roster (Ben is a plain
+                           member, so no Remove/Add buttons — correct)
+keyboard (simulated 300px) panel 844 → 544; "Create team" 832 → 532  ← clear of the keyboard
+
+nine routes × two widths   0 overflow, 0 page errors, no top bar anywhere
+```
+
+## Correction to my own earlier report
+
+Two things I flagged while investigating were **my test's fault, not the app's**,
+and I am recording that rather than quietly dropping them:
+
+* The "0 members" team sheet was my mock missing the roster endpoint. Against
+  the real API the roster loads with roles.
+* The missing typing indicator in the first screenshot was my mock omitting
+  `userId` from the socket payload, which the client correctly ignores.
+
+The ~4px gutter I saw in the dev-server screenshots was the Next.js dev
+overlay, not a layout bug: in a production build `body` has `margin: 0` and the
+nav spans 0 → 390.
+
+## Still not verified (no device here)
+
+Real iOS/Android keyboards, real safe-area insets (the emulator reports 0, so
+the sheet lift was proven by simulating a 300px keyboard rather than a real
+one), gesture navigation, and text-entry behaviour with a real IME. `env()`
+handling is present and correct by construction, but the geometric proof above
+uses a simulated inset.

@@ -16,10 +16,12 @@ import {
   LayoutDashboard,
   LogOut,
   MessageCircle,
+  Moon,
   Newspaper,
   Plus,
   Search,
   Sparkles,
+  Sun,
   Ticket,
   UserRound,
   Bookmark,
@@ -36,6 +38,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
+import { useTheme } from "@/context/ThemeContext";
+import { prefetchInbox, useUnread } from "@/hooks/use-messages";
 import { initialsOf, useSessionUser } from "@/components/shell/use-session-user";
 import { resetMessagesStore } from "@/lib/messages/store";
 import { clearMessagesCache } from "@/lib/messages/cache";
@@ -86,6 +90,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isChatRoute = /^\/messages\/[^/]+$/.test(pathname ?? "");
   const router = useRouter();
   const { user, role } = useSessionUser();
+  /* The bottom nav carries the messages badge on mobile, the account menu
+     carries the theme switch — both used to live in the top bar, which is gone
+     below lg. Read here (not inside `AccountMenu`, which is re-created on every
+     render) so the values stay stable. */
+  const { inbox: unreadMessages } = useUnread();
+  const { theme, toggleTheme } = useTheme();
 
   /* Wake the API as soon as the app boots.
    *
@@ -247,6 +257,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Bookmark className="h-4 w-4" /> Saved posts
           </Link>
         </DropdownMenuItem>
+        {/* Search and the theme switch were top-bar controls. The top bar is
+            desktop-only now, so both live here — otherwise turning the theme
+            back to light would need a desktop. */}
+        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
+          <Link href="/search">
+            <Search className="h-4 w-4" /> Search
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={toggleTheme} className="gap-2.5 py-2.5">
+          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {theme === "dark" ? "Light mode" : "Dark mode"}
+        </DropdownMenuItem>
         {role === "admin" && (
           <DropdownMenuItem asChild className="gap-2.5 py-2.5">
             <Link href="/admin/dashboard">
@@ -384,7 +406,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* ══ Content column ══════════════════════════════════ */}
       <div className="lg:pl-60">
         {/* Top bar */}
-        <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
+        {/* ── Top bar — DESKTOP ONLY (lg and up) ──────────────────────────
+         * On a phone this 56px row + the page's own header stacked into
+         * ~110px of chrome above every screen, and on an open conversation it
+         * pushed the composer down. Every control it held is reachable on
+         * mobile without it:
+         *   Messages      → bottom nav item, with its unread badge
+         *   Notifications → bottom nav "Alerts"
+         *   Create        → the bottom nav's create button
+         *   Search        → the feed's own search field, and the account menu
+         *   Theme         → the account menu
+         *   Profile       → the bottom nav's Profile
+         * Nothing is orphaned by removing it, which is the only reason this
+         * is safe to do. */}
+        <header className="sticky top-0 z-30 hidden border-b border-border bg-background/85 backdrop-blur-md lg:block">
           <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
             {/* Mobile: logo */}
             <Link href="/" aria-label="EventHub home" className="lg:hidden">
@@ -456,7 +491,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-6">
           <MobileNavItem icon={Home} label="Home" href="/" active={pathname === "/"} />
           <MobileNavItem icon={Compass} label="Explore" href="/events" active={pathname.startsWith("/events")} />
 
@@ -472,6 +507,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </button>
             </CreateMenu>
           </div>
+
+          {/* Messages moved into the nav: it was a top-bar icon, and the top
+              bar no longer exists on a phone. Prefetching the inbox on tap is
+              the same warm-start path the old icon used. */}
+          <Link
+            href="/messages"
+            aria-label={unreadMessages ? `Messages (${unreadMessages} unread)` : "Messages"}
+            onClick={() => prefetchInbox()}
+            className={cn(
+              "relative flex min-w-0 flex-col items-center justify-center gap-0.5 pb-1.5 pt-2 transition-colors",
+              pathname.startsWith("/messages") ? "text-primary" : "text-muted-foreground"
+            )}
+          >
+            <MessageCircle className="h-5 w-5" />
+            <span className="max-w-full truncate px-0.5 text-[10px] font-semibold">Messages</span>
+            {unreadMessages > 0 ? (
+              <span className="absolute right-2 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold leading-none text-white">
+                {unreadMessages > 9 ? "9+" : unreadMessages}
+              </span>
+            ) : null}
+          </Link>
 
           <NotificationsNavLink active={pathname.startsWith("/notifications")} />
           {user ? (
@@ -515,7 +571,9 @@ function MobileNavItem({
   const inner = (
     <>
       <Icon className="h-5 w-5" />
-      <span className="text-[10px] font-semibold">{label}</span>
+      {/* Six destinations on a 320px screen is ~53px each, so a long label
+          must truncate rather than widen its cell and push the row out. */}
+      <span className="max-w-full truncate px-0.5 text-[10px] font-semibold">{label}</span>
       {soon && <span className="absolute right-3 top-1.5 h-1.5 w-1.5 rounded-full bg-primary/70" />}
     </>
   );

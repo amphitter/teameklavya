@@ -392,7 +392,7 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
 
   /* ═══ STEPPER ═══════════════════════════════════════════ */
   const Stepper = () => (
-    <div ref={topRef} className="no-scrollbar sticky top-[104px] z-30 -mx-1 flex items-center gap-1 overflow-x-auto rounded-xl border border-border bg-card/95 p-2 px-2 backdrop-blur-md lg:top-4">
+    <div ref={topRef} className="no-scrollbar sticky top-2 z-30 -mx-1 flex items-center gap-1 overflow-x-auto rounded-xl border border-border bg-card/95 p-2 px-2 backdrop-blur-md lg:top-4">
       {STEPS.map((s, i) => {
         const done = s.id < maxStep || (s.id === 4 && false);
         const active = step === s.id;

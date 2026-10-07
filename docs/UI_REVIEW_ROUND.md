@@ -42,6 +42,40 @@ here rather than "fixed":
 
 ---
 
+## Follow-up: the feed's own top bar
+
+Requested: *"only in news feed section apply top navbar with this logo in center
+and alert icon in right corner."*
+
+A **feed-only** bar, phones only:
+
+* the logo is centred in the bar — measured from the rendered image box, and the
+  bell is absolutely positioned so it cannot push the mark off centre at 320;
+* the alert icon is in the right corner and is the **real** control: it carries
+  the unread badge and opens the notification dropdown. It polls only while this
+  bar is mounted, i.e. only on the feed;
+* on desktop the bar is absent — the shell's header already carries the brand —
+  and on every other phone screen (Explore, Events, Communities, Notifications,
+  Messages, profile) it is absent too, so no screen gets two headers.
+
+### The mark
+
+The uploaded file is the official lockup **without** the tagline; the asset
+already in the repo (`eventhub-logo.png`) is the same artwork **with**
+"People • Events • Opportunities" underneath, added after the export. At the 28px
+the bar renders it, the tagline is illegible and only adds a grey smudge, and the
+icon-only mark loses the name. So the uploaded lockup is now shipped as
+`public/brand/eventhub-logo-plain.png` — trimmed to its content (1948×511,
+3.81:1) and exported at 128px tall so it stays crisp on a 4x screen, 42KB.
+
+### One reachability fix that came with it
+
+The feed is the only place the bell lives on a phone now, and the account menu
+had no Notifications entry — so from Explore, a profile, or an open conversation a
+phone could not reach `/notifications` at all. The account menu now has it.
+
+---
+
 ## Evidence
 
 `docs/mobile-qa/ui-fixes.js` — **221 checks, 0 failures**
@@ -56,6 +90,16 @@ here rather than "fixed":
 | desktop × 5 widths | No horizontal overflow; rail visible; phone nav hidden; rail gap 0–48px from the feed; **left margin = right margin (Δ0)** — i.e. no asymmetric band; feed column ≥440px; rail does not overflow its own column. |
 | signed out × 2 widths | Exactly one welcome card; tabs still uncut; no bell; no overflow. |
 | everywhere | Zero uncaught page errors. |
+
+`docs/mobile-qa/feed-topbar.js` — **100 checks, 0 failures**: the bar spans the
+width; the image really loads and keeps its 3.81:1 ratio (a stretched logo is how
+this usually breaks); the logo's centre equals the bar's centre within 2px at
+every width; the bell is inside the bar, anchored to the right edge, ≥36px, and
+never overlaps the logo; tapping it opens the real panel ("View all
+notifications"); the bar stays at the top while the feed scrolls; no horizontal
+overflow; it is on the feed and **only** the feed; exactly one visible bell on the
+feed (the desktop header's is still mounted but hidden — the assertion counts
+visible nodes, because a DOM count reads two); and it is absent on desktop.
 
 ### Regressions (same run, same build)
 

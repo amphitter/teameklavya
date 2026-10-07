@@ -18,7 +18,7 @@ import { LiveEventHero } from "@/components/feed/live-event-hero";
 import type { LiveEventData } from "@/components/feed/live-event-hero";
 import { LivePulseStrip } from "@/components/feed/live-pulse-strip";
 import { RightRail } from "@/components/feed/right-rail";
-import { NotificationBell } from "@/components/notifications/notification-bell";
+import { FeedTopBar } from "@/components/feed/feed-top-bar";
 import { DiscoveryCard } from "@/components/feed/discovery-card";
 import { useFeedDiscovery } from "@/components/feed/use-feed-discovery";
 import { useSessionUser } from "@/components/shell/use-session-user";
@@ -312,232 +312,232 @@ export function FeedView() {
     : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl justify-center gap-6 px-3 py-5 sm:px-6 xl:gap-8">
-      {/* Main column */}
-      <div className="w-full min-w-0 max-w-[620px] lg:min-w-[440px]">
-        {/* Welcome strip for logged-out visitors */}
-        {ready && !user && (
-          <div className="mb-5 flex flex-col gap-3 rounded-xl border border-border bg-gradient-to-br from-brand-light/80 to-purple-light/60 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="flex items-center gap-2 text-base font-bold text-foreground">
-                <Sparkles className="h-4 w-4 text-primary" /> Welcome to EventHub
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Discover events, participate, and build your event journey — all in one place.
-              </p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <Button asChild size="sm">
-                <Link href="/signup">Join EventHub</Link>
-              </Button>
-              <Button asChild size="sm" variant="outline">
-                <Link href="/login">Sign in</Link>
-              </Button>
-            </div>
-          </div>
-        )}
+    <>
+      {/* Feed-only chrome: centred logo + the notification bell in the right
+          corner. Nothing else in the app gets a bar above it. */}
+      <FeedTopBar />
 
-        {/* Greeting with live badge (real event + real quiz score), and — on a
-            phone only — the notification bell beside it. The bell left the
-            bottom nav because that row is for navigation; here it sits where an
-            unread indicator is looked for, next to the greeting, without
-            costing the composer or an open conversation a single pixel. */}
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            <HomeGreeting firstName={user?.firstName} liveBadge={liveBadge} />
-          </div>
-          {ready && user ? (
-            <div className="mt-0.5 shrink-0 lg:hidden">
-              <NotificationBell />
-            </div>
-          ) : null}
-        </div>
-
-        {/* Quick search (phone layout; desktop search lives in the top bar) */}
-        <form
-          onSubmit={submitHomeSearch}
-          className="mt-3 flex h-12 items-center rounded-xl bg-card px-3.5 shadow-[0_2px_12px_rgba(24,39,75,0.04)] transition-shadow focus-within:shadow-[0_4px_16px_rgba(37,99,255,0.15)] sm:hidden"
-        >
-          <span className="material-symbols-outlined mr-2.5 text-[20px] text-muted-foreground">search</span>
-          <input
-            value={homeQuery}
-            onChange={(e) => setHomeQuery(e.target.value)}
-            placeholder="Search events, people, hackathons..."
-            aria-label="Search events"
-            className="h-full w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-          />
-        </form>
-
-        {/* The user's LIVE (ongoing) registered events come first */}
-        {liveEvents.length > 0 && (
-          <div className="mt-4">
-            <LiveEventHero events={liveEvents} />
-          </div>
-        )}
-
-        {/* Live leaderboard snapshot (phone; full widget in the desktop rail) */}
-        {liveQuiz && liveBoard && liveBoard.entries.length > 0 && (
-          <div className="mt-4 xl:hidden">
-            <LivePulseStrip quizId={liveQuiz.quizId} entries={liveBoard.entries} />
-          </div>
-        )}
-
-        {/* §15 — real stories: people you follow + category rings. The rail
-            collapses itself when there is nothing to show, so an empty state
-            never renders as a bare top edge. */}
-        <StoryRailSection
-          canCreate={Boolean(user)}
-          onCompose={() => composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
-          autoOpenComposer={searchParams.get("story") === "1"}
-        />
-
-        <div className="mt-4 space-y-5">
-          {/* Tabs — pill style per reference.
-
-              P0 fix. These were `py-2 text-[13px]`: roughly 36px tall, under
-              the 44px minimum (§30/§44), which is why the filter read as
-              "fails to open on some phones" — the tap landed on the gap
-              between pills rather than the pill.
-
-              §29 asks for a real audit rather than a z-index bump, so:
-                · no z-index is touched. Nothing overlaps this row: the header
-                  is sticky at z-30 but sits above it in normal flow.
-                · the scroller keeps overflow-x-auto and gains
-                  overscroll-x-contain, so a horizontal flick no longer
-                  fights the page or triggers browser back-swipe.
-                · touch-action:manipulation removes the 300ms delay and
-                  double-tap-zoom suppression that swallow fast taps.
-                · the row is a group with role=tablist semantics via
-                  aria-pressed, already present. */}
-          {/* The strip WRAPS instead of scrolling.
-              It used to be `overflow-x-auto` with the scrollbar hidden, which
-              meant "Communities" — the fourth tab — was cut off mid-word with no
-              affordance that anything was there: measured 80px outside the
-              viewport at 360 and still clipped at 390. A hidden scrollbar on a
-              four-item control is not a scroll area, it is a missing button.
-              Wrapping costs a second row only at 320, where it belongs. */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-            {(
-              [
-                { id: "for-you", label: "For You" },
-                { id: "following", label: "Following" },
-                { id: "events", label: "Events" },
-                { id: "communities", label: "Communities" },
-              ] as const
-            ).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => selectTab(t.id)}
-                aria-pressed={tab === t.id}
-                className={cn(
-                  // 44px tall on every screen, and every tab fits inside the
-                  // viewport at 320 — that is the whole point of this change.
-                  "flex select-none items-center justify-center rounded-full",
-                  "px-3 text-[12.5px] font-semibold leading-none transition-colors sm:px-4 sm:text-[13px]",
-                  "min-h-[44px] touch-manipulation active:scale-[0.97]",
-                  tab === t.id
-                    ? // §3 — gradient is a reserved selected-state treatment.
-                      "brand-gradient text-white shadow-[0_4px_12px_rgba(37,99,255,0.25)]"
-                    : "border border-outline-variant bg-surface-container-lowest text-on-surface-variant hover:text-on-surface"
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          <CreatePost
-            onCreated={onCreated}
-            composerRef={composerRef}
-            /* Exactly one welcome card on a signed-out screen. */
-            showGuestCard={!(ready && !user)}
-          />
-
-          {/* Feed */}
-          {feed.isLoading ? (
-            <div className="space-y-5">
-              <PostSkeleton />
-              <PostSkeleton />
-            </div>
-          ) : feed.error ? (
-            <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-6 py-12 text-center">
-              <p className="text-base font-semibold text-foreground">Something went wrong</p>
-              <p className="mt-1 text-sm text-muted-foreground">The feed couldn&apos;t load. Give it another try.</p>
-              <Button size="sm" variant="outline" className="mt-4" onClick={() => feed.refetch()}>
-                Retry
-              </Button>
-            </div>
-          ) : posts.length === 0 ? (
-            tab === "following" ? (
-              <EmptyBlock
-                icon={UserPlus}
-                title="Not following anyone yet"
-                body="Follow people you meet at events and their posts will show up here."
-                action={
-                  <Button asChild size="sm" variant="outline">
-                    <Link href="/events">Explore events</Link>
-                  </Button>
-                }
-              />
-            ) : (
-              <EmptyBlock
-                icon={CalendarSearch}
-                title="Your event story starts here"
-                body="Be the first to post — share an update, a photo, or an event you're excited about."
-                action={
-                  <Button asChild size="sm">
-                    <Link href="/events">Explore events</Link>
-                  </Button>
-                }
-              />
-            )
-          ) : (
-            <>
-              {stream.map((item) =>
-                item.kind === "post" ? (
-                  <FeedPost
-                    key={item.key}
-                    post={item.post}
-                    onDeleted={onDeleted}
-                    onArchived={onArchived}
-                  />
-                ) : (
-                  <DiscoveryCard
-                    key={item.key}
-                    kind={item.kind}
-                    events={discovery.events}
-                    people={discovery.people}
-                    communities={discovery.communities}
-                  />
-                )
-              )}
-              {feed.hasMore && (
-                <div className="pt-1 text-center">
-                  <Button variant="outline" onClick={() => feed.fetchNextPage()} disabled={feed.isFetchingMore}>
-                    {feed.isFetchingMore ? "Loading…" : "Load more posts"}
-                  </Button>
-                </div>
-              )}
-              {!feed.hasMore && (
-                <p className="flex items-center justify-center gap-1.5 pt-2 pb-4 text-xs text-muted-foreground">
-                  <Users className="h-3.5 w-3.5" /> You&apos;re all caught up
+      <div className="mx-auto flex w-full max-w-6xl justify-center gap-6 px-3 py-4 sm:px-6 sm:py-5 xl:gap-8">
+        {/* Main column */}
+        <div className="w-full min-w-0 max-w-[620px] lg:min-w-[440px]">
+          {/* Welcome strip for logged-out visitors */}
+          {ready && !user && (
+            <div className="mb-5 flex flex-col gap-3 rounded-xl border border-border bg-gradient-to-br from-brand-light/80 to-purple-light/60 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="flex items-center gap-2 text-base font-bold text-foreground">
+                  <Sparkles className="h-4 w-4 text-primary" /> Welcome to EventHub
                 </p>
-              )}
-            </>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Discover events, participate, and build your event journey — all in one place.
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <Button asChild size="sm">
+                  <Link href="/signup">Join EventHub</Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/login">Sign in</Link>
+                </Button>
+              </div>
+            </div>
           )}
-        </div>
-      </div>
 
-      {/* Right sidebar (desktop) — upcoming, live leaderboard, builders to follow */}
-      <RightRail
-        user={user}
-        registeredUpcoming={myUpcoming}
-        liveQuiz={liveQuiz}
-        entries={liveBoard?.entries || []}
-        posts={posts}
-      />
-    </div>
+          {/* Greeting with live badge (real event + real quiz score). The bell
+              that used to sit beside it has moved up into the feed's top bar,
+              where the alert icon belongs — one bell on the screen, not two. */}
+          <HomeGreeting firstName={user?.firstName} liveBadge={liveBadge} />
+
+          {/* Quick search (phone layout; desktop search lives in the top bar) */}
+          <form
+            onSubmit={submitHomeSearch}
+            className="mt-3 flex h-12 items-center rounded-xl bg-card px-3.5 shadow-[0_2px_12px_rgba(24,39,75,0.04)] transition-shadow focus-within:shadow-[0_4px_16px_rgba(37,99,255,0.15)] sm:hidden"
+          >
+            <span className="material-symbols-outlined mr-2.5 text-[20px] text-muted-foreground">search</span>
+            <input
+              value={homeQuery}
+              onChange={(e) => setHomeQuery(e.target.value)}
+              placeholder="Search events, people, hackathons..."
+              aria-label="Search events"
+              className="h-full w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </form>
+
+          {/* The user's LIVE (ongoing) registered events come first */}
+          {liveEvents.length > 0 && (
+            <div className="mt-4">
+              <LiveEventHero events={liveEvents} />
+            </div>
+          )}
+
+          {/* Live leaderboard snapshot (phone; full widget in the desktop rail) */}
+          {liveQuiz && liveBoard && liveBoard.entries.length > 0 && (
+            <div className="mt-4 xl:hidden">
+              <LivePulseStrip quizId={liveQuiz.quizId} entries={liveBoard.entries} />
+            </div>
+          )}
+
+          {/* §15 — real stories: people you follow + category rings. The rail
+              collapses itself when there is nothing to show, so an empty state
+              never renders as a bare top edge. */}
+          <StoryRailSection
+            canCreate={Boolean(user)}
+            onCompose={() => composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+            autoOpenComposer={searchParams.get("story") === "1"}
+          />
+
+          <div className="mt-4 space-y-5">
+            {/* Tabs — pill style per reference.
+
+                P0 fix. These were `py-2 text-[13px]`: roughly 36px tall, under
+                the 44px minimum (§30/§44), which is why the filter read as
+                "fails to open on some phones" — the tap landed on the gap
+                between pills rather than the pill.
+
+                §29 asks for a real audit rather than a z-index bump, so:
+                  · no z-index is touched. Nothing overlaps this row: the header
+                    is sticky at z-30 but sits above it in normal flow.
+                  · the scroller keeps overflow-x-auto and gains
+                    overscroll-x-contain, so a horizontal flick no longer
+                    fights the page or triggers browser back-swipe.
+                  · touch-action:manipulation removes the 300ms delay and
+                    double-tap-zoom suppression that swallow fast taps.
+                  · the row is a group with role=tablist semantics via
+                    aria-pressed, already present. */}
+            {/* The strip WRAPS instead of scrolling.
+                It used to be `overflow-x-auto` with the scrollbar hidden, which
+                meant "Communities" — the fourth tab — was cut off mid-word with no
+                affordance that anything was there: measured 80px outside the
+                viewport at 360 and still clipped at 390. A hidden scrollbar on a
+                four-item control is not a scroll area, it is a missing button.
+                On a phone the four tabs sit in a 2x2 grid — equal cells, no ragged
+              half-row — and from sm up they are the single flex line they always
+              were. Nothing is clipped at any width. */}
+            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
+              {(
+                [
+                  { id: "for-you", label: "For You" },
+                  { id: "following", label: "Following" },
+                  { id: "events", label: "Events" },
+                  { id: "communities", label: "Communities" },
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => selectTab(t.id)}
+                  aria-pressed={tab === t.id}
+                  className={cn(
+                    // 44px tall on every screen, and every tab fits inside the
+                    // viewport at 320 — that is the whole point of this change.
+                    /* Full-width inside the 2x2 phone grid; content-width once
+                       the row is a single flex line at sm, otherwise each pill
+                       would stretch across a line of its own. */
+                    "flex w-full select-none items-center justify-center rounded-full sm:w-auto",
+                    "px-3 text-[12.5px] font-semibold leading-none transition-colors sm:px-4 sm:text-[13px]",
+                    "min-h-[44px] touch-manipulation active:scale-[0.97]",
+                    tab === t.id
+                      ? // §3 — gradient is a reserved selected-state treatment.
+                        "brand-gradient text-white shadow-[0_4px_12px_rgba(37,99,255,0.25)]"
+                      : "border border-outline-variant bg-surface-container-lowest text-on-surface-variant hover:text-on-surface"
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <CreatePost
+              onCreated={onCreated}
+              composerRef={composerRef}
+              /* Exactly one welcome card on a signed-out screen. */
+              showGuestCard={!(ready && !user)}
+            />
+
+            {/* Feed */}
+            {feed.isLoading ? (
+              <div className="space-y-5">
+                <PostSkeleton />
+                <PostSkeleton />
+              </div>
+            ) : feed.error ? (
+              <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-6 py-12 text-center">
+                <p className="text-base font-semibold text-foreground">Something went wrong</p>
+                <p className="mt-1 text-sm text-muted-foreground">The feed couldn&apos;t load. Give it another try.</p>
+                <Button size="sm" variant="outline" className="mt-4" onClick={() => feed.refetch()}>
+                  Retry
+                </Button>
+              </div>
+            ) : posts.length === 0 ? (
+              tab === "following" ? (
+                <EmptyBlock
+                  icon={UserPlus}
+                  title="Not following anyone yet"
+                  body="Follow people you meet at events and their posts will show up here."
+                  action={
+                    <Button asChild size="sm" variant="outline">
+                      <Link href="/events">Explore events</Link>
+                    </Button>
+                  }
+                />
+              ) : (
+                <EmptyBlock
+                  icon={CalendarSearch}
+                  title="Your event story starts here"
+                  body="Be the first to post — share an update, a photo, or an event you're excited about."
+                  action={
+                    <Button asChild size="sm">
+                      <Link href="/events">Explore events</Link>
+                    </Button>
+                  }
+                />
+              )
+            ) : (
+              <>
+                {stream.map((item) =>
+                  item.kind === "post" ? (
+                    <FeedPost
+                      key={item.key}
+                      post={item.post}
+                      onDeleted={onDeleted}
+                      onArchived={onArchived}
+                    />
+                  ) : (
+                    <DiscoveryCard
+                      key={item.key}
+                      kind={item.kind}
+                      events={discovery.events}
+                      people={discovery.people}
+                      communities={discovery.communities}
+                    />
+                  )
+                )}
+                {feed.hasMore && (
+                  <div className="pt-1 text-center">
+                    <Button variant="outline" onClick={() => feed.fetchNextPage()} disabled={feed.isFetchingMore}>
+                      {feed.isFetchingMore ? "Loading…" : "Load more posts"}
+                    </Button>
+                  </div>
+                )}
+                {!feed.hasMore && (
+                  <p className="flex items-center justify-center gap-1.5 pt-2 pb-4 text-xs text-muted-foreground">
+                    <Users className="h-3.5 w-3.5" /> You&apos;re all caught up
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Right sidebar (desktop) — upcoming, live leaderboard, builders to follow */}
+        <RightRail
+          user={user}
+          registeredUpcoming={myUpcoming}
+          liveQuiz={liveQuiz}
+          entries={liveBoard?.entries || []}
+          posts={posts}
+        />
+      </div>
+    </>
   );
 }
 
@@ -552,13 +552,13 @@ function EmptyBlock({
   body: string;
   action?: React.ReactNode;
 }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-6 py-14 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-light text-primary">
-        <Icon className="h-7 w-7" />
-      </div>
-      <h3 className="mt-4 text-base font-semibold text-foreground">{title}</h3>
-      <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{body}</p>
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-6 py-14 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-light text-primary">
+          <Icon className="h-7 w-7" />
+        </div>
+        <h3 className="mt-4 text-base font-semibold text-foreground">{title}</h3>
+        <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{body}</p>
       {action && <div className="mt-5">{action}</div>}
     </div>
   );

@@ -246,6 +246,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Ticket className="h-4 w-4" /> My events & tickets
           </Link>
         </DropdownMenuItem>
+        {/* The feed's top bar carries the bell, but that bar is feed-only — and
+            the bottom nav is navigation, not notifications. Without this entry a
+            phone could only reach /notifications from the feed. */}
+        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
+          <Link href="/notifications">
+            <Bell className="h-4 w-4" /> Notifications
+          </Link>
+        </DropdownMenuItem>
         {/* The three owner-only lists, reachable without opening your profile.
             They are different things — saved is a bookmark you made, liked is a
             reaction you gave, archive is your own post set aside — so they get

@@ -24,5 +24,8 @@ router.get("/:id/achievements", optionalUser, userController.getUserAchievements
 router.get("/:id/profile", optionalUser, userController.getPublicProfile);
 router.get("/:id/posts", optionalUser, userController.getUserPosts);
 router.get("/:id/events", optionalUser, userController.getUserEvents);
+// Part 11 §5 — the profile Media tab browses images, paginated:
+// GET /api/users/:id/media?page=1&limit=18
+router.get("/:id/media", optionalUser, userController.getUserMedia);
 
 module.exports = router;

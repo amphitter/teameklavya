@@ -234,6 +234,15 @@ export function FeedView() {
 
   const onDeleted = (id: string) => setRemoved((r) => [...r, id]);
 
+  /* Archiving removes a post from every public list — including the one it was
+     archived from. The server stops returning it on the next fetch, but the
+     card is already rendered, so it has to leave now; otherwise the toast
+     ("only you can see it") is contradicted by the post still sitting in the
+     feed. The same overlay that hides a deleted post hides an archived one,
+     and restoring (or Undo) puts it back without a refetch. */
+  const onArchived = (id: string, archived: boolean) =>
+    setRemoved((r) => (archived ? (r.includes(id) ? r : [...r, id]) : r.filter((x) => x !== id)));
+
   // Real search — routes to event discovery with the query
   const submitHomeSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -413,7 +422,7 @@ export function FeedView() {
           ) : (
             <>
               {posts.map((p) => (
-                <FeedPost key={p._id} post={p} onDeleted={onDeleted} />
+                <FeedPost key={p._id} post={p} onDeleted={onDeleted} onArchived={onArchived} />
               ))}
               {feed.hasMore && (
                 <div className="pt-1 text-center">

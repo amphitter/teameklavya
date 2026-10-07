@@ -14,6 +14,10 @@ export interface ProfileStats {
   eventsAttended: number;
   eventsCreated?: number;
   checkIns?: number;
+  /* Sent to the profile's owner only: the size of their own archived set and
+     how many drafts are sitting unseen. */
+  archivedPosts?: number;
+  draftPosts?: number;
 }
 
 /**
@@ -21,6 +25,32 @@ export interface ProfileStats {
  * Cover image, avatar, @username, verification, bio, location, interests
  * and real stats. `actions` slot receives Edit / Follow buttons.
  */
+/**
+ * One number and its label, inline.
+ *
+ * A button when it opens something (followers/following lists), plain text
+ * otherwise — so the affordance matches the behaviour instead of every stat
+ * looking tappable.
+ */
+function Stat({ value, label, onClick }: { value: number; label: string; onClick?: () => void }) {
+  const body = (
+    <>
+      <b className="text-[15px] font-extrabold text-foreground">{compactCount(value)}</b>{" "}
+      <span className="text-[13px] text-muted-foreground">{label}</span>
+    </>
+  );
+  if (!onClick) return <span className="flex items-baseline gap-1.5">{body}</span>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-baseline gap-1.5 rounded-md transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+    >
+      {body}
+    </button>
+  );
+}
+
 export function ProfileHeader({
   user,
   stats,
@@ -159,37 +189,40 @@ export function ProfileHeader({
           </div>
         </div>
 
-        {/* Stats — real numbers only; followers/following open lists */}
+        {/* ── Social stat row (§5) ────────────────────────────────────────
+         * A compact inline row — Posts · Followers · Following — not five
+         * dashboard tiles. The tiles were a card grid with their own
+         * backgrounds and padding: 200px of vertical space to say three
+         * numbers, and they read as an admin panel rather than a profile.
+         *
+         * Real numbers only, and the Posts figure now excludes archived posts
+         * so it agrees with the Posts tab underneath it.
+         *
+         * Event-first identity is kept, not dropped: the events line below is
+         * the part of this header that no other social product has. */}
         {stats && (
-          <div className="mt-6 grid grid-cols-3 gap-2.5 border-t border-border pt-5 sm:grid-cols-5">
-            {[
-              { label: "Events", value: stats.eventsRegistered, onClick: undefined },
-              { label: "Attended", value: stats.eventsAttended, onClick: undefined },
-              { label: "Posts", value: stats.posts, onClick: undefined },
-              { label: "Followers", value: stats.followers, onClick: onOpenFollowers },
-              { label: "Following", value: stats.following, onClick: onOpenFollowing },
-            ].map((s) => {
-              const inner = (
-                <>
-                  <div className="text-lg font-extrabold text-foreground">{compactCount(s.value)}</div>
-                  <div className="text-[11px] font-medium text-muted-foreground">{s.label}</div>
-                </>
-              );
-              return s.onClick ? (
-                <button
-                  key={s.label}
-                  type="button"
-                  onClick={s.onClick}
-                  className="rounded-lg bg-muted/50 px-3.5 py-3 text-center transition-colors hover:bg-muted"
-                >
-                  {inner}
-                </button>
-              ) : (
-                <div key={s.label} className="rounded-lg bg-muted/50 px-3.5 py-3 text-center">
-                  {inner}
-                </div>
-              );
-            })}
+          <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border pt-4 sm:gap-x-5">
+            <Stat value={stats.posts} label="Posts" />
+            <Stat value={stats.followers} label="Followers" onClick={onOpenFollowers} />
+            <Stat value={stats.following} label="Following" onClick={onOpenFollowing} />
+            {/* Only when there is something real to say. A brand-new account
+                shows no event line rather than "0 events attended". */}
+            {(stats.eventsAttended > 0 || (stats.eventsCreated || 0) > 0) && (
+              <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                <CalendarDays className="h-3.5 w-3.5" aria-hidden />
+                {stats.eventsAttended > 0 && (
+                  <span>
+                    <b className="font-semibold text-foreground">{compactCount(stats.eventsAttended)}</b> attended
+                  </span>
+                )}
+                {stats.eventsAttended > 0 && (stats.eventsCreated || 0) > 0 && <span aria-hidden>·</span>}
+                {(stats.eventsCreated || 0) > 0 && (
+                  <span>
+                    <b className="font-semibold text-foreground">{compactCount(stats.eventsCreated!)}</b> hosted
+                  </span>
+                )}
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -4,6 +4,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { uploadsDir } = require('./services/storage.provider');
 const fs = require('fs');
 const helmet = require('helmet');
 const passport = require('./config/passport');
@@ -140,8 +141,19 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-// Local static uploads (legacy files still served; new uploads go to Cloudinary)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+/* Local static uploads (legacy files still served; new uploads go to Cloudinary).
+ *
+ * The first mount is the directory the storage provider actually writes to
+ * (UPLOADS_DIR, when configured — QA runs and ephemeral environments set it).
+ * The second keeps older files readable from the repository default, so
+ * pointing UPLOADS_DIR somewhere else does not orphan what is already there.
+ *
+ * This used to be a single hardcoded `path.join(__dirname,'uploads')`: uploads
+ * were accepted, the API returned their URL, and every one of them 404'd. */
+app.use('/uploads', express.static(uploadsDir));
+if (path.resolve(uploadsDir) !== path.resolve(__dirname, 'uploads')) {
+  app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+}
 
 // Cookie session for the Google OAuth passport flow
 app.use(

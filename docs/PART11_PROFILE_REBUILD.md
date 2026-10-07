@@ -15,6 +15,18 @@ blocking the whole feature turned out to be a paint-order bug that made the
 
 ---
 
+## Phase status
+
+| Phase | Scope | State |
+|---|---|---|
+| 1 | Edit profile reachable, one click = one save, messages layout bug | **done** `170c4e5` |
+| 2 | Canonical avatar/cover (crop, one square, every surface) | **done** `4bf3a70` — `docs/PHASE2_AVATAR_CANONICAL.md` |
+| 3 | Profile rebuild: header, tabs, feed post component, media grid, Saved/Liked/Archive | **done** — `docs/PHASE3_PROFILE_AND_LISTS.md` (audit: `docs/PHASE3_PROFILE_AUDIT.md`) |
+| 4 | Feed aliveness + micro-interactions (§20–21) | not started |
+| 5 | Final acceptance sweep + the 14-point report | not started |
+
+---
+
 ## Phase 1 — "Click Save, it saves. Click Edit, it opens."
 
 No redesign. Only things that are objectively broken, each with a live repro.

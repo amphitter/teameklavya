@@ -53,6 +53,10 @@ export interface FeedPostData {
   memory?: { rank?: number | null; score?: number; accuracy?: number | null; achievements?: string[] };
   /** Normalized #topics parsed server-side */
   topics?: string[];
+  /* Part 9 §12 — set when the AUTHOR set the post aside. Null/absent means
+     live. Distinct from saved (a private bookmark by any viewer) and from
+     liked (a reaction): three different things with three different homes. */
+  archivedAt?: string | null;
 }
 
 export interface CommentData {

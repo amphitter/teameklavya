@@ -94,10 +94,33 @@ async function visibilityFilter(viewerId) {
   return PostRepository.visibilityFilter(ctx, viewerId);
 }
 
+/**
+ * The author's id, whether `author` is an ObjectId or a POPULATED user.
+ *
+ * `String(populatedUser)` is "[object Object]", so the ownership check below
+ * silently failed for every post fetched with `.populate("author")` — which is
+ * how the single-post route fetches it. Nothing noticed while the only effect
+ * was "the author passes the same public-visibility test as anyone else"; it
+ * surfaced the moment archived posts became owner-only, because then the owner
+ * was locked out of their own post.
+ */
+function authorIdOf(post) {
+  return String(post?.author?._id || post?.author || "");
+}
+
 /** Point-check: may this viewer see this specific post? */
 async function canViewPost(post, viewerId) {
-  if (viewerId && String(post.author) === String(viewerId)) return true;
+  if (viewerId && authorIdOf(post) === String(viewerId)) return true;
   if (post.status !== "published") return false;
+  /* Part 9 §12 — archived means "only I can see this".
+   *
+   * The lists already honoured it (`/users/:id/posts`, the feed, the profile),
+   * but the permalink did not: anyone holding the URL — someone the post was
+   * shared with, a link in a chat, a search result — still got the post and its
+   * comments. That made the feature advisory, and made the UI's own promise
+   * ("Post archived — only you can see it") untrue. The author's check above
+   * returns early, so this only ever excludes OTHER people. */
+  if (post.archivedAt) return false;
   if (!post.visibility || post.visibility === "public") return true;
   if (!viewerId) return false;
   if (post.visibility === "followers") return isFollowerOf(viewerId, post.author);

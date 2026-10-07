@@ -5,6 +5,8 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
+  Archive,
+  ArchiveRestore,
   Bookmark,
   Building2,
   Flag,
@@ -41,9 +43,14 @@ import { cn } from "@/lib/utils";
 export function FeedPost({
   post,
   onDeleted,
+  onArchived,
 }: {
   post: FeedPostData;
   onDeleted?: (id: string) => void;
+  /* The author set the post aside (or put it back). The list that renders this
+     post decides what to do next: a feed drops it, the Archive tab drops it on
+     restore, the profile's Posts tab drops it either way. */
+  onArchived?: (id: string, archived: boolean) => void;
 }) {
   const { user, role } = useSessionUser();
   const [liked, setLiked] = useState(post.likedByMe);
@@ -52,6 +59,8 @@ export function FeedPost({
   const [commentCount, setCommentCount] = useState(post.commentCount);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [archived, setArchived] = useState(Boolean(post.archivedAt));
+  const [archiving, setArchiving] = useState(false);
   const [heartBursts, setHeartBursts] = useState<{ id: number; x: number; y: number }[]>([]);
   const lastTapRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const lastTapTimeRef = useRef(0);
@@ -180,6 +189,45 @@ export function FeedPost({
     }
   };
 
+  /**
+   * §12 — archive, not delete.
+   *
+   * The author's own action, reversible, and deliberately unlike the other two
+   * things a post can be: saving is a private bookmark anyone can make,
+   * liking is a reaction, archiving takes the post out of public feeds and the
+   * public profile while leaving it intact and owned. It is reachable from the
+   * same menu as Delete, which is the only place a post's fate belongs.
+   */
+  const toggleArchive = async () => {
+    setArchiving(true);
+    try {
+      const res = await api.post(`/posts/${post._id}/archive`);
+      if (res.data?.success) {
+        setArchived(Boolean(res.data.archived));
+        toast.success(res.data.archived ? "Post archived — only you can see it" : "Post restored to your profile", {
+          /* Reversible actions get an immediate undo, because the post is out
+             of sight by the time the toast is read. */
+          action: {
+            label: "Undo",
+            onClick: async () => {
+              try {
+                await api.post(`/posts/${post._id}/archive`);
+                onArchived?.(post._id, false);
+              } catch {
+                toast.error("Couldn't undo that");
+              }
+            },
+          },
+        });
+        onArchived?.(post._id, Boolean(res.data.archived));
+      }
+    } catch {
+      toast.error("Couldn't archive that post");
+    } finally {
+      setArchiving(false);
+    }
+  };
+
   const deletePost = async () => {
     setDeleting(true);
     try {
@@ -262,6 +310,19 @@ export function FeedPost({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {isOwn && (
+                <DropdownMenuItem onClick={toggleArchive} disabled={archiving} className="gap-2">
+                  {archived ? (
+                    <>
+                      <ArchiveRestore className="h-4 w-4" /> Restore to profile
+                    </>
+                  ) : (
+                    <>
+                      <Archive className="h-4 w-4" /> Archive post
+                    </>
+                  )}
+                </DropdownMenuItem>
+              )}
               {canDelete && (
                 <DropdownMenuItem onClick={deletePost} disabled={deleting} className="gap-2 text-destructive focus:text-destructive">
                   <Trash2 className="h-4 w-4" /> Delete post

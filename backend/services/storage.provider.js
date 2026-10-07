@@ -356,6 +356,11 @@ if (provider.name === "local") {
 
 module.exports = {
   provider,
+  /* The resolved directory the local provider writes to. server.js serves
+     `/uploads` from HERE — exporting it, rather than letting the static mount
+     re-derive the path, is what keeps "where we write" and "what we serve"
+     from drifting apart (they did, and every QA upload 404'd). */
+  uploadsDir: UPLOADS_DIR,
   CloudinaryProvider,
   LocalProvider,
   VARIANT_PRESETS,

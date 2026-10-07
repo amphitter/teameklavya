@@ -24,7 +24,9 @@ import {
   Sun,
   Ticket,
   UserRound,
+  Archive,
   Bookmark,
+  Heart,
   UsersRound,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
@@ -244,9 +246,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Ticket className="h-4 w-4" /> My events & tickets
           </Link>
         </DropdownMenuItem>
+        {/* The three owner-only lists, reachable without opening your profile.
+            They are different things — saved is a bookmark you made, liked is a
+            reaction you gave, archive is your own post set aside — so they get
+            three entries rather than one vague "My stuff". */}
         <DropdownMenuItem asChild className="gap-2.5 py-2.5">
           <Link href="/saved">
             <Bookmark className="h-4 w-4" /> Saved posts
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
+          <Link href="/liked">
+            <Heart className="h-4 w-4" /> Liked posts
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
+          <Link href="/archived">
+            <Archive className="h-4 w-4" /> Archive
           </Link>
         </DropdownMenuItem>
         {/* Search and the theme switch were top-bar controls. The top bar is

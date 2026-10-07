@@ -90,3 +90,26 @@ zoom slider are hit-testable (not merely present in the DOM).
 
 Both need `LD_LIBRARY_PATH=/var/tmp/libs/usr/lib/x86_64-linux-gnu` and
 `PLAYWRIGHT_BROWSERS_PATH=/home/user/.cache/ms-playwright` in this sandbox.
+
+## Phase 3 — profile and the owner's own lists
+
+```bash
+cd /var/tmp/pw
+QA_EMAIL=ana<stamp>@qa.com node phase3.js          # 390x844, drives the real UI
+QA_EMAIL=ana<stamp>@qa.com node phase3-widths.js  # 320/360/375/390/412/430
+```
+
+`phase3.js` signs in with the seeded account, renames its handle to `ana_roy`,
+creates its own fixtures through the real API, and then **goes through the
+screens**: it archives from the ••• menu (not the API), checks the toast, the
+card leaving the list, the Archive tab, restore, the media grid and the visitor's
+view of the same profile. Fixture captions carry a per-run tag, because the
+seeded database keeps its posts and two runs sharing a caption makes
+"is this card still on screen" unanswerable.
+
+`phase3-widths.js` asserts the tab strip hides **nothing** behind a horizontal
+scroll (`scrollWidth - clientWidth <= 1`) — that failure is what made the Archive
+tab invisible on every phone — and measures the stat row, the media tiles and the
+Archive menu item at each width. Tabs are hit-tested after `scrollIntoView`,
+because on a 320x568 screen content can sit under the fixed bottom nav at
+scroll-top, which is normal and not a defect.

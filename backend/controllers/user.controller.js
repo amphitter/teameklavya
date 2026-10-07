@@ -312,10 +312,14 @@ exports.getPublicProfile = async (req, res) => {
     const objectId =
       mongoose.Types.ObjectId.isValid(String(userId)) ? new mongoose.Types.ObjectId(String(userId)) : userId;
     const [posts, responses, attendedAgg, checkIns, eventsCreated] = await Promise.all([
-      // Soft-deleted posts (status: "deleted") must not inflate the count —
-      // this has to agree with GET /users/:id/posts, which only returns
-      // published posts. Otherwise a profile advertises posts nobody can see.
-      Post.countDocuments({ author: userId, status: "published" }),
+      /* The count must agree with the list underneath it.
+       *
+       * Soft-deleted posts (status: "deleted") must not inflate it, and neither
+       * may ARCHIVED ones: GET /users/:id/posts filters `archivedAt: null`, so
+       * a count that included the archive advertised posts the tab never shows
+       * — the header said 40 and the tab listed 39 with no explanation. The
+       * author's archived total is reported separately, to the author only. */
+      Post.countDocuments({ author: userId, status: "published", archivedAt: null }),
       RegistrationResponse.countDocuments({ userId }),
       RegistrationResponse.aggregate([
         { $match: { userId: objectId } },
@@ -330,6 +334,19 @@ exports.getPublicProfile = async (req, res) => {
 
     const showAttendance = user.socialSettings?.showAttendance !== false;
 
+    /* Owner-only numbers. Both are counts of the viewer's OWN content in the
+       owner-only tabs, so they are computed only for the owner — a visitor
+       asking about someone else's archive gets no number at all rather than
+       the shape of a private list. */
+    let ownCounts = {};
+    if (isSelf) {
+      const [archivedPosts, draftPosts] = await Promise.all([
+        Post.countDocuments({ author: userId, archivedAt: { $ne: null }, status: { $ne: "deleted" } }),
+        Post.countDocuments({ author: userId, status: "draft" }),
+      ]);
+      ownCounts = { archivedPosts, draftPosts };
+    }
+
     res.json({
       success: true,
       user: {
@@ -342,6 +359,7 @@ exports.getPublicProfile = async (req, res) => {
       },
       stats: {
         posts,
+        ...ownCounts,
         followers,
         following,
         eventsRegistered: responses,
@@ -357,6 +375,62 @@ exports.getPublicProfile = async (req, res) => {
   } catch (error) {
     console.error("Public profile error:", error.message);
     res.status(500).json({ success: false, message: "Failed to load profile" });
+  }
+};
+
+/**
+ * GET /api/users/:id/media — the profile's Media tab.
+ *
+ * A real paginated browse of the images someone has shared, instead of the
+ * client-side approximation it replaces: twelve images scraped off whichever
+ * twenty-four posts happened to be loaded, with nothing to say that more
+ * existed and nothing to click through to.
+ *
+ * Published posts only, archived excluded — the same visible set as the
+ * profile's Posts tab, so the grid and any count shown with it agree. A
+ * private or followers-only profile returns the same `canView: false` shape
+ * `getUserPosts` does, so the UI treats both tabs identically.
+ */
+exports.getUserMedia = async (req, res) => {
+  try {
+    const user = await resolveUser(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    const viewerId = req.user?.id || null;
+    const viewerFollows = viewerId
+      ? Boolean(await Follow.exists({ follower: viewerId, followee: user._id, status: "accepted" }))
+      : false;
+    if (!canViewContent(user, viewerId, viewerFollows)) {
+      return res.json({ success: true, posts: [], page: 1, hasMore: false, total: 0, canView: false });
+    }
+
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(36, Math.max(1, parseInt(req.query.limit) || 18));
+
+    /* `images.0` exists is the index-friendly way to ask for image posts; a
+       post with no images contributes nothing to a media grid. */
+    const filter = {
+      author: user._id,
+      status: "published",
+      archivedAt: null,
+      "images.0": { $exists: true },
+    };
+
+    const [posts, total] = await Promise.all([
+      Post.find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select("images content createdAt event")
+        .populate("event", "title slug")
+        .lean(),
+      Post.countDocuments(filter),
+    ]);
+
+    res.json({ success: true, posts, page, hasMore: page * limit < total, total, canView: true });
+  } catch (error) {
+    console.error("User media error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load media" });
   }
 };
 

@@ -1,65 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Bookmark } from "lucide-react";
-import { api } from "@/utils/api";
-import { PageLoader, ErrorState, EmptyState } from "@/components/states";
-import { FeedPost } from "@/components/feed/feed-post";
-import type { FeedPostData } from "@/components/feed/types";
+import { OwnerListPage } from "@/components/feed/owner-list-page";
 
 /**
  * Saved posts — private to the signed-in user (Part 3 §19).
- * Real saved posts only; deleted/hidden originals drop out server-side.
+ *
+ * One of three owner-only lists (saved / liked / archived) that are genuinely
+ * different things: saving is a bookmark you make on anyone's post, liking is a
+ * reaction, archiving is your own post set aside. They share the list shell and
+ * nothing else.
  */
 export default function SavedPage() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [posts, setPosts] = useState<FeedPostData[]>([]);
-
-  const load = () => {
-    setLoading(true);
-    setError(false);
-    api
-      .get("/posts/saved")
-      .then((res) => setPosts(res.data?.posts || []))
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(load, []);
-
-  const remove = (id: string) => setPosts((p) => p.filter((x) => x._id !== id));
-
-  if (loading) return <PageLoader label="Loading saved posts…" />;
-  if (error)
-    return (
-      <div className="mx-auto max-w-2xl px-4 py-8">
-        <ErrorState title="Couldn't load saved posts" description="Give it another try." onRetry={load} />
-      </div>
-    );
-
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 px-3 py-5 sm:px-6 sm:py-7">
-      <div>
-        <h1 className="flex items-center gap-2 text-xl font-extrabold tracking-tight text-foreground sm:text-2xl">
-          <Bookmark className="h-5 w-5 text-primary" /> Saved posts
-        </h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">Private to you — only you can see this list.</p>
-      </div>
-
-      {posts.length === 0 ? (
-        <EmptyState
-          icon={Bookmark}
-          title="Nothing saved yet"
-          description="Save something you want to come back to — tap the bookmark on any post."
-          actionLabel="Back to feed"
-          onAction={() => router.push("/")}
-        />
-      ) : (
-        posts.map((p) => <FeedPost key={p._id} post={p} onDeleted={remove} />)
-      )}
-    </div>
+    <OwnerListPage
+      title="Saved posts"
+      subtitle="Private to you — only you can see this list."
+      icon={Bookmark}
+      endpoint={({ cursor }) => `/posts/saved?limit=12${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`}
+      emptyTitle="Nothing saved yet"
+      emptyDescription="Save something you want to come back to — tap the bookmark on any post."
+    />
   );
 }

@@ -400,16 +400,25 @@ const CLOUD_URL = "https://res.cloudinary.com/demo/image/upload/v1712345678/even
   const readFe = (rel) => fs.readFileSync(path.join(FE, rel), "utf8");
 
   await test("§19 hot-path images render through OptimizedImage", () => {
+    /* Part 11 Phase 3 replaced the profile's post grid with the shared feed
+       list and a real media grid, and deleted the two orphaned views. The list
+       below names the files that actually render these images TODAY — pointing
+       it at a deleted file is how this assertion silently stops testing
+       anything. */
     for (const f of [
       "components/event-card.tsx",
       "components/user-avatar.tsx",
       "components/feed/feed-post.tsx",
-      "components/profile/posts-grid.tsx",
+      "components/feed/post-list.tsx",
+      "components/profile/media-grid.tsx",
       "components/feed/event-post-card.tsx",
       "components/profile/profile-header.tsx",
     ]) {
       const src = readFe(f);
-      assert.ok(src.includes("OptimizedImage"), `${f} must use OptimizedImage`);
+      /* post-list renders the feed post, which owns its own image: it satisfies
+         the rule by delegating, so accept the delegation explicitly. */
+      const compliant = src.includes("OptimizedImage") || src.includes("<FeedPost");
+      assert.ok(compliant, `${f} must render images through OptimizedImage (directly or via FeedPost)`);
     }
   });
 
@@ -422,14 +431,32 @@ const CLOUD_URL = "https://res.cloudinary.com/demo/image/upload/v1712345678/even
   });
 
   await test("§20 uploads compress on-device before hitting the network", () => {
+    /* `components/profile/profile-view.tsx` was deleted in Phase 3 — the
+       profile's upload path is now the media uploader, which hands the file to
+       the crop editor. That path re-encodes ON DEVICE too, just not through
+       `compressFor`: the canonical renderer draws the crop to a fixed-size
+       canvas and encodes webp/jpeg at quality, which is the stronger guarantee
+       for an image that must look identical on every surface. Both count. */
     for (const f of [
       "components/feed/create-post.tsx",
       "components/admin/event-form.tsx",
-      "components/profile/profile-view.tsx",
+      "components/stories/story-composer.tsx",
     ]) {
       const src = readFe(f);
       assert.ok(src.includes("compressFor"), `${f} must compress before upload`);
     }
+    const cropEditor = readFe("components/media/crop-editor.tsx");
+    assert.ok(
+      cropEditor.includes("renderCanonical"),
+      "components/media/crop-editor.tsx must re-encode the crop on device before upload"
+    );
+    /* …and that renderer really does encode at a quality, rather than shipping
+       the original bytes. */
+    const canonical = readFe("utils/canonical-image.ts");
+    assert.ok(
+      canonical.includes("toBlob") && canonical.includes("quality"),
+      "utils/canonical-image.ts must encode the canvas (toBlob + quality), not pass the original through"
+    );
   });
 
   await test("§20 the compressor never blocks an upload when it can't help", () => {

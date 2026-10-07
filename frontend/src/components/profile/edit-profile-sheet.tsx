@@ -44,6 +44,7 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
   const [institution, setInstitution] = useState("");
   const [avatar, setAvatar] = useState("");
   const [coverImage, setCoverImage] = useState("");
+  const [coverPosition, setCoverPosition] = useState(50);
   const [profileVisibility, setProfileVisibility] = useState("public");
   const [allowMessagesFrom, setAllowMessagesFrom] = useState("everyone");
 
@@ -66,11 +67,12 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
     setUsername(user.username || "");
     setBio(p.bio || "");
     setLocation(p.location || "");
-    setWebsite("");
+    setWebsite(p.website || "");
     setInterestsText((p.interests || []).join(", "));
     setInstitution(p.institution || "");
     setAvatar(p.avatar || "");
     setCoverImage(p.coverImage || "");
+    setCoverPosition(typeof p.coverPosition === "number" ? p.coverPosition : 50);
     setProfileVisibility(user.socialSettings?.profileVisibility || "public");
     setAllowMessagesFrom(user.socialSettings?.allowMessagesFrom || "everyone");
   }, [open, user]);
@@ -94,6 +96,8 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
       username !== (user.username || "") ||
       bio !== (p.bio || "") ||
       location !== (p.location || "") ||
+      website !== (p.website || "") ||
+      coverPosition !== (typeof p.coverPosition === "number" ? p.coverPosition : 50) ||
       institution !== (p.institution || "") ||
       interests.join(",") !== (p.interests || []).join(",") ||
       avatar !== (p.avatar || "") ||
@@ -101,7 +105,7 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
       profileVisibility !== (user.socialSettings?.profileVisibility || "public") ||
       allowMessagesFrom !== (user.socialSettings?.allowMessagesFrom || "everyone")
     );
-  }, [user, firstName, lastName, username, bio, location, institution, interests, avatar, coverImage, profileVisibility, allowMessagesFrom]);
+  }, [user, firstName, lastName, username, bio, location, website, institution, interests, avatar, coverImage, coverPosition, profileVisibility, allowMessagesFrom]);
 
   /* §59 — "Prevent accidental navigation loss." */
   useEffect(() => {
@@ -134,13 +138,19 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
       username: username.trim().toLowerCase(),
       bio,
       location,
+      website,
+      coverPosition,
       interests,
       institution,
       profileVisibility,
       allowMessagesFrom,
     };
-    // Only send media the user actually changed — the uploader already
-    // persisted any upload, so re-sending would be a redundant write.
+    /* The uploader persists each image the moment it uploads, so by the time
+     * Save runs these are normally already stored. They are still included
+     * when they differ: that covers "replaced the image, then hit Cancel" on
+     * a previous visit, and it makes the save payload self-consistent rather
+     * than depending on the uploader having run. Re-sending an identical URL
+     * is a no-op write of one field. */
     if (avatar !== (user?.profile?.avatar || "")) payload.avatar = avatar;
     if (coverImage !== (user?.profile?.coverImage || "")) payload.coverImage = coverImage;
 
@@ -192,7 +202,18 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
           {/* §22 — Cover */}
           <section>
             <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">Cover photo</h3>
-            <CoverUploader value={coverImage} onChange={setCoverImage} />
+            <CoverUploader
+              value={coverImage}
+              /* Removing the banner also clears the focal point here, mirroring
+                 what the API does — otherwise the next upload would preview a
+                 crop inherited from a photo the user deleted. */
+              onChange={(url) => {
+                setCoverImage(url);
+                if (!url) setCoverPosition(50);
+              }}
+              position={coverPosition}
+              onPositionChange={setCoverPosition}
+            />
           </section>
 
           {/* §23 — Username */}
@@ -267,6 +288,23 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
               <label htmlFor="ep-inst" className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">Institution</label>
               <input id="ep-inst" value={institution} onChange={(e) => setInstitution(e.target.value)} placeholder="University" className="w-full rounded-[10px] border border-outline-variant bg-surface px-3 py-2.5 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12" />
             </div>
+          </section>
+
+          {/* §2-7 — website. Was input state with nowhere to go; now a real
+              field, validated and sanitised server-side. */}
+          <section>
+            <label htmlFor="ep-site" className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Website
+            </label>
+            <input
+              id="ep-site"
+              type="url"
+              inputMode="url"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value.slice(0, 200))}
+              placeholder="https://"
+              className="w-full rounded-[10px] border border-outline-variant bg-surface px-3 py-2.5 text-[15px] outline-none placeholder:text-on-surface-variant/60 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12"
+            />
           </section>
 
           {/* §24 — Skills / interests */}

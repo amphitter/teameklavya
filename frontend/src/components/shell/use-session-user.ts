@@ -45,6 +45,41 @@ function normalizeUser(raw: unknown): SessionUser | null {
  * Re-syncs when the tab regains focus or the route changes,
  * so login/logout in another tab is reflected.
  */
+/**
+ * Session-changed event.
+ *
+ * WHY A CUSTOM EVENT AND NOT JUST localStorage
+ *   The hook used to re-read the session only on `focus` and on a route
+ *   change. So after editing your profile the header avatar, the nav avatar,
+ *   your post author labels and your own profile header all kept the OLD
+ *   identity until you navigated or switched tabs — and on a single-page
+ *   visit, effectively until a reload. §2-7 requires the update to propagate
+ *   "everywhere without logout", so the write and the notification have to
+ *   happen together, at the one place that owns the session.
+ */
+export const SESSION_EVENT = "eventhub:session-changed";
+
+/**
+ * Persist a saved user and tell every `useSessionUser` consumer at once.
+ *
+ * `patch` is merged rather than replacing the stored object: the login
+ * response and `/auth/me/profile` do not return byte-identical shapes, and
+ * overwriting would drop whichever fields the caller's response happened to
+ * omit.
+ */
+export function updateSessionUser(patch: Partial<SessionUser> | null | undefined) {
+  if (typeof window === "undefined" || !patch) return;
+  try {
+    const raw = localStorage.getItem("user");
+    const current = raw ? JSON.parse(raw) : {};
+    const merged = { ...current, ...patch };
+    localStorage.setItem("user", JSON.stringify(merged));
+    window.dispatchEvent(new Event(SESSION_EVENT));
+  } catch {
+    /* storage unavailable — the next focus sync will pick it up */
+  }
+}
+
 export function useSessionUser() {
   const pathname = usePathname();
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -68,7 +103,13 @@ export function useSessionUser() {
     };
     sync();
     window.addEventListener("focus", sync);
-    return () => window.removeEventListener("focus", sync);
+    // Identity changed in this tab (e.g. a profile save) — re-read immediately
+    // so the header, nav and avatars update on the same frame as the save.
+    window.addEventListener(SESSION_EVENT, sync);
+    return () => {
+      window.removeEventListener("focus", sync);
+      window.removeEventListener(SESSION_EVENT, sync);
+    };
   }, [pathname]);
 
   return { user, role, ready };

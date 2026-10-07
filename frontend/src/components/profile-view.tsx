@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
+  Link as LinkIcon,
   LogOut,
   MapPin,
   Pencil,
@@ -19,7 +20,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/utils/api";
-import { getImageUrl } from "@/utils/image";
+import { getImageUrl, cloudinaryUrl } from "@/utils/image";
+import { UserAvatar } from "@/components/user-avatar";
+import { EditProfileSheet } from "@/components/profile/edit-profile-sheet";
+import { updateSessionUser } from "@/components/shell/use-session-user";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -34,14 +38,35 @@ import { Label } from "@/components/ui/label";
 import { EmptyState, ErrorState, PageLoader, Skeleton } from "@/components/states";
 import { cn } from "@/lib/utils";
 
+/**
+ * The user as `/auth/me` returns it.
+ *
+ * The `profile` shape here used to list only institution/course/year, which
+ * is exactly the set of fields this screen could edit — the type was
+ * describing the limitation rather than the data. Extended to the full
+ * sub-document the backend actually stores and the edit sheet actually
+ * writes, so the header can display what was saved.
+ */
 interface ProfileUser {
   _id: string;
   firstName: string;
   lastName: string;
   email: string;
+  username?: string;
   role: string;
   emailVerified: boolean;
-  profile?: { institution?: string; course?: string; year?: string };
+  profile?: {
+    avatar?: string;
+    coverImage?: string;
+    coverPosition?: number;
+    bio?: string;
+    location?: string;
+    website?: string;
+    institution?: string;
+    course?: string;
+    year?: string;
+    interests?: string[];
+  };
   createdAt?: string;
 }
 
@@ -83,9 +108,11 @@ export default function ProfileView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  /* §2-7 — one edit surface, not two. This screen used to open an inline
+   * form with institution / course / year only: no username, no photo, no
+   * banner. It now opens the same EditProfileSheet the public profile uses,
+   * so "Edit profile" means the same thing wherever the user finds it. */
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ institution: "", course: "", year: "" });
-  const [saving, setSaving] = useState(false);
 
   const [ticketModal, setTicketModal] = useState<UserTicket | null>(null);
 
@@ -112,11 +139,6 @@ export default function ProfileView() {
         }
         const u = meRes.data.user;
         setUser(u);
-        setEditForm({
-          institution: u.profile?.institution || "",
-          course: u.profile?.course || "",
-          year: u.profile?.year || "",
-        });
         setEvents(eventsRes.data?.events ?? []);
         setTickets(ticketsRes.data?.tickets ?? []);
       } catch {
@@ -137,20 +159,6 @@ export default function ProfileView() {
   const past = events.filter((e) => statusOf(e.startDate, e.endDate) === "past");
   const checkedInCount = tickets.filter((t) => t.checkedIn).length;
 
-  const saveProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      const res = await api.put("/auth/me/profile", editForm);
-      setUser((u) => (u ? { ...u, profile: res.data?.profile ?? editForm } : u));
-      setEditing(false);
-      toast.success("Profile updated");
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to update profile");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -172,8 +180,6 @@ export default function ProfileView() {
   }
 
   const fullName = `${user.firstName} ${user.lastName || ""}`.trim();
-  const initials = `${user.firstName?.[0] || ""}${user.lastName?.[0] || ""}`.toUpperCase() || "U";
-
   const EventRow = ({ event }: { event: RegEvent }) => {
     const ticket = ticketByEvent.get(event._id);
     const st = statusOf(event.startDate, event.endDate);
@@ -250,15 +256,41 @@ export default function ProfileView() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
       {/* ── Profile header ─────────────────────────────── */}
-      <Card>
+      <Card className="overflow-hidden">
+        {/* Cover (§7). This screen previously showed neither a banner nor the
+            uploaded avatar — it drew the user's INITIALS in a gradient box —
+            so a member could upload a photo, save it successfully, and see
+            nothing change anywhere. The gradient behind the image is the
+            intended empty state, not a placeholder: a profile without a
+            banner reads as designed rather than as a broken grey rectangle. */}
+        <div className="relative h-32 w-full bg-gradient-to-r from-[#2563FF] via-[#6C35FF] to-[#D946EF] sm:h-40">
+          {user.profile?.coverImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={cloudinaryUrl(user.profile.coverImage, { w: 1200, h: 400 }) || getImageUrl(user.profile.coverImage) || ""}
+              alt=""
+              className="h-full w-full object-cover"
+              /* The focal point set by the reposition control in the editor. */
+              style={{
+                objectPosition: `50% ${typeof user.profile?.coverPosition === "number" ? user.profile.coverPosition : 50}%`,
+              }}
+            />
+          ) : null}
+        </div>
+
         <CardContent className="p-6 sm:p-8">
-          <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-center">
-            <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#0070f0] to-[#5030f0] text-2xl font-extrabold text-white">
-              {initials}
-            </span>
+          <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-start">
+            {/* The real avatar, not initials. Negative margin pulls it onto
+                the cover the way every social profile does. */}
+            <div className="-mt-16 shrink-0 rounded-full border-4 border-card bg-card sm:-mt-20">
+              <UserAvatar user={user} size={80} className="!h-20 !w-20" />
+            </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-2xl font-extrabold tracking-tight text-foreground">{fullName}</h1>
+                {user.username ? (
+                  <span className="text-sm font-semibold text-muted-foreground">@{user.username}</span>
+                ) : null}
                 {user.emailVerified && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-success-light px-2.5 py-1 text-[11px] font-semibold text-success">
                     <BadgeCheck className="h-3.5 w-3.5" /> Verified
@@ -271,6 +303,35 @@ export default function ProfileView() {
                 )}
               </div>
               <p className="mt-0.5 text-sm text-muted-foreground">{user.email}</p>
+              {user.profile?.bio ? (
+                <p className="mt-2 max-w-prose text-sm text-foreground">{user.profile.bio}</p>
+              ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                {user.profile?.location ? (
+                  <span className="inline-flex items-center gap-1">
+                    <MapPin className="h-3.5 w-3.5" /> {user.profile.location}
+                  </span>
+                ) : null}
+                {user.profile?.website ? (
+                  <a
+                    href={user.profile.website}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+                  >
+                    <LinkIcon className="h-3.5 w-3.5" /> {user.profile.website.replace(/^https?:\/\//, "")}
+                  </a>
+                ) : null}
+              </div>
+              {(user.profile?.interests || []).length ? (
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {(user.profile?.interests || []).slice(0, 8).map((t) => (
+                    <span key={t} className="rounded-full bg-purple-light px-2.5 py-1 text-[11px] font-semibold text-purple">
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               {user.createdAt && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   Member since{" "}
@@ -312,55 +373,24 @@ export default function ProfileView() {
         </CardContent>
       </Card>
 
-      {/* ── Edit profile ───────────────────────────────── */}
-      {editing && (
-        <Card className="mt-6">
-          <CardContent className="p-6">
-            <h2 className="text-base font-bold text-foreground">Profile details</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              These auto-fill into event registration forms.
-            </p>
-            <form onSubmit={saveProfile} className="mt-4 grid gap-4 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="institution">Institution / Organization</Label>
-                <Input
-                  id="institution"
-                  value={editForm.institution}
-                  onChange={(e) => setEditForm({ ...editForm, institution: e.target.value })}
-                  placeholder="e.g. GITM"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="course">Course / Program</Label>
-                <Input
-                  id="course"
-                  value={editForm.course}
-                  onChange={(e) => setEditForm({ ...editForm, course: e.target.value })}
-                  placeholder="e.g. B.Tech CSE"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="year">Year</Label>
-                <Input
-                  id="year"
-                  value={editForm.year}
-                  onChange={(e) => setEditForm({ ...editForm, year: e.target.value })}
-                  placeholder="e.g. 3rd year"
-                />
-              </div>
-              <div className="flex gap-2.5 sm:col-span-3">
-                <Button type="submit" className="font-semibold" disabled={saving}>
-                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Save changes
-                </Button>
-                <Button type="button" variant="outline" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
+      {/* Edit profile (§2-7) — the full sheet: photo, banner, username,
+          display name, bio, location, website, institution, skills, privacy. */}
+      <EditProfileSheet
+        open={editing}
+        onClose={() => setEditing(false)}
+        user={user}
+        onSaved={(saved) => {
+          /* Propagate without logout: this screen's copy AND the shared
+           * session (header avatar, nav, author labels, other tabs). */
+          if (saved) {
+            setUser((prev) => (prev ? { ...prev, ...saved } : prev));
+            updateSessionUser(saved);
+            // Re-read /auth/me so anything the sheet did not return (e.g.
+            // derived stats) is refreshed through the same code path.
+            api.get("/auth/me").then((r) => r.data?.user && setUser(r.data.user)).catch(() => {});
+          }
+        }}
+      />
 
       {/* ── Upcoming events ────────────────────────────── */}
       <section className="mt-10">

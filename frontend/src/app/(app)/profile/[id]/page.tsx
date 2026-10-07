@@ -9,7 +9,7 @@ import {
   CalendarDays,
   CalendarRange,
   Flag,
-  Globe,
+  Pencil,
   ImageOff,
   Lock,
   MessageCircle,
@@ -29,6 +29,8 @@ import {
 import { FollowListModal } from "@/components/social/follow-list-modal";
 import { ErrorState, PageLoader, EmptyState } from "@/components/states";
 import { ProfileHeader, type ProfileStats } from "@/components/profile/profile-header";
+import { EditProfileSheet } from "@/components/profile/edit-profile-sheet";
+import { updateSessionUser } from "@/components/shell/use-session-user";
 import { PostsGrid } from "@/components/profile/posts-grid";
 import { AchievementsGrid, type AchievementBadge } from "@/components/profile/achievements";
 import { useSessionUser } from "@/components/shell/use-session-user";
@@ -77,6 +79,12 @@ export default function PublicProfilePage() {
   const [reporting, setReporting] = useState(false);
   const [tab, setTab] = useState<Tab>("posts");
   const [listModal, setListModal] = useState<"followers" | "following" | "requests" | null>(null);
+  /* Part 9 §2-7 — the edit sheet mounts HERE, on the screen the user is
+   * already looking at. The previous build navigated to /user/profile, which
+   * was a different, older profile view whose only editable fields were
+   * institution/course/year — so username, photo and banner simply could not
+   * be changed from anywhere. */
+  const [editOpen, setEditOpen] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -228,8 +236,8 @@ export default function PublicProfilePage() {
         actions={
           isMe ? (
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => router.push("/user/profile")} className="gap-1.5">
-                <Globe className="h-3.5 w-3.5" /> Edit profile
+              <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="gap-1.5">
+                <Pencil className="h-3.5 w-3.5" /> Edit profile
               </Button>
               {requestCount > 0 && (
                 <Button size="sm" onClick={() => setListModal("requests")} className="gap-1.5">
@@ -437,6 +445,30 @@ export default function PublicProfilePage() {
         targetType="user"
         targetId={profileUser?._id || ""}
       />
+
+      {/* Edit profile (§2-7). Mounted only for the owner. */}
+      {isMe ? (
+        <EditProfileSheet
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          user={profileUser}
+          onSaved={(saved) => {
+            /* §2-7 — "propagates everywhere without logout". Three places
+             * hold this identity and all three are refreshed here:
+             *   1. this screen's local copy (header, banner, tabs)
+             *   2. the shared session (header avatar, nav, author labels)
+             *   3. the URL, when the username changed — every link to the
+             *      old @handle now 404s, so the address bar is corrected. */
+            if (saved) {
+              setProfileUser((prev: any) => ({ ...prev, ...saved }));
+              updateSessionUser(saved);
+              if (saved.username && saved.username !== id) {
+                router.replace(`/profile/${saved.username}`);
+              }
+            }
+          }}
+        />
+      ) : null}
     </>
   );
 }

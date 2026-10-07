@@ -50,9 +50,11 @@ export function ProfileHeader({
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       {/* Cover */}
+      {/* Cover (§7). The gradient behind the image is the clean fallback the
+          brief asks for — with no banner the header reads as a designed
+          surface, never as an empty grey rectangle. */}
       <div className="relative h-28 w-full bg-gradient-to-r from-[#2563FF] via-[#6C35FF] to-[#D946EF] sm:h-36">
         {p.coverImage ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <OptimizedImage
             src={p.coverImage}
             alt=""
@@ -61,7 +63,10 @@ export function ProfileHeader({
             priority
             sizes="100vw"
             className="h-full w-full object-cover"
-            style={{ height: "100%" }}
+            /* The stored focal point. A 1600×400 banner is shown here in a
+               112px strip, so centring the crop is what decapitates photos —
+               this is what the reposition control in the editor sets. */
+            style={{ height: "100%", objectPosition: `50% ${typeof p.coverPosition === "number" ? p.coverPosition : 50}%` }}
           />
         ) : null}
       </div>

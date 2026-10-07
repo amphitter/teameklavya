@@ -189,8 +189,11 @@ export interface ProfileUser {
   profile?: {
     avatar?: string;
     coverImage?: string;
+    /** Vertical focal point of the cover, 0–100 (§7 — "repositionable"). */
+    coverPosition?: number;
     bio?: string;
     location?: string;
+    website?: string;
     institution?: string;
     course?: string;
     year?: string;

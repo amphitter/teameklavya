@@ -391,6 +391,7 @@ const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
 const BIO_MAX = 280;
 const NAME_MAX = 50;
 const LOCATION_MAX = 80;
+const WEBSITE_MAX = 200;
 const INTERESTS_MAX = 10;
 const URL_MAX = 500;
 
@@ -448,10 +449,27 @@ exports.updateProfile = async (req, res) => {
       if (avatar === null) return fail('Profile photo must be a valid http(s) URL');
       user.profile.avatar = avatar;
     }
+    /* Cover focal point (§7 — "repositionable"). Clamped rather than
+     * rejected: an out-of-range number is a client bug, and clamping keeps
+     * the banner visible instead of failing the whole save.
+     *
+     * Evaluated BEFORE coverImage, deliberately. The edit sheet can send both
+     * in one request — the user drags the crop, then removes the banner — and
+     * the focal point belongs to the image being removed. Applying it after
+     * the removal would store a crop for a photo that no longer exists, which
+     * then silently applies to the NEXT upload. */
+    if (b.coverPosition !== undefined) {
+      const pos = Number(b.coverPosition);
+      if (!Number.isFinite(pos)) return fail('Cover position must be a number');
+      user.profile.coverPosition = Math.min(100, Math.max(0, Math.round(pos)));
+    }
     if (b.coverImage !== undefined) {
       const cover = sanitizeUrl(b.coverImage);
       if (cover === null) return fail('Cover image must be a valid http(s) URL');
       user.profile.coverImage = cover;
+      // Removing the banner resets its focal point, so a later upload starts
+      // clean instead of inheriting the previous photo's crop.
+      if (!cover) user.profile.coverPosition = 50;
     }
     if (b.bio !== undefined) {
       if (typeof b.bio !== 'string') return fail('Bio must be a string');
@@ -462,6 +480,16 @@ exports.updateProfile = async (req, res) => {
       if (typeof b.location !== 'string') return fail('Location must be a string');
       if (b.location.length > LOCATION_MAX) return fail(`Location must be ${LOCATION_MAX} characters or fewer`);
       user.profile.location = b.location;
+    }
+    if (b.website !== undefined) {
+      if (typeof b.website !== 'string') return fail('Website must be a string');
+      if (b.website.length > WEBSITE_MAX) return fail(`Website must be ${WEBSITE_MAX} characters or fewer`);
+      /* Normalised through the same sanitizer as the media URLs: a profile
+       * link is rendered as a clickable href, so `javascript:` must not
+       * survive. Empty string stays valid — it is how a link is removed. */
+      const site = sanitizeUrl(b.website);
+      if (site === null) return fail('Website must be a valid http(s) URL');
+      user.profile.website = site;
     }
     if (b.interests !== undefined) {
       if (!Array.isArray(b.interests)) return fail('Interests must be an array');

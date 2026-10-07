@@ -7,8 +7,26 @@ const profileSchema = new mongoose.Schema({
   // ── Social profile (Part 3) ──────────────────────────────
   avatar: { type: String, default: '' },        // Cloudinary URL
   coverImage: { type: String, default: '' },    // Cloudinary URL
+  /* Vertical focal point of the cover, as a CSS object-position percentage
+   * (0 = show the top of the image, 100 = show the bottom).
+   *
+   * WHY THIS IS STORED, NOT JUST APPLIED
+   *   A cover is authored at 1600×400 and shown in containers from a 96px
+   *   mobile strip to a 240px desktop banner. Without a stored focal point
+   *   the browser centres the crop, which decapitates any photo whose subject
+   *   is not in the middle. §7 asks for a banner that is
+   *   "croppable / repositionable", and a reposition that resets on reload is
+   *   not a reposition — so the value is persisted with the image.
+   *
+   *   Default 50 keeps every existing cover rendering exactly as it does
+   *   today (plain `object-position: center`). */
+  coverPosition: { type: Number, default: 50, min: 0, max: 100 },
   bio: { type: String, default: '', maxlength: [280, 'Bio is too long (max 280 characters)'] },
   location: { type: String, default: '', maxlength: 80 },
+  /* §2-7 lists "website/location" as profile fields. The edit sheet had the
+   * input state for this but no field to write to, so it was silently
+   * discarded on save — the classic "looks implemented" gap. */
+  website: { type: String, default: '', maxlength: 200 },
   interests: { type: [String], default: [] },    // lowercase topics, max 10 enforced in controller
   // Per-type notification mutes (Part 3, Phase 8): { like: true, comment: true, … }
   // Missing/false = allowed. Enforced in the notification service, never the client.

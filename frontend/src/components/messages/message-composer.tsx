@@ -1,16 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Loader2, Paperclip, SendHorizontal, X } from "lucide-react";
+import { ImagePlus, Paperclip, SendHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
 import { EmojiButton } from "@/components/ui/emoji-picker";
 
 export interface MessageComposerProps {
   onSend: (text: string) => void;
+  /** Called on every keystroke — the debounce lives in the emitter (§13). */
+  onTyping?: () => void;
   onSendImage?: (file: File) => void;
   onSendFile?: (file: File) => void;
   disabled?: boolean;
+  /**
+   * True while an upload is in flight. NOTE: an in-flight TEXT send does NOT
+   * disable the composer (§10) — the optimistic bubble is the feedback, and
+   * blocking input behind a network round trip is the exact "stare at a
+   * spinner after sending" behaviour the spec forbids.
+   */
   sending?: boolean;
   /** Message being replied to — renders a dismissable quote above the input. */
   replyingTo?: { authorName?: string; content?: string; image?: string } | null;
@@ -34,6 +42,7 @@ const MAX_LEN = 2000;
  */
 export function MessageComposer({
   onSend,
+  onTyping,
   onSendImage,
   onSendFile,
   disabled,
@@ -76,18 +85,40 @@ export function MessageComposer({
 
   const submit = () => {
     const value = text.trim();
-    if (!value || disabled || sending) return;
+    if (!value || disabled) return;
     onSend(value);
     setText("");
-    requestAnimationFrame(() => taRef.current?.focus());
+    /* Keep the keyboard up on desktop, where focus is expected to persist.
+     * On a touch device the field already holds focus while typing, so
+     * re-focusing is unnecessary — and on Android it can round-trip through
+     * a keyboard close/open that visibly jolts the composer (§18: "Pressing
+     * send should NOT close the keyboard"). */
+    if (typeof window !== "undefined" && window.matchMedia?.("(pointer: fine)").matches) {
+      requestAnimationFrame(() => taRef.current?.focus());
+    }
   };
 
-  const canSend = text.trim().length > 0 && !disabled && !sending;
+  // Nothing network-bound gates this: with optimisic sends the next message
+  // must be typeable and sendable immediately (§10).
+  const canSend = text.trim().length > 0 && !disabled;
 
   return (
     <div
-      className="sticky bottom-0 z-10 border-t border-outline-variant bg-surface-container-lowest/95 backdrop-blur supports-[backdrop-filter]:bg-surface-container-lowest/80"
-      style={{ paddingBottom: "var(--keyboard-inset, 0px)" }}
+      /* Part 10 §2, §18, §33.
+       *
+       * `background` is a flat surface, NOT a backdrop-blur: §33 asks us to
+       * avoid expensive backdrop-filter on a surface that is on screen for
+       * every frame of a scroll, and this is the hottest surface in the app.
+       *
+       * The bottom padding is the KEYBOARD inset when the keyboard is up and
+       * the SAFE-AREA inset when it is not. The max() matters: on an iPhone
+       * the home indicator needs ~34px, but a keyboard needs ~300px, and
+       * adding them would float the composer a home-bar's height above the
+       * keyboard. Whichever is larger wins. */
+      className="shrink-0 border-t border-outline-variant bg-surface-container-lowest"
+      style={{
+        paddingBottom: "max(var(--keyboard-inset, 0px), env(safe-area-inset-bottom, 0px))",
+      }}
     >
       {/* Reply quote (§30) */}
       {replyingTo ? (
@@ -141,7 +172,7 @@ export function MessageComposer({
 
         {onSendFile ? (
           <>
-            <input ref={fileRef} type="file" className="hidden" onChange={(e) => {
+            <input ref={fileRef} type="file" className="hidden" disabled={sending} onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) onSendFile(f);
               e.target.value = "";
@@ -176,7 +207,10 @@ export function MessageComposer({
           maxLength={MAX_LEN}
           placeholder={placeholder}
           disabled={disabled}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            onTyping?.();
+          }}
           onKeyDown={(e) => {
             // Enter sends; Shift+Enter (and the IME composition guard) newline.
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -198,7 +232,9 @@ export function MessageComposer({
           )}
           aria-label="Send message"
         >
-          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-5 w-5" />}
+          {/* §10 — no spinner. The optimistic bubble IS the feedback, and a
+              spinner here would imply the user must wait for it. */}
+          <SendHorizontal className="h-5 w-5" />
         </button>
       </form>
     </div>

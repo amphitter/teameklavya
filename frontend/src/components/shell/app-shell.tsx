@@ -37,6 +37,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { initialsOf, useSessionUser } from "@/components/shell/use-session-user";
+import { resetMessagesStore } from "@/lib/messages/store";
+import { clearMessagesCache } from "@/lib/messages/cache";
+import { resetSocket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
 import { NotificationBell, NotificationsNavLink } from "@/components/notifications/notification-bell";
 import { MessagesNavLink } from "@/components/shell/messages-link";
@@ -75,6 +78,12 @@ const MY_EVENTS_NAV = [
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  /* Part 10 — /messages needs the shell to step aside (see the <main> and
+   * <nav> comments below). Two distinct flags, because the inbox and an open
+   * conversation need different treatment: the inbox keeps the bottom nav,
+   * the conversation hides it. */
+  const isMessagesRoute = pathname?.startsWith("/messages") ?? false;
+  const isChatRoute = /^\/messages\/[^/]+$/.test(pathname ?? "");
   const router = useRouter();
   const { user, role } = useSessionUser();
     const [communities, setCommunities] = useState<{ _id: string; name: string; slug: string; logoUrl?: string }[]>([]);
@@ -110,6 +119,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
     localStorage.removeItem("user");
+    /* Part 10 §23 — the messages store and its IndexedDB cache hold this
+     * user's conversations. Left in place, the next account to sign in on
+     * this device would paint them for a frame before its own loaded: a
+     * privacy leak, not a cosmetic bug. Both are cleared here, and the
+     * socket is dropped so the new session reconnects with its own token. */
+    resetMessagesStore();
+    void clearMessagesCache();
+    resetSocket();
     toast.success("Logged out");
     router.push("/");
     router.refresh();
@@ -398,13 +415,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="pb-[calc(4.5rem+env(safe-area-inset-bottom))] sm:pb-10 lg:pb-12">{children}</main>
+        {/* Part 10 §2, §30 — Messages owns its own viewport maths.
+         *
+         * Every other page is a document that scrolls, so the shell reserves
+         * bottom space for the fixed nav and the document flows past it. A
+         * chat cannot work that way: its composer must sit at the bottom of
+         * the screen, and any reserved padding puts it below the fold. So on
+         * /messages the shell contributes NO padding and the page computes
+         * its own height against the real viewport. */}
+        <main className={cn(isMessagesRoute ? "pb-0" : "pb-[calc(4.5rem+env(safe-area-inset-bottom))] sm:pb-10 lg:pb-12")}>
+          {children}
+        </main>
       </div>
 
       {/* ══ Mobile bottom navigation ═══════════════════════ */}
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-md lg:hidden"
+        /* Inside an open conversation the nav is hidden: the composer needs
+           the bottom edge of the screen, and Back is the way out (§30). On
+           the inbox it stays, so the five destinations are always one tap
+           away (§32). */
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-md",
+          isChatRoute ? "hidden" : "lg:hidden"
+        )}
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="grid grid-cols-5">

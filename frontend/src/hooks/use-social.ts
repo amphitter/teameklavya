@@ -268,35 +268,22 @@ export interface ChatMessage {
   failed?: boolean;
 }
 
-export function useConversations(archived = false) {
-  const path = archived ? "/messages/conversations?view=archived" : "/messages/conversations";
-  const q = useQuery<{ conversations: Conversation[] }>([path], path, { refetchInterval: 15_000 });
-  return { ...q, conversations: q.data?.conversations ?? [] };
-}
-
-export function useConversation(id: string | null) {
-  const q = useQuery<{ messages: ChatMessage[]; other: StoryAuthor | null; archived: boolean }>(
-    ["/messages/conversations", id],
-    id ? `/messages/conversations/${id}` : null,
-    { enabled: Boolean(id), refetchInterval: 8_000 }
-  );
-  return { ...q, messages: q.data?.messages ?? [], other: q.data?.other ?? null, archived: q.data?.archived ?? false };
-}
-
-export function useArchiveConversation() {
-  return useMutation(
-    (vars: { id: string; archived: boolean }) =>
-      api.post(`/messages/conversations/${vars.id}/archive`, { archived: vars.archived }).then((r) => r.data),
-    // Both views change at once — the inbox loses it, the archive gains it.
-    { invalidate: [["/messages/conversations"]] }
-  );
-}
-
-export function useReactToMessage() {
-  return useMutation(
-    (vars: { id: string; emoji: string }) => api.post(`/messages/${vars.id}/react`, { emoji: vars.emoji }).then((r) => r.data)
-  );
-}
+/* ── Messages: REMOVED in Part 10 ────────────────────────────────────────
+ *
+ * `useConversations`, `useConversation` and `useArchiveConversation` lived
+ * here and polled the API on fixed intervals (15s for the inbox, 8s for an
+ * open thread). They are gone, not deprecated, because keeping them would
+ * leave a SECOND way to load messages — one that refetches whole
+ * conversations on a timer and cannot reconcile an optimistic send. The
+ * messages data path is now single:
+ *
+ *   realtime events    → hooks/use-dm-socket.ts
+ *   state              → lib/messages/store.ts
+ *   reads / writes     → hooks/use-messages.ts
+ *   rendering          → components/messages/*
+ *
+ * `ChatMessage` stays here because the store and the bubble type against it.
+ */
 
 /* ── Shared helpers ────────────────────────────────────────────────────── */
 

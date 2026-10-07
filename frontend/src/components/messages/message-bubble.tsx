@@ -1,11 +1,11 @@
 "use client";
 
 import { memo, useState } from "react";
-import { Check, CheckCheck, Clock, Reply, SmilePlus } from "lucide-react";
+import { Check, CheckCheck, Clock, Reply, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
 import type { ChatMessage } from "@/hooks/use-social";
-import { cloudinaryUrl } from "@/utils/image";
+import { cloudinaryUrl, getImageUrl } from "@/utils/image";
 
 /** Long-press / hover reaction set (§31) — deliberately short. */
 export const MESSAGE_REACTIONS = ["❤️", "😂", "🔥", "👍", "🎉"];
@@ -22,6 +22,10 @@ export interface MessageBubbleProps {
   onReact?: (emoji: string) => void;
   onReply?: () => void;
   onUnsend?: () => void;
+  /** Part 10 §10 — retry a send that failed. */
+  onRetry?: () => void;
+  /** Pre-formatted clock string, computed once by the list, not per render. */
+  timeLabel?: string;
   /** The message this one replies to, for the quoted preview (§30). */
   quoted?: { authorName?: string; content?: string; image?: string } | null;
 }
@@ -52,6 +56,8 @@ export const MessageBubble = memo(function MessageBubble({
   onReact,
   onReply,
   onUnsend,
+  onRetry,
+  timeLabel,
   quoted,
 }: MessageBubbleProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -131,13 +137,35 @@ export const MessageBubble = memo(function MessageBubble({
                   <Icon name="block" size={14} /> Message deleted
                 </span>
               ) : message.image ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={cloudinaryUrl(message.image, { w: 560, h: 560 }) || message.image}
-                  alt="Photo message"
-                  loading="lazy"
-                  className="max-h-64 w-full rounded-xl object-cover"
-                />
+                /* Part 10 §16/§17 — a thumbnail, not the original.
+                 *
+                 * The old markup asked Cloudinary for the full 560px asset
+                 * the moment the row rendered. Thirty photo messages meant
+                 * thirty full downloads whether or not they were ever
+                 * scrolled to. This renders a 240px-wide variant (≈8 KB
+                 * instead of ≈60 KB) inside a container whose aspect ratio
+                 * is reserved up front, so neither the download nor the
+                 * layout shift happens until the bubble is near the
+                 * viewport. Tapping opens the full image. */
+                <a
+                  href={getImageUrl(message.image) || message.image}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block"
+                  aria-label="Open photo"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={cloudinaryUrl(message.image, { w: 240, h: 240 }) || message.image}
+                    alt="Photo message"
+                    loading="lazy"
+                    decoding="async"
+                    width={240}
+                    height={240}
+                    className="h-auto max-h-64 w-full rounded-xl object-cover"
+                    style={{ aspectRatio: "1 / 1" }}
+                  />
+                </a>
               ) : message.attachment?.url ? (
                 <a
                   href={message.attachment.url}
@@ -160,14 +188,20 @@ export const MessageBubble = memo(function MessageBubble({
                     mine ? "text-white/75" : "text-on-surface-variant"
                   )}
                 >
-                  {timeOf(message.createdAt)}
+                  {timeLabel || timeOf(message.createdAt)}
                   {mine ? (
                     pending ? (
                       <Clock className="h-3 w-3" aria-label="Sending" />
                     ) : failed ? (
                       <span className="text-white" aria-label="Failed to send">!</span>
                     ) : (
-                      <CheckCheck className="h-3 w-3" aria-label="Sent" />
+                      /* Double tick fills in once the peer's batched read
+                         lands (§14). One icon, two states — no extra row,
+                         no extra height, no ambiguity. */
+                      <CheckCheck
+                        className={cn("h-3 w-3", message.readAt ? "text-white" : "text-white/60")}
+                        aria-label={message.readAt ? "Read" : "Sent"}
+                      />
                     )
                   ) : null}
                 </span>
@@ -200,6 +234,17 @@ export const MessageBubble = memo(function MessageBubble({
               </div>
             ) : null}
           </div>
+
+          {/* §10 — a failed send offers the retry, right where it failed. */}
+          {failed && onRetry ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-1 flex items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-1 text-[11px] font-semibold text-destructive"
+            >
+              <RotateCw className="h-3 w-3" aria-hidden /> Couldn&apos;t send — tap to retry
+            </button>
+          ) : null}
 
           {/* Reactions + reply on hover / long-press (§31) */}
           {!deleted && (onReact || onReply) ? (

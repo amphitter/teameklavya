@@ -25,6 +25,7 @@ router.post('/login', [
 ], authCtrl.login);
 
 // Password reset flows
+router.post('/resend-verification', [body('email').isEmail().normalizeEmail()], authCtrl.resendVerification);
 router.post('/password/forgot', [body('email').isEmail().normalizeEmail()], authCtrl.requestPasswordReset);
 router.post('/password/verify-otp', authCtrl.verifyResetOtp);
 router.post('/password/reset', authCtrl.resetPassword);

@@ -33,6 +33,19 @@ class SlidingWindowStore {
     this.limit = limit;
     this.windowMs = windowMs;
     this.localHits = new Map(); // local mirror so `decrement` stays accurate
+
+    /* express-rate-limit v7 double-count guard (ERR_ERL_DOUBLE_COUNT).
+       The library tracks which keys it has already counted per request, and
+       identifies a store by `store.localKeys ? store : store.constructor.name`.
+       Without `localKeys`, EVERY SlidingWindowStore looks like the same store —
+       so /api/auth/*, which passes through both the READ and the AUTH limiter,
+       counted `ip:x` twice and the library threw.
+
+       The throw was correct given what it believed. Fix it by telling the
+       truth rather than by suppressing the check: keys here really are local
+       to each instance, and they really are prefixed with the domain. */
+    this.localKeys = true;
+    this.prefix = `${domain}:`;
   }
 
   /** Namespaced bucket key — domain + caller key. */

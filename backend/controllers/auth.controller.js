@@ -38,10 +38,35 @@ exports.signup = async (req, res) => {
       emailVerifyExpires: verifyExpires
     });
 
-    // send verification email
+    /* The account already exists by this point — User.create() succeeded above.
+       If a mail failure threw here, the user would get a 500, assume signup
+       failed, and retry straight into "Email already registered". They would
+       be left with an unverified account they cannot use and, with no resend
+       endpoint, cannot recover.
+       So delivery is reported, not fatal. The response tells the client
+       whether the mail went out, which is safe here — the user just created
+       this account themselves, so there is nothing to enumerate. */
     const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verifyToken}&email=${encodeURIComponent(email)}`;
-    await exports.sendVerificationEmail(user, verifyUrl);
-    return res.status(201).json({ message: 'User registered. Please verify your email.' });
+
+    let emailSent = true;
+    try {
+      const sent = await exports.sendVerificationEmail(user, verifyUrl);
+      // No provider configured is not an exception — it resolves as skipped.
+      if (sent && sent.skipped) emailSent = false;
+    } catch (err) {
+      emailSent = false;
+      console.error(
+        `[signup] verification email FAILED for ${user.email}: ${(err && err.message) || err}`
+      );
+    }
+
+    return res.status(201).json({
+      message: emailSent
+        ? 'User registered. Please verify your email.'
+        : 'Account created, but we could not send the verification email. Use "Resend verification" to try again.',
+      emailSent,
+      canResendVerification: true,
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });
@@ -50,13 +75,63 @@ exports.signup = async (req, res) => {
 // Send the signup verification email
 exports.sendVerificationEmail = async (user, verifyUrl) => {
   const { html, text } = templates.verifyEmail({ user, verifyUrl });
-  await emailService.send({
+  /* Returned rather than discarded: with no provider configured, send()
+     resolves with { provider: "none", skipped: true } instead of throwing.
+     Callers that only check for a rejection would report "sent" for an email
+     that never left the process. */
+  const result = await emailService.send({
     to: user.email,
     subject: "Verify your EventHub email",
     html,
     text,
   });
-  console.log(`Verification email sent to ${user.email}`);
+  if (result && result.skipped) {
+    console.warn(
+      `[signup] verification email NOT SENT for ${user.email} — no email provider configured`
+    );
+  } else {
+    console.log(`Verification email sent to ${user.email}`);
+  }
+  return result;
+};
+
+/**
+ * Resend the verification email.
+ *
+ * Without this, a delivery failure at signup strands the account permanently:
+ * it exists, it is unverified, login refuses it, and there is no other path to
+ * a verification link. The user is locked out of their own email address for
+ * good.
+ *
+ * The response is identical whether or not the address exists — otherwise this
+ * becomes a cleaner enumeration oracle than signup ever was.
+ */
+exports.resendVerification = async (req, res) => {
+  const GENERIC = 'If that address needs verification, a new link has been sent.';
+  try {
+    const email = String(req.body?.email || '').toLowerCase().trim();
+    if (!email) return res.status(400).json({ message: 'Email required' });
+
+    const user = await User.findOne({ email });
+    if (!user) return res.json({ message: GENERIC });
+    if (user.emailVerified) return res.json({ message: GENERIC });
+
+    // Rotate the token: the old one may have been the thing that never arrived.
+    user.emailVerifyToken = generateToken(18);
+    user.emailVerifyExpires = new Date(Date.now() + 24 * 3600 * 1000);
+    await user.save();
+
+    const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${user.emailVerifyToken}&email=${encodeURIComponent(email)}`;
+
+    await exports.sendVerificationEmail(user, verifyUrl);
+    return res.json({ message: GENERIC });
+  } catch (err) {
+    /* A mail outage is not an internal error — that is a provider failure the
+       user did not cause and cannot fix. Log it, and answer with the same
+       generic response so an outage cannot be used to probe for accounts. */
+    console.error('[resend-verification] failed:', (err && err.message) || err);
+    return res.json({ message: GENERIC });
+  }
 };
 
 exports.verifyEmail = async (req, res) => {
@@ -129,7 +204,26 @@ exports.requestPasswordReset = async (req, res) => {
     user.resetOtp = otp;
     user.resetOtpExpires = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
     await user.save();
-    await exports.sendResetOtpEmail(user, otp, OTP_TTL_MINUTES);
+
+    /* Deliberately NOT awaited.
+       Two reasons, and the first is a security one:
+       1. If a mail failure produced a 500 here, the endpoint would leak
+          whether the account exists — 200 for "no such user" above, 500 for
+          "user exists but mail is down". That turns the anti-enumeration
+          measure on the line above into an enumeration oracle. The response
+          MUST be identical either way.
+       2. The provider timeout is ~25s. Awaiting it means the user stares at a
+          spinner for 26 seconds and then gets an error, for a problem that is
+          not theirs and that they cannot fix.
+       This is fire-and-forget done correctly: the outcome cannot change the
+       response, so not awaiting loses nothing — but the rejection is handled
+       explicitly so a failed send is logged instead of vanishing. */
+    exports.sendResetOtpEmail(user, otp, OTP_TTL_MINUTES).catch((err) => {
+      console.error(
+        `[password-reset] OTP email FAILED for ${user.email}: ${(err && err.message) || err}`
+      );
+    });
+
     return res.json({ message: 'If the email exists, an OTP has been sent.' });
   } catch (err) {
     console.error(err);

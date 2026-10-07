@@ -1,0 +1,72 @@
+# ============================================================
+# RENDER BLUEPRINT — optional
+# ============================================================
+# If this file exists when you connect the repo, Render uses it to create the
+# service automatically. It saves clicking through the dashboard but is NOT
+# required — delete it if you prefer to configure by hand.
+#
+# Secrets are intentionally NOT set here. Render will prompt for them, or you
+# fill them in the dashboard. Never commit real values to this file.
+# ============================================================
+services:
+  - type: web
+    name: eventhub-api
+    runtime: node
+    # The backend lives in the backend/ subdirectory
+    rootDir: backend
+    branch: main
+    region: singapore
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+
+    envVars:
+      # ── Set automatically by Render ──
+      - key: PORT
+        value: 5000
+
+      # ── Static values ──
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: RATE_LIMIT_PROVIDER
+        value: upstash
+      - key: CACHE_PROVIDER
+        value: upstash
+      - key: SYNC_ENABLED
+        value: false
+      - key: MONGO_MAX_POOL_SIZE
+        value: 10
+
+      # ── Secrets — Render marks these for manual entry ──
+      # Fill these in the dashboard after the service is created.
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CALLBACK_URL
+        sync: false

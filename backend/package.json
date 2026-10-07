@@ -41,7 +41,8 @@
     "test:scale": "node tests/part7-scale.selftest.js",
     "verify-restore": "node scripts/verify-restore.js",
     "scan-secrets": "node scripts/scan-secrets.js",
-    "test:recovery": "node tests/part7-recovery.selftest.js"
+    "test:recovery": "node tests/part7-recovery.selftest.js",
+    "reconcile": "node scripts/reconcile-supabase.js"
   },
   "keywords": [],
   "author": "",
@@ -76,5 +77,8 @@
     "cross-env": "^10.1.0",
     "mongodb-memory-server": "^11.3.0",
     "socket.io-client": "^4.8.1"
+  },
+  "engines": {
+    "node": ">=20.0.0 <21"
   }
 }

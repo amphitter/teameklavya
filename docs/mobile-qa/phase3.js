@@ -244,7 +244,12 @@ function png(w, h, rgb) {
     };
   });
   ok(stats.found, "the header carries a Posts · Followers · Following row");
-  ok(stats.text?.includes("Posts") && stats.text?.includes("Followers") && stats.text?.includes("Following"),
+  /* Match the INTENT — three stat labels present — not the plural spelling.
+     The count is singular when it is 1 ("1 Follower"), which is the correct
+     English this app now uses; asserting the literal "Followers" made a correct
+     label look like a missing one. */
+  const hasStat = (word) => new RegExp(`\\b${word}s?\\b`).test(stats.text || "");
+  ok(hasStat("Post") && hasStat("Follower") && hasStat("Following"),
      "…with all three labels in one line", stats.text);
   ok(stats.display === "flex" && stats.height < 70,
      "…inline, not five stacked dashboard tiles", `display ${stats.display}, height ${stats.height}px`);

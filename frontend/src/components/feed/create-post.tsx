@@ -21,7 +21,17 @@ const MAX_IMAGES = 4;
  * Working: text + up to 4 photos (Cloudinary) + event attach (organizers).
  * Video/Poll are visible-but-disabled ("Soon") — architected, not fake.
  */
-export function CreatePost({ onCreated, composerRef }: { onCreated: (post: FeedPostData) => void; composerRef?: React.RefObject<HTMLDivElement | null> }) {
+export function CreatePost({
+  onCreated,
+  composerRef,
+  showGuestCard = true,
+}: {
+  onCreated: (post: FeedPostData) => void;
+  composerRef?: React.RefObject<HTMLDivElement | null>;
+  /** Signed out: render the "Join the conversation" card. The feed turns it off
+   *  when its own welcome card is already on screen, so the two do not stack. */
+  showGuestCard?: boolean;
+}) {
   const { user, role } = useSessionUser();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -102,7 +112,13 @@ export function CreatePost({ onCreated, composerRef }: { onCreated: (post: FeedP
     }
   };
 
+  /* Signed out, this card and the feed's own "Welcome to EventHub" card said the
+     same thing twice: measured stacked on the first screen at 360px, 174px of
+     prose and four buttons between the search field and the first post. The feed
+     passes `showGuestCard={false}` when it is already rendering the welcome card;
+     this card still exists for any other caller that has no such notice. */
   if (!user) {
+    if (!showGuestCard) return null;
     return (
       <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
         <p className="text-sm font-semibold text-foreground">Join the conversation</p>

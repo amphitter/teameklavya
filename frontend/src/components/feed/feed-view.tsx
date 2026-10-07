@@ -18,6 +18,7 @@ import { LiveEventHero } from "@/components/feed/live-event-hero";
 import type { LiveEventData } from "@/components/feed/live-event-hero";
 import { LivePulseStrip } from "@/components/feed/live-pulse-strip";
 import { RightRail } from "@/components/feed/right-rail";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { DiscoveryCard } from "@/components/feed/discovery-card";
 import { useFeedDiscovery } from "@/components/feed/use-feed-discovery";
 import { useSessionUser } from "@/components/shell/use-session-user";
@@ -311,9 +312,9 @@ export function FeedView() {
     : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl justify-center gap-8 px-3 py-5 sm:px-6">
+    <div className="mx-auto flex w-full max-w-6xl justify-center gap-6 px-3 py-5 sm:px-6 xl:gap-8">
       {/* Main column */}
-      <div className="w-full min-w-0 max-w-[620px]">
+      <div className="w-full min-w-0 max-w-[620px] lg:min-w-[440px]">
         {/* Welcome strip for logged-out visitors */}
         {ready && !user && (
           <div className="mb-5 flex flex-col gap-3 rounded-xl border border-border bg-gradient-to-br from-brand-light/80 to-purple-light/60 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -336,8 +337,21 @@ export function FeedView() {
           </div>
         )}
 
-        {/* Greeting with live badge (real event + real quiz score) */}
-        <HomeGreeting firstName={user?.firstName} liveBadge={liveBadge} />
+        {/* Greeting with live badge (real event + real quiz score), and — on a
+            phone only — the notification bell beside it. The bell left the
+            bottom nav because that row is for navigation; here it sits where an
+            unread indicator is looked for, next to the greeting, without
+            costing the composer or an open conversation a single pixel. */}
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <HomeGreeting firstName={user?.firstName} liveBadge={liveBadge} />
+          </div>
+          {ready && user ? (
+            <div className="mt-0.5 shrink-0 lg:hidden">
+              <NotificationBell />
+            </div>
+          ) : null}
+        </div>
 
         {/* Quick search (phone layout; desktop search lives in the top bar) */}
         <form
@@ -395,10 +409,14 @@ export function FeedView() {
                   double-tap-zoom suppression that swallow fast taps.
                 · the row is a group with role=tablist semantics via
                   aria-pressed, already present. */}
-          <div
-            className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto overscroll-x-contain px-1 pb-1"
-            style={{ WebkitOverflowScrolling: "touch" }}
-          >
+          {/* The strip WRAPS instead of scrolling.
+              It used to be `overflow-x-auto` with the scrollbar hidden, which
+              meant "Communities" — the fourth tab — was cut off mid-word with no
+              affordance that anything was there: measured 80px outside the
+              viewport at 360 and still clipped at 390. A hidden scrollbar on a
+              four-item control is not a scroll area, it is a missing button.
+              Wrapping costs a second row only at 320, where it belongs. */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {(
               [
                 { id: "for-you", label: "For You" },
@@ -413,10 +431,10 @@ export function FeedView() {
                 onClick={() => selectTab(t.id)}
                 aria-pressed={tab === t.id}
                 className={cn(
-                  // 44px tall on every screen; the row itself absorbs the
-                  // horizontal space so nothing is clipped on a 320px phone.
-                  "flex shrink-0 select-none items-center justify-center rounded-full",
-                  "px-4 text-[13px] font-semibold leading-none transition-colors",
+                  // 44px tall on every screen, and every tab fits inside the
+                  // viewport at 320 — that is the whole point of this change.
+                  "flex select-none items-center justify-center rounded-full",
+                  "px-3 text-[12.5px] font-semibold leading-none transition-colors sm:px-4 sm:text-[13px]",
                   "min-h-[44px] touch-manipulation active:scale-[0.97]",
                   tab === t.id
                     ? // §3 — gradient is a reserved selected-state treatment.
@@ -429,7 +447,12 @@ export function FeedView() {
             ))}
           </div>
 
-          <CreatePost onCreated={onCreated} composerRef={composerRef} />
+          <CreatePost
+            onCreated={onCreated}
+            composerRef={composerRef}
+            /* Exactly one welcome card on a signed-out screen. */
+            showGuestCard={!(ready && !user)}
+          />
 
           {/* Feed */}
           {feed.isLoading ? (

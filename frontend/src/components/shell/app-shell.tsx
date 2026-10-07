@@ -47,7 +47,7 @@ import { resetMessagesStore } from "@/lib/messages/store";
 import { clearMessagesCache } from "@/lib/messages/cache";
 import { resetSocket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
-import { NotificationBell, NotificationsNavLink } from "@/components/notifications/notification-bell";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { MessagesNavLink } from "@/components/shell/messages-link";
 import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/utils/api";
@@ -420,7 +420,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
          * pushed the composer down. Every control it held is reachable on
          * mobile without it:
          *   Messages      → bottom nav item, with its unread badge
-         *   Notifications → bottom nav "Alerts"
+         *   Notifications → the home header's bell (phone), this bar (desktop)
          *   Create        → the bottom nav's create button
          *   Search        → the feed's own search field, and the account menu
          *   Theme         → the account menu
@@ -499,7 +499,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <div className="grid grid-cols-6">
+        {/* Five destinations. The bell used to sit here as a sixth item labelled
+            "Alerts"; it is now in the phone header next to the greeting, where a
+            notification indicator belongs — one tap from the top of the screen,
+            leaving the bottom row to navigation only. */}
+        <div className="grid grid-cols-5">
           <MobileNavItem icon={Home} label="Home" href="/" active={pathname === "/"} />
           <MobileNavItem icon={Compass} label="Explore" href="/events" active={pathname.startsWith("/events")} />
 
@@ -537,7 +541,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             ) : null}
           </Link>
 
-          <NotificationsNavLink active={pathname.startsWith("/notifications")} />
           {user ? (
             <AccountMenu>
               <button

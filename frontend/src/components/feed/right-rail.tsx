@@ -194,7 +194,14 @@ export function RightRail({
   const people = suggested.length > 0 ? suggested : builders;
 
   return (
-    <aside className="hidden w-80 shrink-0 xl:block">
+    /* Shown from lg, not xl.
+       Between 1024 and 1279 the rail used to be hidden while the feed column
+       stayed capped at 620px inside the space left of nothing — measured 82-130px
+       of empty page on the right of the content at 1024-1120, and a phone-width
+       experience on a desktop. The rail is the thing that belongs in that space.
+       It is narrower at lg (w-56) and widens at xl (w-80) so the feed column
+       never has to shrink below a readable width. */
+    <aside className="hidden w-56 shrink-0 lg:block xl:w-80">
       <div className="sticky top-24 space-y-5 pb-6">
         {/* Upcoming events */}
         {upcoming.length > 0 && (

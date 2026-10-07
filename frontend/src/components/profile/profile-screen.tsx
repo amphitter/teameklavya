@@ -476,16 +476,31 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
               costs one extra row at 390px and removes all hidden state: the
               whole navigation is legible at a glance, which is the entire
               reason this phase exists. */}
-          <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-border bg-card p-1">
+          {/* A three-column grid on a phone, a wrapping row from sm up.
+              Wrapping alone (the previous fix for the clipped strip) removed the
+              hidden state but left a ragged block: seven pills of different
+              widths broke into 4 + 3 + 1 across three uneven lines at 360, which
+              reads as a mistake rather than a menu. Equal columns are calm and,
+              at 11px, every label — including "Achievements" — fits at 320
+              (`whitespace-nowrap` here is a promise, and phase3-widths.js keeps
+              it: no label may be cut). */}
+          <div className="grid grid-cols-3 gap-1 rounded-2xl border border-border bg-card p-1 sm:flex sm:flex-wrap sm:items-center">
             {tabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => setTab(t.id)}
                 aria-pressed={tab === t.id}
+                /* Every chip carries a surface, not just the selected one.
+                   Bare text in a grid reads as a paragraph; seven bordered
+                   chips read as a menu — and it matches the feed's tab strip,
+                   so the same control looks the same in both places. */
                 className={cn(
-                  "rounded-full px-2.5 py-1.5 text-[13px] font-semibold transition-colors sm:px-3.5 sm:py-2 sm:text-sm",
-                  tab === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  "flex items-center justify-center whitespace-nowrap rounded-full px-2 py-1.5 text-[11px] font-semibold transition-colors",
+                  "sm:px-3.5 sm:py-2 sm:text-sm",
+                  tab === t.id
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-outline-variant bg-surface-container-lowest text-muted-foreground hover:text-foreground"
                 )}
               >
                 {t.label}

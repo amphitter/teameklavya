@@ -23,6 +23,7 @@ blocking the whole feature turned out to be a paint-order bug that made the
 | 2 | Canonical avatar/cover (crop, one square, every surface) | **done** `4bf3a70` — `docs/PHASE2_AVATAR_CANONICAL.md` |
 | 3 | Profile rebuild: header, tabs, feed post component, media grid, Saved/Liked/Archive | **done** — `docs/PHASE3_PROFILE_AND_LISTS.md` (audit: `docs/PHASE3_PROFILE_AUDIT.md`) |
 | 4 | Feed aliveness + micro-interactions (§20–21) | **done** — `docs/PHASE4_FEED_AND_MOTION.md` (audit: `docs/PHASE4_FEED_AUDIT.md`) |
+| — | UI review round: bottom nav (Alerts removed), tab strip, desktop band, guest screen | **done** — `docs/UI_REVIEW_ROUND.md` (harness: `docs/mobile-qa/ui-fixes.js`, 221 checks) |
 | 5 | Final acceptance sweep + the 14-point report | next |
 
 ---

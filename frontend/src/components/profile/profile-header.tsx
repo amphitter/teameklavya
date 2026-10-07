@@ -34,11 +34,23 @@ export interface ProfileStats {
  * otherwise — so the affordance matches the behaviour instead of every stat
  * looking tappable.
  */
+/**
+ * Singular when it is one. "1 Posts" was on every new profile — the count is
+ * real, the grammar was not. `label` is the plural form; the singular is derived
+ * rather than passed in, so a caller cannot forget. "Following" is both forms
+ * already and stays as it is.
+ */
+function plural(n: number, pluralForm: string) {
+  if (n !== 1) return pluralForm;
+  if (pluralForm === "Following") return pluralForm;
+  return pluralForm.replace(/s$/, "");
+}
+
 function Stat({ value, label, onClick }: { value: number; label: string; onClick?: () => void }) {
   const body = (
     <>
       <b className="text-[15px] font-extrabold text-foreground">{compactCount(value)}</b>{" "}
-      <span className="text-[13px] text-muted-foreground">{label}</span>
+      <span className="text-[13px] text-muted-foreground">{plural(value, label)}</span>
     </>
   );
   if (!onClick) return <span className="flex items-baseline gap-1.5">{body}</span>;

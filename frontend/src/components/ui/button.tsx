@@ -3,8 +3,20 @@ import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
+/* §44 — every button is at least 44x44 on touch devices.
+
+   Applied here rather than at each call site so the guarantee is global and
+   cannot be forgotten. Scoped to (pointer: coarse) so a desktop's denser
+   h-9/h-10 sizes are untouched — forcing 44px everywhere would visibly bloat
+   the desktop UI, which §60 warns against. Buttons that are already 44px or
+   taller (lg, and the feed's min-h-[44px] pills) are unaffected.
+
+   Note this is a floor, not a fixed size: a button with its own larger
+   explicit height keeps that height. */
+const TOUCH_MIN = "[@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px]";
+
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  `inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${TOUCH_MIN}`,
   {
     variants: {
       variant: {

@@ -6,6 +6,7 @@ import { MessageCircle } from "lucide-react";
 import { api } from "@/utils/api";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { usePolling } from "@/lib/query";
+import { cn } from "@/lib/utils";
 
 /** Header messages icon with unread badge → /messages. */
 export function MessagesNavLink() {
@@ -44,7 +45,18 @@ export function MessagesNavLink() {
     <Link
       href="/messages"
       aria-label={`Messages${unread ? ` (${unread} unread)` : ""}`}
-      className="relative hidden h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:flex"
+      /* P0 fix — this was `hidden ... sm:flex`, so the only way to reach
+         Messages was gone on every phone. §32 asks for a top-right header
+         entry on mobile while the bottom nav stays
+         Home/Explore/Create/Community/Profile, so the icon must render at
+         all widths. The 44px box is the §44 minimum tap target; it collapses
+         to the original 36px only from sm up, where the header is denser. */
+      className={cn(
+        "relative flex shrink-0 items-center justify-center rounded-lg",
+        "text-muted-foreground transition-colors active:bg-muted",
+        "hover:bg-muted hover:text-foreground",
+        "-mr-1 h-11 w-11 sm:-mr-0 sm:h-9 sm:w-9",
+      )}
     >
       <MessageCircle className="h-[18px] w-[18px]" />
       {unread > 0 && (

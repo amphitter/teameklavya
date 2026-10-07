@@ -319,8 +319,27 @@ export function FeedView() {
         />
 
         <div className="mt-4 space-y-5">
-          {/* Tabs — pill style per reference */}
-          <div className="no-scrollbar flex items-center gap-2 overflow-x-auto pb-1">
+          {/* Tabs — pill style per reference.
+
+              P0 fix. These were `py-2 text-[13px]`: roughly 36px tall, under
+              the 44px minimum (§30/§44), which is why the filter read as
+              "fails to open on some phones" — the tap landed on the gap
+              between pills rather than the pill.
+
+              §29 asks for a real audit rather than a z-index bump, so:
+                · no z-index is touched. Nothing overlaps this row: the header
+                  is sticky at z-30 but sits above it in normal flow.
+                · the scroller keeps overflow-x-auto and gains
+                  overscroll-x-contain, so a horizontal flick no longer
+                  fights the page or triggers browser back-swipe.
+                · touch-action:manipulation removes the 300ms delay and
+                  double-tap-zoom suppression that swallow fast taps.
+                · the row is a group with role=tablist semantics via
+                  aria-pressed, already present. */}
+          <div
+            className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto overscroll-x-contain px-1 pb-1"
+            style={{ WebkitOverflowScrolling: "touch" }}
+          >
             {(
               [
                 { id: "for-you", label: "For You" },
@@ -335,7 +354,11 @@ export function FeedView() {
                 onClick={() => selectTab(t.id)}
                 aria-pressed={tab === t.id}
                 className={cn(
-                  "shrink-0 rounded-full px-4 py-2 text-[13px] font-semibold transition-colors",
+                  // 44px tall on every screen; the row itself absorbs the
+                  // horizontal space so nothing is clipped on a 320px phone.
+                  "flex shrink-0 select-none items-center justify-center rounded-full",
+                  "px-4 text-[13px] font-semibold leading-none transition-colors",
+                  "min-h-[44px] touch-manipulation active:scale-[0.97]",
                   tab === t.id
                     ? // §3 — gradient is a reserved selected-state treatment.
                       "brand-gradient text-white shadow-[0_4px_12px_rgba(37,99,255,0.25)]"

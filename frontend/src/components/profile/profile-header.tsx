@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { BadgeCheck, CalendarDays, MapPin } from "lucide-react";
-import { UserAvatar } from "@/components/user-avatar";
+import { UserAvatar, versionedUrl } from "@/components/user-avatar";
 import { handleOf, compactCount } from "@/lib/social";
 import { OptimizedImage } from "@/components/ui/optimized-image";
 
@@ -56,16 +56,17 @@ export function ProfileHeader({
       <div className="relative h-28 w-full bg-gradient-to-r from-[#2563FF] via-[#6C35FF] to-[#D946EF] sm:h-36">
         {p.coverImage ? (
           <OptimizedImage
-            src={p.coverImage}
+            src={versionedUrl(p.coverImage, p.coverVersion)}
             alt=""
             preset="banner"
             size="large"
             priority
             sizes="100vw"
             className="h-full w-full object-cover"
-            /* The stored focal point. A 1600×400 banner is shown here in a
-               112px strip, so centring the crop is what decapitates photos —
-               this is what the reposition control in the editor sets. */
+            /* The stored focal point, derived from the crop the user chose, so
+               the same strip of the banner stays in frame on a 390px phone and
+               a 1440px desktop. The asset itself is the 3:1 canonical render —
+               this positions it, it does not re-crop it. */
             style={{ height: "100%", objectPosition: `50% ${typeof p.coverPosition === "number" ? p.coverPosition : 50}%` }}
           />
         ) : null}
@@ -82,7 +83,11 @@ export function ProfileHeader({
        * fix: button top 174, cover bottom 230. */}
       <div className="relative z-10 px-5 pb-5 sm:px-7 sm:pb-7">
         <div className="-mt-12 flex flex-col gap-5 sm:-mt-14 sm:flex-row sm:items-start">
-          <div className="rounded-full border-4 border-card">
+          {/* `w-fit` is load-bearing: in the mobile column the flex container
+              stretches its children, so this ring was drawn the full width of
+              the card — a giant pill outline lying across the cover, with the
+              photo parked at its left edge. The ring must hug the avatar. */}
+          <div className="w-fit shrink-0 rounded-full border-4 border-card">
             <UserAvatar user={user} size={96} className="!h-24 !w-24" />
           </div>
 

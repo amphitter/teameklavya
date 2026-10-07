@@ -5,7 +5,7 @@ import { Check, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
-import { AvatarUploader, CoverUploader } from "@/components/profile/media-uploader";
+import { AvatarUploader, CoverUploader, type UploadMeta } from "@/components/profile/media-uploader";
 import {
   classifySaveError,
   useEditProfile,
@@ -51,8 +51,23 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
   const [avatar, setAvatar] = useState("");
   const [coverImage, setCoverImage] = useState("");
   const [coverPosition, setCoverPosition] = useState(50);
+  /* The crop and the asset version travel with the image.
+   *
+   * The uploader stores all three the moment it finishes, so these are usually
+   * just mirrors of what the server already has — but Save re-sends the image
+   * fields when they differ, and re-sending a URL without its crop/version
+   * would strip the framing the user just chose and leave the new file
+   * cached under the old version. */
+  const [avatarMeta, setAvatarMeta] = useState<UploadMeta | null>(null);
+  const [coverMeta, setCoverMeta] = useState<UploadMeta | null>(null);
   const [profileVisibility, setProfileVisibility] = useState("public");
   const [allowMessagesFrom, setAllowMessagesFrom] = useState("everyone");
+  /* The URL each `meta` describes. Needed because uploading persists the image
+   * immediately while Save still re-sends it: the crop must ride along with the
+   * URL it was made for, and must NOT be attached to an older untracked URL. */
+  const [avatarTracked, setAvatarTracked] = useState("");
+  const [coverTracked, setCoverTracked] = useState("");
+
   /* The save bar must clear the phone keyboard, not hide behind it. */
   const panelRef = useKeyboardInset<HTMLDivElement>();
 
@@ -93,6 +108,10 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
     setAvatar(p.avatar || "");
     setCoverImage(p.coverImage || "");
     setCoverPosition(typeof p.coverPosition === "number" ? p.coverPosition : 50);
+    setAvatarMeta(null);
+    setCoverMeta(null);
+    setAvatarTracked(p.avatar || "");
+    setCoverTracked(p.coverImage || "");
     setProfileVisibility(user.socialSettings?.profileVisibility || "public");
     setAllowMessagesFrom(user.socialSettings?.allowMessagesFrom || "everyone");
   }, [open, user]);
@@ -171,8 +190,25 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
      * a previous visit, and it makes the save payload self-consistent rather
      * than depending on the uploader having run. Re-sending an identical URL
      * is a no-op write of one field. */
-    if (avatar !== (user?.profile?.avatar || "")) payload.avatar = avatar;
-    if (coverImage !== (user?.profile?.coverImage || "")) payload.coverImage = coverImage;
+    if (avatar !== (user?.profile?.avatar || "")) {
+      payload.avatar = avatar;
+      if (avatarMeta && avatarTracked === avatar) {
+        payload.avatarCrop = avatarMeta.crop;
+        payload.avatarVersion = avatarMeta.version;
+      }
+    }
+    if (coverImage !== (user?.profile?.coverImage || "")) {
+      payload.coverImage = coverImage;
+      if (coverMeta && coverTracked === coverImage) {
+        payload.coverCrop = coverMeta.crop;
+        /* The crop already knows which strip of the photo should stay in frame
+           across breakpoints; the focal point is that decision expressed as an
+           object-position. Derived here so the two can never disagree. */
+        payload.coverPosition = coverMeta.focalY;
+      } else {
+        payload.coverPosition = coverPosition;
+      }
+    }
 
     if (inFlight.current) return;
     inFlight.current = true;
@@ -247,7 +283,16 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
           {/* §21 — Profile photo */}
           <section>
             <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">Profile photo</h3>
-            <AvatarUploader value={avatar} onChange={setAvatar} />
+            <AvatarUploader
+              value={avatar}
+              initialCrop={user?.profile?.avatarCrop ?? null}
+              onChange={(url, meta) => {
+                setAvatar(url);
+                setAvatarMeta(meta ?? null);
+                setAvatarTracked(url);
+                if (!url) setAvatarTracked("");
+              }}
+            />
           </section>
 
           {/* §22 — Cover */}
@@ -255,15 +300,22 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
             <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">Cover photo</h3>
             <CoverUploader
               value={coverImage}
+              initialCrop={user?.profile?.coverCrop ?? null}
               /* Removing the banner also clears the focal point here, mirroring
                  what the API does — otherwise the next upload would preview a
                  crop inherited from a photo the user deleted. */
-              onChange={(url) => {
+              onChange={(url, meta) => {
                 setCoverImage(url);
-                if (!url) setCoverPosition(50);
+                setCoverMeta(meta ?? null);
+                setCoverTracked(url);
+                // Keep the preview honest about where the crop will anchor.
+                if (meta) setCoverPosition(meta.focalY);
+                if (!url) {
+                  setCoverPosition(50);
+                  setCoverTracked("");
+                }
               }}
               position={coverPosition}
-              onPositionChange={setCoverPosition}
             />
           </section>
 

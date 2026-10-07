@@ -200,6 +200,12 @@ exports.login = async (req, res) => {
         email: user.email,
         username: user.username,
         role: user.role,
+        /* The shell renders the account avatar, the nav avatar and every
+         * cached author label from THIS payload — it is the only identity the
+         * client stores. Leaving `profile` out meant a member with a photo saw
+         * their initials in the header next to a profile page that showed the
+         * photo, for the whole session, with nothing to refresh it (§7). */
+        profile: user.profile,
       },
     });
   } catch (err) {
@@ -395,12 +401,31 @@ const WEBSITE_MAX = 200;
 const INTERESTS_MAX = 10;
 const URL_MAX = 500;
 
-/** Accepts only http(s) URLs, or '' to clear. Rejects javascript:, data:, etc. */
+/**
+ * Accepts an http(s) URL, a server-relative upload path, or '' to clear.
+ * Rejects javascript:, data:, protocol-relative //host, etc.
+ *
+ * The relative case is not a nicety: with no Cloudinary credentials the storage
+ * provider falls back to local disk and hands back `/uploads/avatars/x.png`.
+ * Requiring an absolute URL there meant an upload could succeed and then be
+ * rejected by the very next call — "Profile photo must be a valid http(s) URL"
+ * for a photo that was already on the server. The frontend has always known how
+ * to resolve these paths (`getImageUrl`), so the API was the inconsistent one.
+ *
+ * Only paths under `/uploads/` are allowed, and only as a single leading slash:
+ * `//evil.com/x.png` is a protocol-relative URL to another host, which is why
+ * the check is an explicit prefix and not "starts with /".
+ */
 function sanitizeUrl(value) {
   if (value === '' || value == null) return '';
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   if (trimmed.length > URL_MAX) return null;
+  if (trimmed.startsWith('/uploads/')) {
+    // No traversal, no query-string tricks, no second slash after the host.
+    if (trimmed.includes('..') || trimmed.includes('//')) return null;
+    return trimmed;
+  }
   try {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
@@ -408,6 +433,26 @@ function sanitizeUrl(value) {
   } catch {
     return null;
   }
+}
+
+/** Sentinel for "present but not usable" — distinct from `null` (cleared). */
+const INVALID = Symbol('invalid-crop');
+
+/**
+ * Parse a stored crop: four finite fractions in 0–1, ordered and non-empty.
+ *
+ * `null` is meaningful and passes through — it means "clear the crop" (the
+ * photo was removed, or a legacy image is being replaced).
+ */
+function parseCrop(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object') return INVALID;
+  const nums = ['x', 'y', 'w', 'h'].map((k) => Number(value[k]));
+  if (nums.some((n) => !Number.isFinite(n))) return INVALID;
+  const [x, y, w, h] = nums;
+  if (w <= 0 || h <= 0) return INVALID;
+  if (x < 0 || y < 0 || x + w > 1.0001 || y + h > 1.0001) return INVALID;
+  return { x, y, w, h };
 }
 
 exports.updateProfile = async (req, res) => {
@@ -448,6 +493,34 @@ exports.updateProfile = async (req, res) => {
       const avatar = sanitizeUrl(b.avatar);
       if (avatar === null) return fail('Profile photo must be a valid http(s) URL');
       user.profile.avatar = avatar;
+      // Removing the photo discards its crop, for the same reason the banner
+      // does: a crop that outlives its image silently applies to the next one.
+      if (!avatar) user.profile.avatarCrop = null;
+    }
+    /* §6 — the crop the canonical render came from.
+     * Validated as fractions rather than trusted: a crop outside 0–1 would
+     * re-open the editor on a region that does not exist, and NaN would break
+     * the geometry silently. Rejected loudly here — the one place that can
+     * still tell the user something useful — while the UI clamps at the edge. */
+    if (b.avatarCrop !== undefined) {
+      const crop = parseCrop(b.avatarCrop);
+      if (crop === INVALID) return fail('Profile photo crop must be four fractions between 0 and 1');
+      user.profile.avatarCrop = crop;
+    }
+    if (b.avatarVersion !== undefined) {
+      const v = Number(b.avatarVersion);
+      if (!Number.isFinite(v) || v < 0) return fail('Avatar version must be a positive number');
+      user.profile.avatarVersion = Math.floor(v);
+    }
+    if (b.coverCrop !== undefined) {
+      const crop = parseCrop(b.coverCrop);
+      if (crop === INVALID) return fail('Cover crop must be four fractions between 0 and 1');
+      user.profile.coverCrop = crop;
+    }
+    if (b.coverVersion !== undefined) {
+      const v = Number(b.coverVersion);
+      if (!Number.isFinite(v) || v < 0) return fail('Cover version must be a positive number');
+      user.profile.coverVersion = Math.floor(v);
     }
     /* Cover focal point (§7 — "repositionable"). Clamped rather than
      * rejected: an out-of-range number is a client bug, and clamping keeps
@@ -467,9 +540,12 @@ exports.updateProfile = async (req, res) => {
       const cover = sanitizeUrl(b.coverImage);
       if (cover === null) return fail('Cover image must be a valid http(s) URL');
       user.profile.coverImage = cover;
-      // Removing the banner resets its focal point, so a later upload starts
-      // clean instead of inheriting the previous photo's crop.
-      if (!cover) user.profile.coverPosition = 50;
+      // Removing the banner resets its focal point AND its crop, so a later
+      // upload starts clean instead of inheriting the previous photo's framing.
+      if (!cover) {
+        user.profile.coverPosition = 50;
+        user.profile.coverCrop = null;
+      }
     }
     if (b.bio !== undefined) {
       if (typeof b.bio !== 'string') return fail('Bio must be a string');

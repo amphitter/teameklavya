@@ -47,7 +47,7 @@ import { resetSocket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
 import { NotificationBell, NotificationsNavLink } from "@/components/notifications/notification-bell";
 import { MessagesNavLink } from "@/components/shell/messages-link";
-import { getImageUrl } from "@/utils/image";
+import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/utils/api";
 
 /* ──────────────────────────────────────────────────────────
@@ -160,28 +160,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isActive = (item: NavItem) =>
     item.exact ? pathname === "/" : Boolean(item.href && pathname.startsWith(item.href));
 
-  const avatar = user?.profile?.avatar || (user as any)?.avatar;
-
-  const UserAvatar = ({ size = 32 }: { size?: number }) =>
-    avatar ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={getImageUrl(avatar)}
-        alt=""
-        width={size}
-        height={size}
-        className="rounded-full object-cover"
-        style={{ width: size, height: size }}
-      />
+  /* The shell draws the account avatar through the SAME shared component as
+   * every other surface. It used to carry its own raw `<img>` here, which meant
+   * the header was the one place that asked for the untransformed original at a
+   * single size — a fourth crop of the same photo, and none of the variant
+   * handling. One component, one crop, every surface (§7). */
+  const AccountAvatar = ({ size = 32 }: { size?: number }) =>
+    user ? (
+      <UserAvatar user={user} size={size} alt="" />
     ) : (
       <span
-        className={cn(
-          "flex items-center justify-center rounded-full bg-brand-light text-xs font-bold text-primary",
-          !user && "bg-muted text-muted-foreground"
-        )}
+        className={cn("flex items-center justify-center rounded-full bg-muted text-muted-foreground")}
         style={{ width: size, height: size }}
       >
-        {user ? initialsOf(user) : <UserRound className="h-4 w-4" />}
+        <UserRound className="h-4 w-4" />
       </span>
     );
 
@@ -378,7 +370,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 type="button"
                 className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-muted"
               >
-                <UserAvatar />
+                <AccountAvatar />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-foreground">
                     {user.firstName} {user.lastName}
@@ -457,7 +449,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     aria-label="Account menu"
                     className="ml-1 rounded-full ring-offset-2 transition-all hover:ring-2 hover:ring-primary/40"
                   >
-                    <UserAvatar />
+                    <AccountAvatar />
                   </button>
                 </AccountMenu>
               </div>
@@ -540,7 +532,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   pathname.startsWith("/user") ? "text-primary" : "text-muted-foreground"
                 )}
               >
-                <UserAvatar size={22} />
+                <AccountAvatar size={22} />
                 <span className="text-[10px] font-semibold">Profile</span>
               </button>
             </AccountMenu>

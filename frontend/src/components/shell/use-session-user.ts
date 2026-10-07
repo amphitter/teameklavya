@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { api } from "@/utils/api";
 
 export interface SessionUser {
   _id?: string;
@@ -9,11 +10,24 @@ export interface SessionUser {
   lastName?: string;
   email?: string;
   username?: string;
+  verified?: boolean;
+  role?: string;
   profile?: {
     avatar?: string;
+    coverImage?: string;
+    /* The canonical crop + asset version (§6, §27). The shell needs the
+       version: without it a replaced photo would stay cached in the header. */
+    avatarVersion?: number;
+    coverVersion?: number;
+    coverPosition?: number;
+    avatarCrop?: { x: number; y: number; w: number; h: number } | null;
+    coverCrop?: { x: number; y: number; w: number; h: number } | null;
+    bio?: string;
+    location?: string;
     institution?: string;
     course?: string;
     year?: string;
+    interests?: string[];
   };
 }
 
@@ -80,6 +94,40 @@ export function updateSessionUser(patch: Partial<SessionUser> | null | undefined
   }
 }
 
+/**
+ * One identity refresh per page load, for sessions stored without a profile.
+ *
+ * The session is the ONLY identity the shell reads, and it is written from
+ * whichever endpoint signed the user in. A payload without `profile` therefore
+ * means initials in the header for someone who has a photo — and since nothing
+ * ever refetched it, that lasted the entire session (and every new session
+ * signed in through the same path).
+ *
+ * Two guards keep this cheap: it runs at most once per page load, and only
+ * when the stored copy has no profile at all (a healed session stops asking).
+ * It is fired after the first paint, so it adds no wait before the page's own
+ * requests (Part 11 §2) — the stored identity renders immediately, and this
+ * only corrects it.
+ */
+let profileSync: Promise<void> | null = null;
+
+function syncMissingProfile() {
+  if (profileSync) return profileSync;
+  profileSync = (async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      const res = await api.get("/auth/me");
+      const fresh = res?.data?.user || res?.data;
+      if (fresh?.profile) updateSessionUser({ profile: fresh.profile, verified: fresh.verified });
+    } catch {
+      /* offline, expired token, or an old backend — the stored copy still
+         renders, and the next real login carries the profile itself */
+    }
+  })();
+  return profileSync;
+}
+
 export function useSessionUser() {
   const pathname = usePathname();
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -92,7 +140,11 @@ export function useSessionUser() {
         const token = localStorage.getItem("token");
         const storedRole = localStorage.getItem("role");
         const raw = localStorage.getItem("user");
-        setUser(token && raw ? normalizeUser(JSON.parse(raw)) : null);
+        const stored = token && raw ? normalizeUser(JSON.parse(raw)) : null;
+        setUser(stored);
+        /* Stored identity is incomplete → ask the server once, in the
+           background. Never awaited: the shell renders from storage first. */
+        if (stored && !stored.profile) void syncMissingProfile();
         setRole(token ? storedRole : null);
       } catch {
         setUser(null);

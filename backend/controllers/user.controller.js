@@ -278,7 +278,14 @@ exports.getPublicProfile = async (req, res) => {
       lastName: user.lastName,
       username: user.username,
       verified: Boolean(user.verified),
-      profile: { avatar: user.profile?.avatar || "" },
+      /* Identity is always visible, so the avatar is — and it must carry its
+       * version, or a private profile would serve a replaced photo from cache
+       * forever (§27). The banner is deliberately NOT in this block: it is
+       * content, and content stays hidden when the profile is. */
+      profile: {
+        avatar: user.profile?.avatar || "",
+        avatarVersion: user.profile?.avatarVersion || 0,
+      },
       createdAt: user.createdAt,
     };
 

@@ -1,5 +1,13 @@
 const mongoose = require('mongoose');
 
+/* A crop is four numbers — a VALUE, not a document. `_id: false` keeps an
+ * ObjectId out of the payload: the client compares crops by value, and an
+ * identifier on a plain coordinate would be meaningless noise. */
+const cropSchema = new mongoose.Schema(
+  { x: Number, y: Number, w: Number, h: Number },
+  { _id: false }
+);
+
 const profileSchema = new mongoose.Schema({
   institution: { type: String, default: '' },
   course: { type: String, default: '' },
@@ -21,6 +29,28 @@ const profileSchema = new mongoose.Schema({
    *   Default 50 keeps every existing cover rendering exactly as it does
    *   today (plain `object-position: center`). */
   coverPosition: { type: Number, default: 50, min: 0, max: 100 },
+
+  /* ── Canonical crops (§6) ──────────────────────────────────────────────
+   * The framing the user chose in the crop editor, as fractions of the
+   * ORIGINAL image: { x, y, w, h }, each 0–1.
+   *
+   * The stored avatar is already rendered from this crop, so nothing needs it
+   * to display correctly. It is kept so "re-crop" opens on the user's own
+   * framing instead of a fresh centre crop — and so a future re-render (a
+   * larger canonical size, say) can reproduce exactly what they chose.
+   *
+   * A stored avatar WITHOUT one of these is a legacy upload from before the
+   * editor existed: the UI offers those users a one-tap re-crop (§7). */
+  avatarCrop: { type: cropSchema, default: null },
+  coverCrop: { type: cropSchema, default: null },
+
+  /* ── Asset versions (§27) ──────────────────────────────────────────────
+   * Bumped ONLY when the asset is replaced, and appended to delivery URLs as
+   * `?v=`. A new photo is therefore never served from a CDN or browser cache,
+   * while an unchanged one keeps caching indefinitely — which a render-time
+   * timestamp could not do. */
+  avatarVersion: { type: Number, default: 0 },
+  coverVersion: { type: Number, default: 0 },
   bio: { type: String, default: '', maxlength: [280, 'Bio is too long (max 280 characters)'] },
   location: { type: String, default: '', maxlength: 80 },
   /* §2-7 lists "website/location" as profile fields. The edit sheet had the

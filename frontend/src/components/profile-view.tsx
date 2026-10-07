@@ -21,9 +21,9 @@ import {
 import { toast } from "sonner";
 import { api } from "@/utils/api";
 import { getImageUrl, cloudinaryUrl } from "@/utils/image";
-import { UserAvatar } from "@/components/user-avatar";
+import { UserAvatar, versionedUrl } from "@/components/user-avatar";
 import { EditProfileSheet } from "@/components/profile/edit-profile-sheet";
-import { updateSessionUser } from "@/components/shell/use-session-user";
+import { updateSessionUser, SESSION_EVENT } from "@/components/shell/use-session-user";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -59,6 +59,8 @@ interface ProfileUser {
     avatar?: string;
     coverImage?: string;
     coverPosition?: number;
+    coverVersion?: number;
+    avatarVersion?: number;
     bio?: string;
     location?: string;
     website?: string;
@@ -103,6 +105,30 @@ export default function ProfileView() {
   const router = useRouter();
 
   const [user, setUser] = useState<ProfileUser | null>(null);
+  /* An image upload writes immediately and does not pass through the sheet's
+   * Save, so this screen is told about it the same way every other consumer
+   * is: through the session. Without this the banner and photo here kept the
+   * old values until a reload while the header had already changed. */
+  useEffect(() => {
+    const onSessionChange = () => {
+      try {
+        const raw = localStorage.getItem("user");
+        if (!raw) return;
+        const stored = JSON.parse(raw);
+        setUser((prev) => {
+          if (!prev) return prev;
+          if (stored?._id && prev._id && stored._id !== prev._id) return prev;
+          return { ...prev, profile: { ...((prev as any).profile || {}), ...(stored.profile || {}) } } as ProfileUser;
+        });
+      } catch {
+        /* storage unavailable — the next fetch reconciles it */
+      }
+    };
+    window.addEventListener(SESSION_EVENT, onSessionChange);
+    return () => window.removeEventListener(SESSION_EVENT, onSessionChange);
+  }, []);
+
+
   const [events, setEvents] = useState<RegEvent[]>([]);
   const [tickets, setTickets] = useState<UserTicket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -267,7 +293,11 @@ export default function ProfileView() {
           {user.profile?.coverImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={cloudinaryUrl(user.profile.coverImage, { w: 1200, h: 400 }) || getImageUrl(user.profile.coverImage) || ""}
+              src={
+                cloudinaryUrl(versionedUrl(user.profile.coverImage, user.profile?.coverVersion), { w: 1200, h: 400 }) ||
+                getImageUrl(user.profile.coverImage) ||
+                ""
+              }
               alt=""
               className="h-full w-full object-cover"
               /* The focal point set by the reposition control in the editor. */

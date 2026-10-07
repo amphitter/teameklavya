@@ -66,6 +66,12 @@ const nextConfig: NextConfig = {
       { source: "/api/:path*", destination: `${backendProxy}/api/:path*` },
       { source: "/socket.io", destination: `${backendProxy}/socket.io/` },
       { source: "/socket.io/:path*", destination: `${backendProxy}/socket.io/:path*` },
+      /* Local-storage uploads come back as server-relative `/uploads/…` paths
+         (the provider falls back to disk when Cloudinary is not configured),
+         and `getImageUrl` resolves them against the API base. In one-origin
+         preview mode that base is empty, so without this rewrite a freshly
+         uploaded photo would 404 in the very preview used to verify it. */
+      { source: "/uploads/:path*", destination: `${backendProxy}/uploads/:path*` },
     ];
   },
 };

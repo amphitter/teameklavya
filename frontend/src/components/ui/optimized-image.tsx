@@ -27,6 +27,7 @@
 
 import { useState } from "react";
 import { cloudinaryUrl } from "@/utils/image";
+import { buildSrcset, heightForWidth, isFixedBox } from "@/lib/image-variants";
 
 export type ImageSize = "thumb" | "small" | "medium" | "large" | "original";
 export type ImagePreset = "avatar" | "logo" | "poster" | "post" | "banner" | "default";
@@ -101,14 +102,26 @@ export function OptimizedImage({
     (source.includes("res.cloudinary.com") || source.startsWith("/uploads") === false) &&
     source.includes("res.cloudinary.com");
 
+  /* The shape rule lives in `lib/image-variants.ts` — see it for WHY a fixed
+     box must scale its height at every width (a constant height means a
+     different crop per device, which is how the same avatar used to show a
+     different slice of the photo on a phone and a laptop). */
+  const fixed = isFixedBox({ width, height });
+
   const buildUrl = (w?: number, h?: number) =>
-    cloudinaryUrl(source as string, { w, h, crop: width && height ? "fill" : "limit" });
+    cloudinaryUrl(source as string, { w, h, crop: fixed ? "fill" : "limit" });
+
+  /* The single (non-srcset) source must obey the same shape rule as the
+     variants above it, or `src` and `srcset` would describe two different
+     crops and the browser would pick between them. */
+  const srcHeight =
+    displayWidth == null ? height : heightForWidth(displayWidth, { width, height });
 
   const srcSet =
     isTransformable && size !== "original"
-      ? [widths.thumb, widths.small, widths.medium, widths.large]
-          .map((w) => `${buildUrl(w, height)} ${w}w`)
-          .join(", ")
+      ? buildSrcset([widths.thumb, widths.small, widths.medium, widths.large], { width, height }, (w, h) =>
+          cloudinaryUrl(source as string, { w, h, crop: fixed ? "fill" : "limit" })
+        )
       : undefined;
 
   const handleError = () => {
@@ -126,7 +139,7 @@ export function OptimizedImage({
 
   return (
     <img
-      src={buildUrl(displayWidth, height)}
+      src={buildUrl(displayWidth, srcHeight)}
       srcSet={srcSet}
       sizes={srcSet ? sizes : undefined}
       alt={alt}

@@ -33,7 +33,7 @@ import { EditProfileSheet } from "@/components/profile/edit-profile-sheet";
 import { updateSessionUser } from "@/components/shell/use-session-user";
 import { PostsGrid } from "@/components/profile/posts-grid";
 import { AchievementsGrid, type AchievementBadge } from "@/components/profile/achievements";
-import { useSessionUser } from "@/components/shell/use-session-user";
+import { SESSION_EVENT, useSessionUser } from "@/components/shell/use-session-user";
 import { cloudinaryUrl } from "@/utils/image";
 import { cn } from "@/lib/utils";
 import type { FeedPostData } from "@/components/feed/types";
@@ -85,6 +85,36 @@ export default function PublicProfilePage() {
    * institution/course/year — so username, photo and banner simply could not
    * be changed from anywhere. */
   const [editOpen, setEditOpen] = useState(false);
+
+
+  /* The image uploaders write to the server the moment a crop is confirmed —
+   * they do not wait for the sheet's Save. That write is anonymous to this
+   * screen, which keeps its own copy of the profile, so a new photo used to
+   * show up in the header and the nav while the banner and photo the user was
+   * actually looking at stayed old, until a reload.
+   *
+   * The uploader publishes the new identity to the session — the same
+   * mechanism a profile save uses — and this screen merges it. Only `profile`,
+   * and only for this account, so an identity change for someone else can
+   * never rewrite the profile you are viewing. */
+  useEffect(() => {
+    const onSessionChange = () => {
+      try {
+        const raw = localStorage.getItem("user");
+        if (!raw) return;
+        const stored = JSON.parse(raw);
+        setProfileUser((prev: any) => {
+          if (!prev) return prev;
+          if (stored?._id && prev._id && stored._id !== prev._id) return prev;
+          return { ...prev, profile: { ...(prev.profile || {}), ...(stored.profile || {}) } };
+        });
+      } catch {
+        /* storage unavailable — the next load() reconciles it */
+      }
+    };
+    window.addEventListener(SESSION_EVENT, onSessionChange);
+    return () => window.removeEventListener(SESSION_EVENT, onSessionChange);
+  }, []);
 
   const load = () => {
     setLoading(true);

@@ -51,6 +51,9 @@ const FOLDER_WHITELIST = new Set([
   "stories",   // Part 8 — 9:16 portrait story media
 ]);
 
+/** Declared canonical shapes (§6) — see media.service.validateShape. */
+const CANONICAL_SHAPES = new Set(["avatar", "cover"]);
+
 /** Map an upload folder onto the responsive-variant preset used to serve it. */
 const PURPOSE_BY_FOLDER = {
   avatars: "avatar",
@@ -124,12 +127,20 @@ router.post("/image", requireAuth, upload.single("file"), async (req, res) => {
     }
     const folder = FOLDER_WHITELIST.has(req.query.folder) ? String(req.query.folder) : "misc";
 
+    /* §6 — the caller may declare that it is uploading a CANONICAL render
+     * (square avatar / 3:1 cover). Declaring it makes the server check the
+     * shape of the bytes it received, so the contract cannot be broken by a
+     * client that forgets to crop. Whitelisted, so a typo is ignored rather
+     * than silently disabling anything. */
+    const shape = CANONICAL_SHAPES.has(req.query.purpose) ? String(req.query.purpose) : null;
+
     uploaded = await media.uploadImage({
       buffer: req.file.buffer,
       mimetype: req.file.mimetype,
       folder,
       uploadedBy: req.user.id,
       purpose: PURPOSE_BY_FOLDER[folder] || "default",
+      shape,
     });
 
     // Unlike the event route, nothing consumes this asset yet — the client is

@@ -39,6 +39,12 @@ const MediaAsset = require("../models/mediaAsset.model");
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024; // hard ceiling for any single upload
 
+/* The canonical sizes the frontend renders (§6). The minimums leave room for a
+ * smaller future canonical size without loosening the contract to "anything
+ * square" — a 64×64 avatars would look broken at 800px. */
+const MIN_CANONICAL_AVATAR_PX = 128;
+const MAX_CANONICAL_PX = 4096;
+
 /* ── Validation (§62, §63) ───────────────────────────────────────────── */
 
 /**
@@ -198,6 +204,66 @@ function validateDimensions(buffer) {
   return null;
 }
 
+/**
+ * §6 — enforce the CANONICAL SHAPE the uploader declares.
+ *
+ * The crop editor renders the avatar as a square and the cover as 3:1 before
+ * uploading, so those files arrive with a shape that is already the user's
+ * decision. Checking it here makes "canonical" a property of the stored asset
+ * rather than a promise made by the client: a build that forgot to crop, or a
+ * script posting straight to this endpoint, gets a clear 400 instead of quietly
+ * writing a 3:1 "avatar" that every surface then crops differently — the exact
+ * defect this contract exists to end.
+ *
+ * This is a CONTRACT check, not a security boundary, and it is deliberately
+ * opt-in (`?purpose=`): every security-relevant property — real content type
+ * from magic bytes, per-folder size limits, decompression-bomb guard and
+ * dimension ceilings — is enforced on every upload regardless of what the
+ * caller declares. Shape is validated when declared, because the failure it
+ * prevents is the declarer's own profile looking wrong.
+ *
+ * @returns a user-facing message, or null when the shape is acceptable
+ */
+function validateShape(buffer, purpose) {
+  if (!purpose) return null;
+
+  const dims = readDimensions(buffer);
+  if (!dims) return null; // unreachable: validateDimensions ran first
+  const { width, height } = dims;
+
+  /* 2% tolerance: the canonical 1600×533 cover is 3.0019:1, not exactly 3:1 —
+     rounding to whole pixels means a strict equality check would reject the
+     very file this project generates. */
+  const TOLERANCE = 0.02;
+
+  if (purpose === "avatar") {
+    const ratio = width / height;
+    if (Math.abs(ratio - 1) > TOLERANCE) {
+      return `A profile photo is uploaded as a square, but that one is ${width}×${height}. Crop it first.`;
+    }
+    if (width < MIN_CANONICAL_AVATAR_PX) {
+      return `A profile photo needs to be at least ${MIN_CANONICAL_AVATAR_PX}×${MIN_CANONICAL_AVATAR_PX}.`;
+    }
+    if (width > MAX_CANONICAL_PX) {
+      return `A profile photo should be at most ${MAX_CANONICAL_PX}px — it is rendered at 512px.`;
+    }
+    return null;
+  }
+
+  if (purpose === "cover") {
+    const ratio = width / height;
+    if (Math.abs(ratio - 3) > 3 * TOLERANCE + 0.01) {
+      return `A cover photo is uploaded in a 3:1 frame, but that one is ${width}×${height}. Crop it first.`;
+    }
+    if (width > MAX_CANONICAL_PX) {
+      return `A cover photo should be at most ${MAX_CANONICAL_PX}px wide.`;
+    }
+    return null;
+  }
+
+  return null;
+}
+
 /** Validate for multer's fileFilter, which runs before bytes are read. */
 function validateImageMimetype(mimetype) {
   return mimetype && ALLOWED_MIME_TYPES.has(mimetype)
@@ -238,10 +304,20 @@ async function uploadImage({
   publicId,
   uploadedBy = null,
   purpose = "default",
+  /* "avatar" | "cover" when the caller is uploading a CANONICAL render (§6).
+   * Absent for every other upload, which then keeps the rules it always had. */
+  shape = null,
 }) {
   const validationError = validateImageBuffer(buffer, mimetype, folder);
   if (validationError) {
     const err = new Error(validationError);
+    err.status = 400;
+    throw err;
+  }
+
+  const shapeError = validateShape(buffer, shape);
+  if (shapeError) {
+    const err = new Error(shapeError);
     err.status = 400;
     throw err;
   }
@@ -372,6 +448,7 @@ module.exports = {
   validateImageBuffer,
   validateImageMimetype,
   validateDimensions,
+  validateShape,
   readDimensions,
   MAX_DIMENSION_PX,
   MAX_TOTAL_PIXELS,

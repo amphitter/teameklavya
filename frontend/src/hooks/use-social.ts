@@ -12,6 +12,7 @@
  * thin, typed façade over the shared client.
  */
 
+import type { CropRect } from "@/lib/crop";
 import { useCallback, useMemo } from "react";
 import { api } from "@/utils/api";
 import {
@@ -58,7 +59,7 @@ export interface StoryAuthor {
   lastName?: string;
   username?: string;
   verified?: boolean;
-  profile?: { avatar?: string; coverImage?: string };
+  profile?: { avatar?: string; coverImage?: string; avatarVersion?: number };
 }
 
 export interface StoryGroup {
@@ -191,6 +192,16 @@ export interface ProfileUser {
     coverImage?: string;
     /** Vertical focal point of the cover, 0–100 (§7 — "repositionable"). */
     coverPosition?: number;
+    /* The canonical crop + asset version (§6, §27).
+     *
+     * `avatarCrop` is the framing the canonical render came from — kept so the
+     * editor re-opens on the user's own crop, and absent on avatars uploaded
+     * before the crop step existed. `version` changes only when the file
+     * changes, which is what makes `?v=` a cache-buster rather than noise. */
+    avatarCrop?: CropRect | null;
+    coverCrop?: CropRect | null;
+    avatarVersion?: number;
+    coverVersion?: number;
     bio?: string;
     location?: string;
     website?: string;

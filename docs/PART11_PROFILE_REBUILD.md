@@ -31,6 +31,8 @@ No redesign. Only things that are objectively broken, each with a live repro.
 
 ## Phase 2 — Crop and canonical avatar
 
+> **Status: DONE — verified live and in unit tests.** See `docs/PHASE2_AVATAR_CANONICAL.md` for what shipped, the nine defects it found and fixed, and the evidence.
+
 The root of "nose on one device, whole face on another": the stored image is
 whatever the user uploaded and every surface crops it independently.
 

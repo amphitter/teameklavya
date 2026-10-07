@@ -81,6 +81,7 @@ export function StoryRail({
           key={g.author._id}
           name={displayName(g.author)}
           src={g.author.profile?.avatar}
+          version={g.author.profile?.avatarVersion}
           verified={g.author.verified}
           unseen={g.hasUnseen}
           isMe={g.isMe}
@@ -126,9 +127,11 @@ export interface StoryAvatarProps {
   count?: number;
   onClick?: () => void;
   size?: "sm" | "md";
+  /** Bumped only when the photo changes — see `user-avatar`. */
+  version?: number;
 }
 
-export function StoryAvatar({ name, src, verified, unseen, isMe, count, onClick, size = "md" }: StoryAvatarProps) {
+export function StoryAvatar({ name, src, verified, unseen, isMe, count, onClick, size = "md", version }: StoryAvatarProps) {
   const dim = size === "sm" ? "h-11 w-11" : "h-16 w-16";
   return (
     <button
@@ -140,7 +143,11 @@ export function StoryAvatar({ name, src, verified, unseen, isMe, count, onClick,
       <span className={cn("relative rounded-full p-[2.5px]", unseen ? "brand-gradient" : "bg-outline-variant")}>
         <span className={cn("relative block rounded-full border-[3px] border-surface-container-lowest", dim)}>
           <UserAvatar
-            user={{ firstName: name.split(" ")[0], lastName: name.split(" ").slice(1).join(" "), profile: { avatar: src } }}
+            user={{
+              firstName: name.split(" ")[0],
+              lastName: name.split(" ").slice(1).join(" "),
+              profile: { avatar: src, avatarVersion: version },
+            }}
             size={size === "sm" ? 40 : 58}
             className="h-full w-full"
           />

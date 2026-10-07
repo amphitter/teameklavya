@@ -19,6 +19,10 @@ process.env.GOOGLE_CLIENT_ID = "x";
 process.env.GOOGLE_CLIENT_SECRET = "y";
 process.env.GOOGLE_CALLBACK_URL = "http://localhost/callback";
 process.env.RATE_LIMIT_DISABLED = "1";
+/* Uploads during a QA run go to a throwaway directory. Without this the
+ * local-disk fallback writes into the repository, so every verification pass
+ * leaves untracked images behind. */
+process.env.UPLOADS_DIR = process.env.UPLOADS_DIR || `/var/tmp/qa-uploads-${Date.now()}`;
 process.env.REALTIME_CAP_SOCKETS_PER_IP = "900";
 
 const http = require("http");

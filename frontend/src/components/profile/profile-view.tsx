@@ -10,7 +10,7 @@ import { compressFor } from "@/utils/compress-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { EditProfileSheet } from "@/components/profile/edit-profile-sheet";
 import { ErrorState, PageLoader, EmptyState } from "@/components/states";
 import { ProfileHeader, type ProfileStats } from "@/components/profile/profile-header";
 import { PostsGrid } from "@/components/profile/posts-grid";
@@ -273,210 +273,27 @@ export default function ProfileView() {
 
       {tab === "achievements" && <AchievementsGrid achievements={achievements} memberSince={user.createdAt} />}
 
-      {/* Edit dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-h-[85vh] max-w-md overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Edit profile</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={saveProfile} className="space-y-5">
-            {/* Identity */}
-            <div className="space-y-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Identity</p>
-              <div className="space-y-1.5">
-                <Label htmlFor="username">Username</Label>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-semibold text-muted-foreground">@</span>
-                  <Input
-                    id="username"
-                    value={socialForm.username}
-                    onChange={(e) =>
-                      setSocialForm((f) => ({ ...f, username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "") }))
-                    }
-                    placeholder="devansh"
-                    maxLength={30}
-                    className="flex-1"
-                  />
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  3-30 characters · letters, numbers, underscore · your profile: /profile/{socialForm.username || "username"}
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="bio">Bio</Label>
-                <textarea
-                  id="bio"
-                  value={socialForm.bio}
-                  onChange={(e) => setSocialForm((f) => ({ ...f, bio: e.target.value.slice(0, 280) }))}
-                  placeholder="Builder, hackathon enthusiast, AI nerd…"
-                  rows={2}
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                />
-                <p className="text-right text-[11px] text-muted-foreground">{socialForm.bio.length} / 280</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="location">Location</Label>
-                  <Input
-                    id="location"
-                    value={socialForm.location}
-                    onChange={(e) => setSocialForm((f) => ({ ...f, location: e.target.value }))}
-                    placeholder="Gurugram, IN"
-                    maxLength={80}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="interests">Interests</Label>
-                  <Input
-                    id="interests"
-                    value={socialForm.interests}
-                    onChange={(e) => setSocialForm((f) => ({ ...f, interests: e.target.value }))}
-                    placeholder="ai, hackathons, web"
-                  />
-                </div>
-              </div>
-
-              {/* Avatar + cover */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Avatar</Label>
-                  <div className="flex items-center gap-2.5">
-                    {socialForm.avatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={socialForm.avatar} alt="" className="h-11 w-11 rounded-full object-cover" />
-                    ) : (
-                      <span className="h-11 w-11 rounded-full bg-muted" />
-                    )}
-                    <label className="cursor-pointer rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-muted">
-                      {avatarBusy ? "Uploading…" : "Upload"}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0], "avatar")}
-                      />
-                    </label>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Cover image</Label>
-                  <div className="flex items-center gap-2.5">
-                    {socialForm.coverImage ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={socialForm.coverImage} alt="" className="h-11 w-16 rounded-lg object-cover" />
-                    ) : (
-                      <span className="h-11 w-16 rounded-lg bg-gradient-to-r from-[#2563FF] to-[#D946EF]" />
-                    )}
-                    <label className="cursor-pointer rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-muted">
-                      {coverBusy ? "Uploading…" : "Upload"}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0], "cover")}
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Academic */}
-            <div className="space-y-4 border-t border-border pt-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Academics</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="institution">Institution</Label>
-                  <Input
-                    id="institution"
-                    value={editForm.institution}
-                    onChange={(e) => setEditForm((f) => ({ ...f, institution: e.target.value }))}
-                    placeholder="e.g. GITM Gurgaon"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="course">Course</Label>
-                  <Input
-                    id="course"
-                    value={editForm.course}
-                    onChange={(e) => setEditForm((f) => ({ ...f, course: e.target.value }))}
-                    placeholder="e.g. B.Tech AI & DS"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="year">Year</Label>
-                <Input
-                  id="year"
-                  value={editForm.year}
-                  onChange={(e) => setEditForm((f) => ({ ...f, year: e.target.value }))}
-                  placeholder="e.g. 2nd year"
-                />
-              </div>
-            </div>
-
-            {/* Privacy */}
-            <div className="space-y-4 border-t border-border pt-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Privacy</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="profileVisibility">Profile visibility</Label>
-                  <select
-                    id="profileVisibility"
-                    value={socialForm.profileVisibility}
-                    onChange={(e) => setSocialForm((f) => ({ ...f, profileVisibility: e.target.value }))}
-                    className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                  >
-                    <option value="public">Public</option>
-                    <option value="followers">Followers only</option>
-                    <option value="private">Private</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="allowMessagesFrom">Messages from</Label>
-                  <select
-                    id="allowMessagesFrom"
-                    value={socialForm.allowMessagesFrom}
-                    onChange={(e) => setSocialForm((f) => ({ ...f, allowMessagesFrom: e.target.value }))}
-                    className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                  >
-                    <option value="everyone">Everyone</option>
-                    <option value="followers">Followers only</option>
-                    <option value="nobody">Nobody</option>
-                  </select>
-                </div>
-              </div>
-              <div className="space-y-2">
-                {(
-                  [
-                    { key: "showAttendance" as const, label: "Show event attendance on my profile" },
-                    { key: "showAchievements" as const, label: "Show achievements on my profile" },
-                  ]
-                ).map((o) => (
-                  <label key={o.key} className="flex cursor-pointer items-center gap-2.5 text-sm text-foreground">
-                    <input
-                      type="checkbox"
-                      checked={socialForm[o.key]}
-                      onChange={(e) => setSocialForm((f) => ({ ...f, [o.key]: e.target.checked }))}
-                      className="h-4 w-4 accent-[#2563FF]"
-                    />
-                    {o.label}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 border-t border-border pt-4">
-              <Button type="button" variant="ghost" onClick={() => setEditOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saving || avatarBusy || coverBusy}>
-                {saving ? "Saving…" : "Save changes"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* Edit profile sheet (§21-24, §59) — the inline dialog it replaces
+          could not change the avatar or cover, and had no username
+          availability check. */}
+      <EditProfileSheet
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        user={user}
+        onSaved={(updated) => {
+          // §56 — propagate the new identity immediately, no reload or
+          // logout needed: header, nav avatar, post author labels.
+          setUser((u: any) => ({ ...u, ...updated }));
+          try {
+            const raw = localStorage.getItem("user");
+            if (raw) {
+              localStorage.setItem("user", JSON.stringify({ ...JSON.parse(raw), ...updated }));
+            }
+          } catch {
+            /* storage unavailable — the next /auth/me refetch will re-sync */
+          }
+        }}
+      />
     </div>
   );
 }

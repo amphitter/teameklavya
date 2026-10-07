@@ -119,6 +119,9 @@ function broadcastPresence(userId, online) {
 }
 
 /** The user opened a conversation: start routing presence to them. */
+/** Hard ceiling on how many conversations one socket may watch (§42). */
+const WATCH_MAX_PER_SOCKET = 50;
+
 function watchConversation(socket, conversationId, participantIds) {
   const me = String(socket.data?.user?.id || "");
   if (!me || !conversationId) return;
@@ -403,12 +406,37 @@ function registerDmHandlers(socket, { rateLimit }) {
    * goings, and no reason to pay for them. */
   socket.on(EVENTS.C_DM_WATCH, async (payload = {}) => {
     try {
-      if (!payload.conversationId) return;
-      const convo = await Conversation.findOne({ _id: payload.conversationId, participants: me })
+      /* Two shapes, one handler:
+       *   { conversationId }                  — the thread on screen. Answers
+       *                                         at once with who is around.
+       *   { conversationIds: [...], silent }  — the inbox list, batched into
+       *                                         ONE query. `silent` skips the
+       *                                         reply because the list already
+       *                                         carries each row's presence;
+       *                                         the client only needs the
+       *                                         transitions that follow.
+       *
+       * The batch is capped: subscriptions cost memory per socket, and a
+       * client that asks to watch everything the user has ever said is not
+       * a case worth paying for. */
+      const ids = Array.isArray(payload.conversationIds)
+        ? payload.conversationIds.slice(0, WATCH_MAX_PER_SOCKET).map(String)
+        : payload.conversationId
+          ? [String(payload.conversationId)]
+          : [];
+      if (!ids.length) return;
+
+      const convos = await Conversation.find({ _id: { $in: ids }, participants: me })
         .select("participants")
         .lean();
-      if (!convo) return; // not a participant — ignore silently
-      watchConversation(socket, convo._id, convo.participants.map(String));
+      // A non-participant matches nothing and is ignored silently.
+      for (const convo of convos) {
+        watchConversation(socket, convo._id, convo.participants.map(String));
+      }
+
+      if (payload.silent === true || !payload.conversationId) return;
+      const convo = convos.find((c) => String(c._id) === String(payload.conversationId));
+      if (!convo) return;
 
       /* Answer immediately with everyone's current state, so opening a thread
        * does not wait for the first transition to learn who is around. */
@@ -426,7 +454,12 @@ function registerDmHandlers(socket, { rateLimit }) {
 
   socket.on(EVENTS.C_DM_UNWATCH, (payload = {}) => {
     try {
-      unwatchConversation(socket, payload.conversationId);
+      const ids = Array.isArray(payload.conversationIds)
+        ? payload.conversationIds.slice(0, WATCH_MAX_PER_SOCKET)
+        : payload.conversationId
+          ? [payload.conversationId]
+          : [];
+      for (const id of ids) unwatchConversation(socket, id);
     } catch {
       /* best-effort */
     }

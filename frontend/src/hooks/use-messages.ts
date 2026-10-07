@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { api } from "@/utils/api";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import type { ChatMessage } from "@/hooks/use-social";
+import { unwatchConversations, watchConversations } from "@/lib/messages/watch";
 import {
   cacheInbox,
   cacheThread,
@@ -208,6 +209,25 @@ export function useInbox(view: "all" | "unread" | "archived"): UseInboxResult {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [archived, view]);
+
+  /* Keep the list's presence dots truthful.
+   *
+   * The rows arrive with each peer's presence already, which is correct at
+   * load. Without this effect the dot would keep saying "Active now" for
+   * someone who closed the app ten minutes ago — a green light that lies is
+   * worse than no light at all. Bounded to the first page, batched into one
+   * event, and re-announced on reconnect by the socket module. */
+  const watchKey = rows
+    .slice(0, 20)
+    .filter((r) => r.type !== "team")
+    .map((r) => r._id)
+    .join(",");
+  useEffect(() => {
+    if (!watchKey) return;
+    const ids = watchKey.split(",");
+    watchConversations(ids);
+    return () => unwatchConversations(ids);
+  }, [watchKey]);
 
   return { rows, loading, error, hasMore, loadMore, refresh };
 }

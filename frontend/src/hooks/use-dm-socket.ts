@@ -22,6 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSocket } from "@/lib/socket";
+import { replayInboxWatches, unwatchThread, watchThread } from "@/lib/messages/watch";
 import { inbox, presence, threads, unread, type ConversationRow } from "@/lib/messages/store";
 import type { ChatMessage } from "@/hooks/use-social";
 import { refreshUnread } from "@/hooks/use-messages";
@@ -76,22 +77,15 @@ const activeSubs = new Set<(id: string | null) => void>();
  * withdraw. Without this the header would never learn a peer came online. */
 let watchedConversationId: string | null = null;
 
-function emitWatch(id: string | null, watched: boolean) {
-  if (!id) return;
-  const socket = getSocket();
-  if (!socket.connected) return;
-  socket.emit(watched ? "dm:watch" : "dm:unwatch", { conversationId: id });
-}
-
 export function setActiveConversation(id: string | null) {
   if (activeConversationId === id) return;
   activeConversationId = id;
   // Withdraw the old watch BEFORE registering the new one, so a fast
   // navigation between two threads cannot leave a stale subscription
   // delivering presence for a conversation that is no longer on screen.
-  if (watchedConversationId && watchedConversationId !== id) emitWatch(watchedConversationId, false);
+  if (watchedConversationId && watchedConversationId !== id) unwatchThread(watchedConversationId);
   watchedConversationId = id;
-  emitWatch(id, true);
+  if (id) watchThread(id);
   activeSubs.forEach((fn) => fn(id));
 }
 
@@ -237,7 +231,12 @@ export function useDmSocket(): { connection: DmConnection } {
        re-announcing the watch, presence would silently stop updating for the
        rest of the session — the failure mode where everything looks fine
        until someone goes offline and the label never changes. */
-    const onReconnectWatch = () => emitWatch(watchedConversationId, true);
+    const onReconnectWatch = () => {
+      // A fresh socket has no subscriptions at all: re-announce both the open
+      // thread and the inbox list, or presence silently stops updating.
+      if (watchedConversationId) watchThread(watchedConversationId);
+      replayInboxWatches();
+    };
     const onDisconnect = () => mounted.current && setConnection("offline");
     const onReconnectAttempt = () => mounted.current && setConnection("connecting");
 

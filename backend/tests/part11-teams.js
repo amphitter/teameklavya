@@ -341,6 +341,33 @@ function connect(token) {
   ok(r.d.presence && typeof r.d.presence.online === "boolean", "opening a thread returns the peer's presence");
   sockB3.disconnect();
 
+  /* ── The inbox batch watch ──────────────────────────────────────────
+   * The list already has each row's presence from its REST read, so its
+   * watch must register WITHOUT the per-conversation state burst — and it
+   * must still deliver transitions, or the dots freeze. */
+  section("presence — the batched inbox watch");
+  r = await call("POST", "/api/messages/conversations", { userId: uc._id }, ta);
+  const dmAC = r.d.conversationId;
+
+  const sockA2 = await connect(ta);
+  const seenA2 = listen(sockA2);
+  await sleep(200);
+  sockA2.emit("dm:watch", { conversationIds: [dmId, dmAC], silent: true });
+  await sleep(300);
+  ok(eventsOf(seenA2, "dm:presence").length === 0, "a silent batch watch does not spend a state burst on the list");
+
+  // Watching a conversation this user is not in must do nothing at all.
+  sockA2.emit("dm:watch", { conversationIds: ["64b000000000000000000000"], silent: true });
+  await sleep(200);
+  ok(eventsOf(seenA2, "dm:presence").length === 0, "watching a conversation you are not in is ignored silently");
+
+  const sockC = await connect(tc);
+  await sleep(400);
+  const cOnline = eventsOf(seenA2, "dm:presence").filter((e) => e.payload?.userId === String(uc._id));
+  ok(cOnline.length >= 1 && cOnline.some((e) => e.payload.online === true), "but a transition DOES arrive for a batched watch (the dot stays truthful)");
+  sockC.disconnect();
+  sockA2.disconnect();
+
   for (const s of [sockA, sockD]) s.disconnect();
   dm._resetTimers();
 

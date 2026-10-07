@@ -15,12 +15,13 @@
  * thread implementation, not two.
  */
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ThreadPanel } from "@/components/messages/thread-panel";
 import { ConversationList } from "@/components/messages/conversation-list";
 import { useDmSocket, setActiveConversation } from "@/hooks/use-dm-socket";
 import { useInbox, useUnread } from "@/hooks/use-messages";
+import { TeamCreateSheet } from "@/components/messages/team-create-sheet";
 import { useEffect } from "react";
 
 export default function ConversationPage() {
@@ -28,6 +29,7 @@ export default function ConversationPage() {
   const router = useRouter();
   const conversationId = params?.id ?? null;
 
+  const [teamSheetOpen, setTeamSheetOpen] = useState(false);
   const { connection } = useDmSocket();
   const { rows, loading, error, hasMore, loadMore, refresh } = useInbox("all");
   const { archived: unreadArchived } = useUnread();
@@ -77,6 +79,7 @@ export default function ConversationPage() {
             onRetry={() => void refresh()}
             archivedUnread={unreadArchived}
             linkPrefix="/messages"
+            onCreateTeam={() => setTeamSheetOpen(true)}
           />
         </aside>
 
@@ -85,8 +88,18 @@ export default function ConversationPage() {
           fallback={fallback}
           onBack={onBack}
           connection={connection}
+          onCreateTeam={() => setTeamSheetOpen(true)}
         />
       </div>
+
+      <TeamCreateSheet
+        open={teamSheetOpen}
+        onClose={() => setTeamSheetOpen(false)}
+        onCreated={(id) => {
+          setTeamSheetOpen(false);
+          router.push(`/messages/${id}`);
+        }}
+      />
     </div>
   );
 }

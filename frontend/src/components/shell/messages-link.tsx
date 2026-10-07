@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { MessageCircle } from "lucide-react";
 import { useSessionUser } from "@/components/shell/use-session-user";
-import { refreshUnread, useUnread } from "@/hooks/use-messages";
+import { prefetchInbox, refreshUnread, useUnread } from "@/hooks/use-messages";
 import { useDmSocket } from "@/hooks/use-dm-socket";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +37,9 @@ export function MessagesNavLink() {
   useEffect(() => {
     if (!user) return;
     void refreshUnread();
+    /* Load the inbox rows in the background so tapping this icon paints
+       immediately instead of showing a skeleton for a round trip. */
+    prefetchInbox();
   }, [user]);
 
   if (ready && !user) return null;

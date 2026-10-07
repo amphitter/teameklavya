@@ -31,8 +31,34 @@ import type { ChatMessage } from "@/hooks/use-social";
 
 /* ── Types ──────────────────────────────────────────────────────────────── */
 
+/**
+ * Presence (Part 11 §4) — active now, or last seen at a moment.
+ *
+ * `online` is live socket state on the server; `lastSeenAt` is the durable
+ * half and survives a restart. Both arrive from the API on load and are then
+ * kept current by `dm:presence` events.
+ */
+export interface Presence {
+  online: boolean;
+  lastSeenAt: string | null;
+}
+
+/** One member of a team, as returned by the roster endpoints. */
+export interface TeamMember {
+  _id: string;
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+  profile?: { avatar?: string };
+  role?: "owner" | "admin" | "member";
+}
+
 export interface ConversationRow {
   _id: string;
+  /* `direct` or `team`. Optional because rows cached on this device before
+     teams existed have neither field, and an old cache must not break the
+     list. A missing type is treated as a direct chat, which is what it was. */
+  type?: "direct" | "team";
   /* Shape mirrors `SessionUser` so the row can be handed straight to
      `<UserAvatar>` without a cast. The API may omit `profile` entirely for a
      user who has never set one, which is what the optional marker says. */
@@ -43,7 +69,13 @@ export interface ConversationRow {
     username?: string;
     profile?: { avatar?: string; institution?: string; course?: string; year?: string };
   } | null;
-  lastMessage: { text: string; at: string; mine: boolean } | null;
+  /* Team identity. Null/absent for direct rows. */
+  name?: string | null;
+  avatar?: string | null;
+  memberCount?: number | null;
+  /** Direct rows only — a team has no single presence (§4). */
+  presence?: Presence | null;
+  lastMessage: { text: string; at: string; mine: boolean; senderName?: string | null } | null;
   updatedAt: string;
   unreadCount: number;
   muted?: boolean;
@@ -65,8 +97,22 @@ export interface ThreadState {
   archived: boolean;
   /** Set when the very first load failed with nothing cached to show. */
   error: boolean;
-  /** Epoch ms until which the peer is typing; 0 = not typing. */
-  typingUntil: number;
+  /* ── Part 11 — team identity on the open thread ── */
+  /** "direct" for a pair, "team" for a named roster. */
+  type: "direct" | "team";
+  /** Team name; null for a direct chat. */
+  name: string | null;
+  avatar: string | null;
+  /** The roster, for sender labels inside a team. Empty for direct chats. */
+  members: TeamMember[];
+  myRole: "owner" | "admin" | "member" | null;
+  /**
+   * userId → epoch ms until which that user counts as typing.
+   *
+   * A MAP, not a flag: in a team several people type at once, and one peer
+   * withdrawing their indicator must not cancel another's (§3).
+   */
+  typing: Record<string, number>;
   /** True once the server has confirmed the latest page for this session. */
   synced: boolean;
 }
@@ -82,6 +128,9 @@ const K_INBOX = "inbox";
 const K_ARCHIVED = "archived";
 const K_UNREAD = "unread";
 const threadKey = (id: string) => `thread:${id}`;
+/* One slice per USER, not one slice for all presence: a peer going online must
+ * re-render that peer's row and nothing else (§7 — no whole-list churn). */
+const presenceKey = (id: string) => `presence:${id}`;
 const searchKey = (q: string, type: string) => `search:${type}:${q}`;
 
 /* ── Store core ─────────────────────────────────────────────────────────── */
@@ -108,7 +157,12 @@ const EMPTY_THREAD: ThreadState = {
   muted: false,
   archived: false,
   error: false,
-  typingUntil: 0,
+  type: "direct",
+  name: null,
+  avatar: null,
+  members: [],
+  myRole: null,
+  typing: {},
   synced: false,
 };
 const EMPTY_ROWS: ConversationRow[] = [];
@@ -168,6 +222,18 @@ export const inbox = {
       setSlice(toKey, [{ ...found, archived: toArchived }, ...to]);
     }
   },
+  /** Drop a row we are no longer part of (leaving a team). */
+  remove(conversationId: string) {
+    for (const key of [K_INBOX, K_ARCHIVED]) {
+      const rows = slices.get(key) as ConversationRow[] | undefined;
+      if (!rows?.some((r) => r._id === conversationId)) continue;
+      setSlice(
+        key,
+        rows.filter((r) => r._id !== conversationId)
+      );
+    }
+  },
+
   /** Prepend or refresh a row at the top of the inbox, newest first. */
   upsert(archived: boolean, row: ConversationRow) {
     const key = archived ? K_ARCHIVED : K_INBOX;
@@ -319,9 +385,23 @@ export const threads = {
     setSlice(threadKey(id), { ...cur, messages: cur.messages.filter((m) => m._id !== messageId) });
   },
 
-  typing(id: string, until: number) {
+  /**
+   * Record that `userId` is (or is no longer) typing in this thread.
+   *
+   * Keyed per user so a team can show "Ana and Ben are typing" and so one
+   * person stopping cannot clear someone else's indicator. `until = 0`
+   * removes that user's entry; the map itself is only replaced when the
+   * value actually changes, which keeps the slice reference stable and
+   * stops a repeated `typing:false` from re-rendering the thread.
+   */
+  typing(id: string, userId: string, until: number) {
     const cur = getSlice<ThreadState>(threadKey(id), EMPTY_THREAD);
-    setSlice(threadKey(id), { ...cur, typingUntil: until });
+    const had = cur.typing[userId] ?? 0;
+    if (until === 0 && !had) return;
+    const next = { ...cur.typing };
+    if (until > 0) next[userId] = until;
+    else delete next[userId];
+    setSlice(threadKey(id), { ...cur, typing: next });
   },
 
   /** Do we already hold this message? Used to skip a redundant append. */
@@ -332,6 +412,43 @@ export const threads = {
   reset(id: string) {
     slices.delete(threadKey(id));
     listeners.get(threadKey(id))?.forEach((f) => f());
+  },
+};
+
+/* ── Presence (Part 11 §4) ──────────────────────────────────────────────── */
+
+export const presence = {
+  key: presenceKey,
+  get: (userId: string) => getSlice<Presence | null>(presenceKey(userId), null),
+
+  set(userId: string, next: Presence | null) {
+    const cur = getSlice<Presence | null>(presenceKey(userId), null);
+    // Identity check first: an unchanged state must not replace the slice,
+    // or every presence event from a chatty peer re-renders their row.
+    if (cur && next && cur.online === next.online && cur.lastSeenAt === next.lastSeenAt) return;
+    if (!cur && !next) return;
+    setSlice(presenceKey(userId), next);
+  },
+
+  /**
+   * Seed from a REST payload. Called with every conversation list and thread
+   * load so a cold start paints "Active now" on the first frame instead of
+   * waiting for the first presence event.
+   */
+  seed(rows: ConversationRow[]) {
+    for (const row of rows) {
+      if (row.type === "team") continue;
+      const id = row.other?._id;
+      if (id && row.presence) presence.set(id, row.presence);
+    }
+  },
+
+  reset() {
+    for (const key of [...listeners.keys()]) {
+      if (!key.startsWith("presence:")) continue;
+      slices.delete(key);
+      listeners.get(key)?.forEach((fn) => fn());
+    }
   },
 };
 

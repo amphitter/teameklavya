@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSocket } from "@/lib/socket";
-import { inbox, threads, unread, type ConversationRow } from "@/lib/messages/store";
+import { inbox, presence, threads, unread, type ConversationRow } from "@/lib/messages/store";
 import type { ChatMessage } from "@/hooks/use-social";
 import { refreshUnread } from "@/hooks/use-messages";
 
@@ -50,7 +50,9 @@ interface MessageEvent {
   conversationId: string;
   message: WireMessage;
   self?: boolean;
-  preview?: { text: string; at: string; senderId: string };
+  preview?: { text: string; at: string; senderId: string; senderName?: string };
+  /** Team name, present only for team conversations. */
+  teamName?: string;
   recipientArchived?: boolean;
   senderArchived?: boolean;
 }
@@ -68,9 +70,28 @@ export type DmConnection = "connecting" | "online" | "offline";
 let activeConversationId: string | null = null;
 const activeSubs = new Set<(id: string | null) => void>();
 
+/* ── Presence watching (Part 11 §4) ─────────────────────────────────────
+ * Presence is broadcast ONLY to sockets that asked to watch a conversation,
+ * which is why opening a thread must announce itself and leaving must
+ * withdraw. Without this the header would never learn a peer came online. */
+let watchedConversationId: string | null = null;
+
+function emitWatch(id: string | null, watched: boolean) {
+  if (!id) return;
+  const socket = getSocket();
+  if (!socket.connected) return;
+  socket.emit(watched ? "dm:watch" : "dm:unwatch", { conversationId: id });
+}
+
 export function setActiveConversation(id: string | null) {
   if (activeConversationId === id) return;
   activeConversationId = id;
+  // Withdraw the old watch BEFORE registering the new one, so a fast
+  // navigation between two threads cannot leave a stale subscription
+  // delivering presence for a conversation that is no longer on screen.
+  if (watchedConversationId && watchedConversationId !== id) emitWatch(watchedConversationId, false);
+  watchedConversationId = id;
+  emitWatch(id, true);
   activeSubs.forEach((fn) => fn(id));
 }
 
@@ -130,6 +151,8 @@ function attachSocketHandlers() {
           text: payload.preview?.text ?? msg.content ?? "",
           at: payload.preview?.at ?? msg.createdAt,
           mine: Boolean(payload.self),
+          // Part 11 — a team row must say WHO spoke, not just what was said.
+          senderName: payload.preview?.senderName ?? null,
         },
         updatedAt: payload.preview?.at ?? msg.createdAt,
         unreadCount: payload.self
@@ -145,7 +168,24 @@ function attachSocketHandlers() {
     // Typing only ever matters for the thread on screen. Writing another
     // key would wake a component that cannot display it.
     if (activeConversationId !== payload.conversationId) return;
-    threads.typing(payload.conversationId, payload.typing ? Date.now() + TYPING_TTL_MS : 0);
+    threads.typing(
+      payload.conversationId,
+      String(payload.userId),
+      payload.typing ? Date.now() + TYPING_TTL_MS : 0
+    );
+  });
+
+  /* Presence (Part 11 §4).
+   *
+   * Pushed only to watchers of a conversation the user belongs to, so
+   * receiving one is already proof that it is relevant — no filtering by
+   * membership is needed here, and no peer's activity leaks to a stranger. */
+  socket.on("dm:presence", (payload: { userId: string; online: boolean; lastSeenAt?: string | null }) => {
+    if (!payload?.userId) return;
+    presence.set(String(payload.userId), {
+      online: Boolean(payload.online),
+      lastSeenAt: payload.lastSeenAt ?? null,
+    });
   });
 
   socket.on("dm:read", (payload: { conversationId: string; readerId: string; at: string }) => {
@@ -193,11 +233,17 @@ export function useDmSocket(): { connection: DmConnection } {
     const socket = getSocket();
 
     const onConnect = () => mounted.current && setConnection("online");
+    /* A reconnect starts a NEW socket with no subscriptions. Without
+       re-announcing the watch, presence would silently stop updating for the
+       rest of the session — the failure mode where everything looks fine
+       until someone goes offline and the label never changes. */
+    const onReconnectWatch = () => emitWatch(watchedConversationId, true);
     const onDisconnect = () => mounted.current && setConnection("offline");
     const onReconnectAttempt = () => mounted.current && setConnection("connecting");
 
     setConnection(socket.connected ? "online" : "connecting");
     socket.on("connect", onConnect);
+    socket.on("connect", onReconnectWatch);
     socket.on("disconnect", onDisconnect);
     socket.io.on("reconnect_attempt", onReconnectAttempt);
 
@@ -237,6 +283,7 @@ export function useDmSocket(): { connection: DmConnection } {
       mounted.current = false;
       listenerCount.n -= 1;
       socket.off("connect", onConnect);
+      socket.off("connect", onReconnectWatch);
       socket.off("disconnect", onDisconnect);
       socket.io.off("reconnect_attempt", onReconnectAttempt);
       socket.off("connect", onReconnected);

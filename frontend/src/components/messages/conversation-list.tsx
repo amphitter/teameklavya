@@ -10,21 +10,82 @@
  */
 
 import { memo, useCallback } from "react";
-import { Archive, BellOff, Loader2, MessageCircle, Search, X } from "lucide-react";
+import { Archive, BellOff, Loader2, MessageCircle, Plus, Search, Users, X } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { UserAvatar } from "@/components/user-avatar";
 import { handleOf, timeAgo } from "@/lib/social";
+import { PresenceDot } from "@/components/messages/presence-dot";
 import type { ConversationRow } from "@/lib/messages/store";
 
-export type InboxTab = "all" | "unread" | "groups" | "archived";
+export type InboxTab = "all" | "unread" | "teams" | "archived";
 
+/* Part 11 §5 — TEAMS, not groups. `teams` is the filter over the rows we
+ * already have (type === "team"), so tapping it costs no request. */
 export const INBOX_TABS: { id: InboxTab; label: string }[] = [
   { id: "all", label: "All" },
   { id: "unread", label: "Unread" },
-  { id: "groups", label: "Groups" },
+  { id: "teams", label: "Teams" },
   { id: "archived", label: "Archived" },
 ];
+
+/** Is this row a team? Absent type means a row cached before teams existed. */
+export function isTeamRow(row: ConversationRow) {
+  return row.type === "team";
+}
+
+/** Display name for either kind of row. */
+function rowName(row: ConversationRow) {
+  if (isTeamRow(row)) return row.name || "Team";
+  return `${row.other?.firstName || ""} ${row.other?.lastName || ""}`.trim() || "Unknown";
+}
+
+/**
+ * Team avatar: the team's own picture when it has one, otherwise a neutral
+ * people glyph. Never a fake face — a team is not a person (§51).
+ */
+function RowAvatar({ row, size = 48 }: { row: ConversationRow; size?: number }) {
+  if (!isTeamRow(row)) {
+    return (
+      <div className="relative shrink-0">
+        <UserAvatar user={row.other} size={size} />
+        {/* Presence under the avatar. Renders nothing when offline. */}
+        <PresenceDot userId={row.other?._id} />
+      </div>
+    );
+  }
+  if (row.avatar) {
+    return (
+      <div className="relative shrink-0">
+        <UserAvatar user={{ firstName: row.name || "T", profile: { avatar: row.avatar } }} size={size} />
+      </div>
+    );
+  }
+  return (
+    <div
+      className="flex shrink-0 items-center justify-center rounded-full bg-primary-light text-primary"
+      style={{ width: size, height: size }}
+      aria-hidden
+    >
+      <Users className="h-5 w-5" />
+    </div>
+  );
+}
+
+/**
+ * Second line of a row.
+ * A team must say WHO spoke — "Ben: standup at 6" — otherwise a busy team
+ * reads as a wall of unattributed text.
+ */
+function rowPreview(row: ConversationRow) {
+  if (!row.lastMessage) return isTeamRow(row) ? "No messages yet" : `@${handleOf(row.other)} — say hi`;
+  const who = row.lastMessage.mine
+    ? "You"
+    : isTeamRow(row)
+      ? row.lastMessage.senderName || ""
+      : "";
+  return `${who ? `${who}: ` : ""}${row.lastMessage.text}`;
+}
 
 /* ── One row ────────────────────────────────────────────────────────────── */
 
@@ -36,7 +97,8 @@ interface RowProps {
 
 const ConversationItem = memo(function ConversationItem({ row, active, onOpen }: RowProps) {
   const unread = (row.unreadCount || 0) > 0;
-  const name = `${row.other?.firstName || ""} ${row.other?.lastName || ""}`.trim() || "Unknown";
+  const name = rowName(row);
+  const team = isTeamRow(row);
 
   return (
     <li>
@@ -53,7 +115,7 @@ const ConversationItem = memo(function ConversationItem({ row, active, onOpen }:
         )}
       >
         <div className="relative shrink-0">
-          <UserAvatar user={row.other} size={48} />
+          <RowAvatar row={row} />
           {row.archived ? (
             <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-surface-container-lowest bg-on-surface-variant">
               <Archive className="h-2 w-2 text-white" aria-hidden />
@@ -67,6 +129,9 @@ const ConversationItem = memo(function ConversationItem({ row, active, onOpen }:
                 alone is not a reliable signal for every user. */}
             <span className={cn("truncate text-[14px] text-on-surface", unread ? "font-bold" : "font-semibold")}>
               {name}
+              {team && row.memberCount ? (
+                <span className="ml-1.5 text-[11px] font-medium text-on-surface-variant">{row.memberCount}</span>
+              ) : null}
             </span>
             <span className="shrink-0 text-[11px] tabular-nums text-on-surface-variant">
               {row.lastMessage?.at ? timeAgo(row.lastMessage.at) : ""}
@@ -79,9 +144,7 @@ const ConversationItem = memo(function ConversationItem({ row, active, onOpen }:
                 unread ? "font-semibold text-on-surface" : "text-on-surface-variant"
               )}
             >
-              {row.lastMessage
-                ? `${row.lastMessage.mine ? "You: " : ""}${row.lastMessage.text}`
-                : `@${handleOf(row.other)} — say hi`}
+              {rowPreview(row)}
             </span>
             {unread ? (
               <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-white">
@@ -135,6 +198,8 @@ export interface ConversationListProps {
   searchResults?: ConversationRow[];
   /** Rendered as a link on desktop, as a router push on mobile. */
   linkPrefix?: string;
+  /** Part 11 — opens the create-team sheet. Hidden when the caller has none. */
+  onCreateTeam?: () => void;
 }
 
 export function ConversationList({
@@ -154,6 +219,7 @@ export function ConversationList({
   searching,
   searchResults,
   linkPrefix,
+  onCreateTeam,
 }: ConversationListProps) {
   const shown = search.trim() ? searchResults || [] : rows;
 
@@ -171,10 +237,21 @@ export function ConversationList({
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Header: title + search. No giant hero, no stats (§3). */}
       <div className="shrink-0 border-b border-outline-variant px-3 pb-2 pt-3">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex items-center justify-between gap-2">
           <h1 className="text-[20px] font-bold tracking-tight text-on-surface">
-            {tab === "archived" ? "Archived" : "Messages"}
+            {tab === "archived" ? "Archived" : tab === "teams" ? "Teams" : "Messages"}
           </h1>
+          {/* The one place a team is created, right where teams are listed. */}
+          {onCreateTeam ? (
+            <button
+              type="button"
+              onClick={onCreateTeam}
+              className="flex h-9 shrink-0 touch-manipulation items-center gap-1.5 rounded-full bg-primary px-3 text-[13px] font-semibold text-white active:opacity-90"
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+              New team
+            </button>
+          ) : null}
         </div>
 
         <div className="relative">
@@ -209,23 +286,19 @@ export function ConversationList({
           className="mt-2 flex gap-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {INBOX_TABS.map((t) => {
-            const disabled = t.id === "groups";
             return (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
                 aria-selected={tab === t.id}
-                disabled={disabled}
-                title={disabled ? "Group chats are not supported yet" : undefined}
-                onClick={() => !disabled && onTabChange(t.id)}
+                onClick={() => onTabChange(t.id)}
                 className={cn(
                   "relative shrink-0 touch-manipulation rounded-full px-3 text-[13px] font-semibold transition-colors",
                   "min-h-[32px] py-1.5",
                   tab === t.id
                     ? "bg-primary text-white"
-                    : "bg-surface-container text-on-surface-variant hover:text-on-surface",
-                  disabled && "cursor-not-allowed opacity-40"
+                    : "bg-surface-container text-on-surface-variant hover:text-on-surface"
                 )}
               >
                 {t.label}
@@ -297,11 +370,12 @@ export function ConversationList({
 /** Non-interactive inner content, for the desktop `<Link>` variant. */
 function ConversationRowInner({ row, active }: { row: ConversationRow; active: boolean }) {
   const unread = (row.unreadCount || 0) > 0;
-  const name = `${row.other?.firstName || ""} ${row.other?.lastName || ""}`.trim() || "Unknown";
+  const name = rowName(row);
+  const team = isTeamRow(row);
   return (
     <div className={cn("flex w-full items-center gap-3", active && "font-semibold")}>
       <div className="relative shrink-0">
-        <UserAvatar user={row.other} size={48} />
+        <RowAvatar row={row} />
         {row.archived ? (
           <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-surface-container-lowest bg-on-surface-variant">
             <Archive className="h-2 w-2 text-white" aria-hidden />
@@ -312,6 +386,9 @@ function ConversationRowInner({ row, active }: { row: ConversationRow; active: b
         <div className="flex items-baseline justify-between gap-2">
           <span className={cn("truncate text-[14px] text-on-surface", unread ? "font-bold" : "font-semibold")}>
             {name}
+            {team && row.memberCount ? (
+              <span className="ml-1.5 text-[11px] font-medium text-on-surface-variant">{row.memberCount}</span>
+            ) : null}
           </span>
           <span className="shrink-0 text-[11px] tabular-nums text-on-surface-variant">
             {row.lastMessage?.at ? timeAgo(row.lastMessage.at) : ""}
@@ -324,9 +401,7 @@ function ConversationRowInner({ row, active }: { row: ConversationRow; active: b
               unread ? "font-semibold text-on-surface" : "text-on-surface-variant"
             )}
           >
-            {row.lastMessage
-              ? `${row.lastMessage.mine ? "You: " : ""}${row.lastMessage.text}`
-              : `@${handleOf(row.other)} — say hi`}
+            {rowPreview(row)}
           </span>
           {unread ? (
             <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-white">
@@ -358,6 +433,17 @@ function EmptyInbox({ tab, hasQuery }: { tab: InboxTab; hasQuery: boolean }) {
         <p className="text-[14px] font-bold text-on-surface">No archived conversations</p>
         <p className="text-[12px] text-on-surface-variant">
           Conversations you archive are kept here — never deleted.
+        </p>
+      </div>
+    );
+  }
+  if (tab === "teams") {
+    return (
+      <div className="flex flex-col items-center gap-1 px-6 py-12 text-center">
+        <Users className="h-7 w-7 text-on-surface-variant/50" aria-hidden />
+        <p className="text-[14px] font-bold text-on-surface">No teams yet</p>
+        <p className="max-w-[16rem] text-[12px] text-on-surface-variant">
+          Create a team and add your followers, the people you follow, or anyone on EventHub.
         </p>
       </div>
     );

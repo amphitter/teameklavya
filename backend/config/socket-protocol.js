@@ -25,6 +25,8 @@ const EVENTS = {
    * one socket server but never share rooms or handlers. */
   C_DM_TYPING: "dm:typing", // { conversationId, typing } — socket only, never persisted (§13)
   C_DM_READ: "dm:read", // { conversationId } — batched read announcement (§14)
+  C_DM_WATCH: "dm:watch", // Part 11 { conversationId } — "this thread is on screen"
+  C_DM_UNWATCH: "dm:unwatch", // Part 11 { conversationId }
 
   /* ── organizer → server (authorized: owner/admin/moderator only) ── */
   O_EVENT_START: "event:start", // { eventId }
@@ -78,6 +80,7 @@ const EVENTS = {
   S_DM_TYPING: "dm:typing", // Part 10 { conversationId, userId, typing }
   S_DM_READ: "dm:read", // Part 10 { conversationId, readerId, at }
   S_DM_DELETED: "dm:deleted", // Part 10 { conversationId, messageId }
+  S_DM_PRESENCE: "dm:presence", // Part 11 { userId, online, lastSeenAt }
 
   S_ERROR: "error", // { code, message } — structured, never stack traces (§81)
 };

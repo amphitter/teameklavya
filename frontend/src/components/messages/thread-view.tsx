@@ -113,6 +113,14 @@ export interface ThreadViewProps {
   loading: boolean;
   error?: boolean;
   typing?: boolean;
+  /** What the typing bubble says (a team names the person typing). */
+  typingLabel?: string;
+  /**
+   * Show the sender's name above a group of received messages. On in a team
+   * (who said it is the point); off in a direct chat, where there are only
+   * ever two possible authors and the name is noise.
+   */
+  showSenderNames?: boolean;
   onLoadOlder: () => void;
   onRetryLoad?: () => void;
   onReact?: (messageId: string, emoji: string) => void;
@@ -133,6 +141,8 @@ export function ThreadView({
   loading,
   error,
   typing,
+  typingLabel,
+  showSenderNames = false,
   onLoadOlder,
   onRetryLoad,
   onReact,
@@ -364,6 +374,7 @@ export function ThreadView({
               showDay={row.showDay}
               dayLabel={row.dayLabel}
               quoted={row.quoted}
+              showSenderName={showSenderNames}
               timeLabel={timeOf(row.message.createdAt)}
               onReact={onReact ? (e) => onReact(row.message._id, e) : undefined}
               onReply={onReply ? () => onReply(row.message) : undefined}
@@ -379,7 +390,7 @@ export function ThreadView({
 
         {virtual ? <div style={{ height: padBottom }} aria-hidden /> : null}
 
-        {typing ? <TypingBubble name={otherName} /> : null}
+        {typing ? <TypingBubble name={typingLabel || otherName} /> : null}
       </div>
     </div>
   );

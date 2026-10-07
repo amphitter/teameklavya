@@ -14,7 +14,18 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Archive, ArchiveRestore, BellOff, BellRing, Info, Loader2, WifiOff } from "lucide-react";
+import {
+  ArrowLeft,
+  Archive,
+  ArchiveRestore,
+  BellOff,
+  BellRing,
+  Info,
+  Loader2,
+  UserPlus,
+  Users,
+  WifiOff,
+} from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { api } from "@/utils/api";
@@ -26,6 +37,8 @@ import { handleOf } from "@/lib/social";
 import { inbox, threads, type ConversationRow } from "@/lib/messages/store";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { refreshUnread, useThread } from "@/hooks/use-messages";
+import { PresenceDot, PresenceText } from "@/components/messages/presence-dot";
+import { TeamInfoSheet } from "@/components/messages/team-info-sheet";
 import { dropCachedThread } from "@/lib/messages/cache";
 import { useTypingEmitter, type DmConnection } from "@/hooks/use-dm-socket";
 import { compressFor } from "@/utils/compress-image";
@@ -40,9 +53,19 @@ export interface ThreadPanelProps {
   connection: DmConnection;
   /** Desktop renders the "choose a conversation" placeholder instead. */
   emptyState?: React.ReactNode;
+  /** Part 11 — reachable from inside a conversation, not only from the inbox. */
+  onCreateTeam?: () => void;
 }
 
-export function ThreadPanel({ conversationId, onBack, fallback, connection, emptyState }: ThreadPanelProps) {
+export function ThreadPanel({
+  conversationId,
+  onBack,
+  fallback,
+  connection,
+  emptyState,
+  onCreateTeam,
+}: ThreadPanelProps) {
+  const [teamInfoOpen, setTeamInfoOpen] = useState(false);
   const thread = useThread(conversationId);
   const { onInput, stop } = useTypingEmitter(conversationId);
   const { user } = useSessionUser();
@@ -54,7 +77,16 @@ export function ThreadPanel({ conversationId, onBack, fallback, connection, empt
   const markedRef = useRef<string | null>(null);
 
   const other = thread.other || fallback?.other || null;
-  const name = `${other?.firstName || ""} ${other?.lastName || ""}`.trim() || "Conversation";
+  /* A team has a name and a roster; a direct chat has a person. `fallback` is
+   * the inbox row, so the header is right on the first frame even before the
+   * thread request lands. */
+  const isTeam = thread.type === "team" || fallback?.type === "team";
+  const teamName = thread.name || fallback?.name || "Team";
+  const memberCount = thread.members.length || fallback?.memberCount || 0;
+  const name = isTeam
+    ? teamName
+    : `${other?.firstName || ""} ${other?.lastName || ""}`.trim() || "Conversation";
+  const peerId = isTeam ? null : other?._id;
 
   /* Clear the unread badge for this thread as soon as it is on screen, and
      once more whenever a newer incoming message lands. One batched call each
@@ -200,6 +232,7 @@ export function ThreadPanel({ conversationId, onBack, fallback, connection, empt
   }
 
   return (
+    <>
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`Conversation with ${name}`}>
       {/* ── Header (§2) ───────────────────────────────────────────────── */}
       <header className="flex shrink-0 items-center gap-2 border-b border-outline-variant bg-surface-container-lowest px-2 py-1.5 sm:px-3">
@@ -213,23 +246,47 @@ export function ThreadPanel({ conversationId, onBack, fallback, connection, empt
         </button>
 
         <Link
-          href={other?.username ? `/profile/${other.username}` : "#"}
+          href={isTeam ? "#" : other?.username ? `/profile/${other.username}` : "#"}
           className="flex min-w-0 flex-1 items-center gap-2.5"
         >
-          <UserAvatar user={other} size={38} />
+          {isTeam ? (
+            <TeamAvatar name={teamName} avatar={thread.avatar || fallback?.avatar || null} members={thread.members} size={38} />
+          ) : (
+            <div className="relative shrink-0">
+              <UserAvatar user={other} size={38} />
+              <PresenceDot userId={peerId} size={11} />
+            </div>
+          )}
           <div className="min-w-0">
             <p className="truncate text-[15px] font-bold leading-tight text-on-surface">{name}</p>
             <p className="truncate text-[11px] leading-tight text-on-surface-variant">
               {thread.isPeerTyping ? (
-                <span className="text-primary">typing…</span>
+                <span className="text-primary">
+                  {typingLabel(thread.typingNames, isTeam)}
+                </span>
+              ) : isTeam ? (
+                `${memberCount} ${memberCount === 1 ? "member" : "members"}`
               ) : (
-                `@${handleOf(other)}`
+                /* Part 11 §4 — "Active now" / "Last seen 5m ago" replaces the
+                   bare @handle whenever presence is actually known. */
+                <PresenceText userId={peerId} onlineClassName="text-primary" />
               )}
             </p>
           </div>
         </Link>
 
         <div className="relative flex items-center">
+          {onCreateTeam ? (
+            <button
+              type="button"
+              onClick={onCreateTeam}
+              className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-lg text-on-surface-variant active:bg-surface-container sm:h-9 sm:w-9"
+              aria-label="Create a team"
+              title="Create a team"
+            >
+              <UserPlus className="h-5 w-5" />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onOpenMenu}
@@ -267,12 +324,25 @@ export function ThreadPanel({ conversationId, onBack, fallback, connection, empt
                   {thread.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
                   {thread.archived ? "Move to inbox" : "Archive"}
                 </button>
-                <Link
-                  href={other?.username ? `/profile/${other.username}` : "#"}
-                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-on-surface hover:bg-surface-container"
-                >
-                  <Info className="h-4 w-4" /> View profile
-                </Link>
+                {isTeam ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setTeamInfoOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-on-surface hover:bg-surface-container"
+                  >
+                    <Users className="h-4 w-4" /> Team info and members
+                  </button>
+                ) : (
+                  <Link
+                    href={other?.username ? `/profile/${other.username}` : "#"}
+                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-on-surface hover:bg-surface-container"
+                  >
+                    <Info className="h-4 w-4" /> View profile
+                  </Link>
+                )}
               </div>
             </>
           ) : null}
@@ -305,12 +375,16 @@ export function ThreadPanel({ conversationId, onBack, fallback, connection, empt
         conversationId={conversationId}
         messages={thread.messages}
         currentUserId={myId}
-        otherName={other?.firstName || undefined}
+        otherName={isTeam ? teamName : other?.firstName || undefined}
+        /* Part 11 §5 — inside a team every received bubble must say who wrote
+           it; inside a direct chat the two sides are already unambiguous. */
+        showSenderNames={isTeam}
         hasMore={thread.hasMore}
         fetchingOlder={thread.fetchingOlder}
         loading={thread.loading}
         error={thread.error}
         typing={thread.isPeerTyping}
+        typingLabel={typingLabel(thread.typingNames, isTeam)}
         onLoadOlder={thread.loadOlder}
         onRetryLoad={() => {
           // Drop the cached copy so the retry is a true first load, not a
@@ -345,8 +419,89 @@ export function ThreadPanel({ conversationId, onBack, fallback, connection, empt
             : null
         }
         onCancelReply={() => setReplyTo(null)}
-        placeholder={`Message ${other?.firstName || ""}…`.trim()}
+        placeholder={isTeam ? `Message ${teamName}…` : `Message ${other?.firstName || ""}…`.trim()}
       />
     </section>
+
+    {/* Team info — mounted at the panel level so it is reachable from the
+        header menu at every width, and so leaving a team can send the user
+        straight back to the inbox. */}
+    {isTeam ? (
+      <TeamInfoSheet
+        open={teamInfoOpen}
+        conversationId={conversationId}
+        name={teamName}
+        onClose={() => setTeamInfoOpen(false)}
+        onLeft={() => {
+          // The team is gone from this user's account: drop the thread and the
+          // row so nothing stale can render behind the navigation.
+          setTeamInfoOpen(false);
+          if (conversationId) {
+            threads.reset(conversationId);
+            inbox.remove(conversationId);
+          }
+          onBack?.();
+        }}
+      />
+    ) : null}
+    </>
+  );
+}
+
+/**
+ * "typing…" for a direct chat; "Ana is typing…" inside a team, because in a
+ * team the useful question is WHO, not merely that somebody is.
+ */
+function typingLabel(names: string[], isTeam: boolean): string {
+  if (!names.length) return "typing…";
+  if (names.length === 1) return isTeam ? `${names[0]} is typing…` : "typing…";
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  return `${names[0]} and ${names.length - 1} others are typing…`;
+}
+
+/** Team avatar: the team's picture, or a face-pile of up to three members. */
+function TeamAvatar({
+  name,
+  avatar,
+  members,
+  size,
+}: {
+  name: string;
+  avatar: string | null;
+  members: { _id: string; firstName?: string; lastName?: string; username?: string; profile?: { avatar?: string } }[];
+  size: number;
+}) {
+  if (avatar) return <UserAvatar user={{ firstName: name, profile: { avatar } }} size={size} />;
+  const faces = members.slice(0, 3);
+  if (faces.length >= 2) {
+    /* Real members, real avatars — a roster the user is actually in, not a
+       decorative tile. */
+    return (
+      <span className="relative shrink-0" style={{ width: size, height: size }} aria-hidden>
+        {faces.slice(0, 3).map((m, i) => (
+          <span
+            key={m._id}
+            className="absolute rounded-full ring-2 ring-surface-container-lowest"
+            style={{
+              width: size * 0.62,
+              height: size * 0.62,
+              top: i === 0 ? 0 : i === 1 ? size * 0.38 : size * 0.19,
+              left: i === 0 ? 0 : i === 1 ? 0 : size * 0.38,
+            }}
+          >
+            <UserAvatar user={m} size={Math.round(size * 0.62)} />
+          </span>
+        ))}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-full bg-primary-light text-primary"
+      style={{ width: size, height: size }}
+      aria-hidden
+    >
+      <Users className="h-5 w-5" />
+    </span>
   );
 }

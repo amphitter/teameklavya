@@ -88,5 +88,48 @@ sec('§10 — patchMessage never invents a row');
 S.threads.patchMessage('t4', 'ghost', { content: 'x' });
 ok(S.threads.get('t4').messages.every((m) => m._id !== 'ghost'), 'patching an unknown id is a no-op');
 
+sec('Part 11 §4 — presence is per user, and an unchanged state does not churn');
+S.presence.set('u1', { online: true, lastSeenAt: null });
+ok(S.presence.get('u1').online === true, 'a user can be marked active');
+const before = S.presence.get('u1');
+S.presence.set('u1', { online: true, lastSeenAt: null });
+ok(S.presence.get('u1') === before, 'repeating the SAME state keeps the slice reference (no re-render)');
+S.presence.set('u1', { online: false, lastSeenAt: T(30) });
+ok(S.presence.get('u1').online === false && S.presence.get('u1').lastSeenAt === T(30), 'going offline records the last-seen moment');
+ok(S.presence.get('u2') === null, 'another user is untouched by it');
+
+sec('Part 11 §4 — a conversation list seeds presence, teams have none');
+S.presence.seed([
+  { _id: 'c9', other: { _id: 'u3' }, presence: { online: true, lastSeenAt: null }, lastMessage: null, updatedAt: T(0), unreadCount: 0 },
+  { _id: 'c10', type: 'team', other: null, presence: { online: true, lastSeenAt: null }, lastMessage: null, updatedAt: T(0), unreadCount: 0 },
+]);
+ok(S.presence.get('u3')?.online === true, 'a direct row seeds its peer');
+ok(S.presence.get('undefined') === null, 'a team row seeds nobody (presence is meaningless for a roster)');
+
+sec('Part 11 §3 — typing is tracked per user, so a team can show several at once');
+S.threads.set('t9', { ...S.threads.get('t9'), messages: [], typing: {} });
+S.threads.typing('t9', 'a', 500);
+ok(S.threads.get('t9').typing.a === 500, 'the first peer is recorded');
+S.threads.typing('t9', 'b', 600);
+ok(Object.keys(S.threads.get('t9').typing).length === 2, 'a second peer is recorded alongside, not instead');
+S.threads.typing('t9', 'a', 0);
+ok(S.threads.get('t9').typing.a === undefined, 'one peer stopping removes only their entry');
+ok(S.threads.get('t9').typing.b === 600, 'the other peer is STILL typing (regression: a shared timer cancelled it)');
+const typingRef = S.threads.get('t9').typing;
+S.threads.typing('t9', 'zz', 0);
+ok(S.threads.get('t9').typing === typingRef, 'clearing someone who was never typing does not touch the slice');
+
+sec('Part 11 §5 — teams are rows like any other, and leaving drops the row');
+S.inbox.set(false, [
+  { _id: 'd1', type: 'direct', other: { _id: 'p1' }, lastMessage: null, updatedAt: T(0), unreadCount: 0 },
+  { _id: 'tm1', type: 'team', name: 'Robotics', memberCount: 4, other: null, lastMessage: { text: 'hi', at: T(1), mine: false, senderName: 'Ben' }, updatedAt: T(1), unreadCount: 0 },
+]);
+ok(S.inbox.get(false).filter((r) => r.type === 'team').length === 1, 'a team lives in the same list as a direct chat');
+ok(S.inbox.get(false)[1].lastMessage.senderName === 'Ben', 'a team row carries WHO spoke');
+S.inbox.remove('tm1');
+ok(S.inbox.get(false).length === 1 && S.inbox.get(false)[0]._id === 'd1', 'leaving a team removes exactly that row');
+S.inbox.remove('tm1');
+ok(S.inbox.get(false).length === 1, 'removing it twice is a no-op');
+
 console.log(`\n${"═".repeat(52)}\n  MESSAGES STORE: ${pass} passed, ${fail} failed\n${"═".repeat(52)}`);
 process.exit(fail ? 1 : 0);

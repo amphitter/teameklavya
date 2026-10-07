@@ -89,6 +89,11 @@ const userSchema = new mongoose.Schema({
   socialSettings: { type: socialSettingsSchema, default: () => ({}) },
 
   // Email verification fields
+  /* Part 11 — presence. Written from the socket layer, throttled (see
+   * dm-realtime.service), never from a request handler: a user is "away" the
+   * moment their last socket closes, which no HTTP call can observe. */
+  lastSeenAt: { type: Date, default: null },
+
   emailVerified: { type: Boolean, default: false },
   emailVerifyToken: { type: String },
   emailVerifyExpires: { type: Date },

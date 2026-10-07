@@ -3,11 +3,47 @@ const mongoose = require("mongoose");
 /** 1:1 direct-message conversation between exactly two users. */
 const conversationSchema = new mongoose.Schema(
   {
+    /* Part 11 — a conversation is either a 1:1 direct chat or a TEAM.
+     *
+     * The product calls these "teams", not "groups": a team is something you
+     * assemble from your followers, the people you follow, or anyone else on
+     * the app, and it is a named, persistent set of people. The wire format
+     * stays `type` so nothing downstream has to learn a new word for an old
+     * concept, but every label a user reads says "team". */
+    type: { type: String, enum: ["direct", "team"], default: "direct", required: true },
+
     participants: {
       type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-      validate: { validator: (v) => v.length === 2, message: "A conversation needs exactly 2 participants" },
+      validate: [
+        {
+          // A direct chat is exactly two people — the invariant the pair key
+          // and every "other participant" lookup depends on.
+          validator(v) {
+            return this.type !== "direct" || v.length === 2;
+          },
+          message: "A direct conversation needs exactly 2 participants",
+        },
+        {
+          // A team needs at least its owner plus one other member; otherwise
+          // it is not a conversation, it is a note to self.
+          validator(v) {
+            return this.type !== "team" || v.length >= 2;
+          },
+          message: "A team needs at least 2 members",
+        },
+      ],
       required: true,
     },
+
+    /* ── Team-only fields ───────────────────────────────────────────────
+     * Undefined on direct conversations, which keeps every existing query
+     * and every existing document valid. */
+    name: { type: String, default: "", maxlength: 80 },
+    avatar: { type: String, default: "" },
+    /** Sole owner. Only the owner may delete or transfer; admins may manage members. */
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    /** Members who can add/remove others without being the owner. */
+    admins: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], default: [] },
     lastMessage: {
       text: { type: String, maxlength: 1000 },
       sender: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
@@ -49,8 +85,15 @@ conversationSchema.pre("save", function (next) {
   // Recomputed (not just set on insert) so a document written before this
   // field existed gains its key the first time it is saved through mongoose.
   // The documented backfill is scripts/backfill-conversation-keys.js.
-  if (this.participants?.length === 2) {
+  /* Only DIRECT conversations get a pair key. A team's identity is its
+   * document, not its membership — a team's roster changes over time, and
+   * deriving a key from it would make the unique index fight every
+   * membership change. Leaving it undefined also keeps the partial unique
+   * index (which filters on a string value) from applying to teams at all. */
+  if (this.type === "direct" && this.participants?.length === 2) {
     this.participantsKey = pairKeyOf(this.participants[0], this.participants[1]);
+  } else {
+    this.participantsKey = undefined;
   }
   next();
 });
@@ -97,6 +140,8 @@ conversationSchema.index(
  * is gone: this compound index has `participants` as its prefix, so it
  * serves the same membership lookups while also carrying the sort key. */
 conversationSchema.index({ participants: 1, updatedAt: -1 });
+/* Team chat search matches on the team name (§25 extends to teams). */
+conversationSchema.index({ name: 1 });
 
 const Conversation = mongoose.model("Conversation", conversationSchema);
 Conversation.pairKeyOf = pairKeyOf;

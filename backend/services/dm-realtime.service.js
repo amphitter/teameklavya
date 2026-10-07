@@ -48,6 +48,114 @@ let io = null;
 /** userId → count of live sockets, so we can tell "app is open" from "gone". */
 const connectedUsers = new Map();
 
+/* ── Presence (Part 11 — "active / last seen") ────────────────────────────
+ *
+ * WHY THE WRITE IS THROTTLED AND THE STATE IS NOT
+ *   "Online" is derived from live sockets and lives only in memory — it is
+ *   true the instant a socket opens and false the instant the last one closes,
+ *   with no database involved. `lastSeenAt` is the durable half, and it is
+ *   written at most once a minute per connected user plus once on the final
+ *   disconnect. A per-connect write would turn every reconnect (flaky mobile
+ *   networks do this constantly) into a row update.
+ */
+const lastSeenWriteAt = new Map(); // userId → epoch ms of last persisted write
+const LAST_SEEN_WRITE_INTERVAL_MS = 60_000;
+
+/* conversationId → Set<userId> currently watching (thread open on screen).
+ * userId → Set<conversationId> they are watching — the reverse index, so a
+ * presence change can find every watcher it concerns without scanning. */
+const watchRegistry = new Map();
+const watchingBy = new Map();
+
+function recordLastSeen(userId, { force = false } = {}) {
+  const id = String(userId);
+  const now = Date.now();
+  if (!force && now - (lastSeenWriteAt.get(id) || 0) < LAST_SEEN_WRITE_INTERVAL_MS) return;
+  lastSeenWriteAt.set(id, now);
+  User.updateOne({ _id: id }, { $set: { lastSeenAt: new Date(now) } }).catch((e) =>
+    console.error("lastSeen write failed:", e.message)
+  );
+}
+
+/** Is this user holding at least one open socket right now? */
+function isUserOnline(userId) {
+  return connectedUsers.has(String(userId));
+}
+
+/** { online, lastSeenAt } for a user — memory first, then the stored value. */
+async function presenceOf(userId) {
+  const id = String(userId);
+  if (connectedUsers.has(id)) return { online: true, lastSeenAt: null };
+  const u = await User.findById(id).select("lastSeenAt").lean();
+  return { online: false, lastSeenAt: u?.lastSeenAt || null };
+}
+
+/**
+ * Tell everyone who is looking at a conversation that one of its members
+ * changed presence.
+ *
+ * Scoped deliberately: only watchers of conversations the user actually
+ * belongs to are notified. Broadcasting presence to every connected client
+ * would leak the activity pattern of every user to every other user, and
+ * would cost one emit per socket per connect.
+ */
+function broadcastPresence(userId, online) {
+  const id = String(userId);
+  const conversations = watchingBy.get(id);
+  if (!conversations?.size) return;
+  const now = new Date();
+  for (const conversationId of conversations) {
+    const watchers = watchRegistry.get(conversationId);
+    if (!watchers?.size) continue;
+    for (const watcherId of watchers) {
+      if (watcherId === id) continue;
+      emitToUser(watcherId, EVENTS.S_DM_PRESENCE, {
+        userId: id,
+        online,
+        lastSeenAt: online ? null : now,
+      });
+    }
+  }
+}
+
+/** The user opened a conversation: start routing presence to them. */
+function watchConversation(socket, conversationId, participantIds) {
+  const me = String(socket.data?.user?.id || "");
+  if (!me || !conversationId) return;
+  const cid = String(conversationId);
+
+  if (!watchRegistry.has(cid)) watchRegistry.set(cid, new Set());
+  watchRegistry.get(cid).add(me);
+
+  if (!watchingBy.has(me)) watchingBy.set(me, new Set());
+  watchingBy.get(me).add(cid);
+
+  /* Register this user against the conversation's OTHER participants so that
+   * when any of them comes online or goes away, `broadcastPresence` can find
+   * this conversation from the reverse index. */
+  for (const pid of participantIds || []) {
+    const other = String(pid);
+    if (other === me) continue;
+    if (!watchingBy.has(other)) watchingBy.set(other, new Set());
+    watchingBy.get(other).add(cid);
+  }
+}
+
+function unwatchConversation(socket, conversationId) {
+  const me = String(socket.data?.user?.id || "");
+  if (!me) return;
+  const cid = conversationId ? String(conversationId) : null;
+  if (cid) {
+    watchRegistry.get(cid)?.delete(me);
+    if (!watchRegistry.get(cid)?.size) watchRegistry.delete(cid);
+    watchingBy.get(me)?.delete(cid);
+  } else {
+    // Socket went away entirely — drop every conversation it was watching.
+    for (const c of watchingBy.get(me) || []) watchRegistry.get(c)?.delete(me);
+    watchingBy.delete(me);
+  }
+}
+
 /** `${userId}:${conversationId}` → timeout handle for the typing expiry. */
 const typingTimers = new Map();
 
@@ -70,7 +178,14 @@ function joinUserRoom(socket) {
   const uid = socket.data?.user?.id;
   if (!uid) return null;
   socket.join(userRoomKey(uid));
+  const wasOffline = !connectedUsers.has(uid);
   connectedUsers.set(uid, (connectedUsers.get(uid) || 0) + 1);
+  // Only the FIRST socket of a user flips them online — opening a second tab
+  // must not re-announce them.
+  if (wasOffline) {
+    recordLastSeen(uid, { force: true });
+    broadcastPresence(uid, true);
+  }
   return userRoomKey(uid);
 }
 
@@ -78,13 +193,21 @@ function leaveUserRoom(socket) {
   const uid = socket.data?.user?.id;
   if (!uid) return;
   const next = (connectedUsers.get(uid) || 0) - 1;
-  if (next <= 0) connectedUsers.delete(uid);
-  else connectedUsers.set(uid, next);
+  if (next <= 0) {
+    connectedUsers.delete(uid);
+    // The durable half of presence. Written immediately because this is the
+    // last signal we get — there is no later request to piggyback on.
+    recordLastSeen(uid, { force: true });
+    broadcastPresence(uid, false);
+  } else {
+    connectedUsers.set(uid, next);
+  }
+  unwatchConversation(socket, null);
 }
 
 /** Is this user holding at least one open socket? (diagnostics + tests) */
 function isUserConnected(userId) {
-  return connectedUsers.has(String(userId));
+  return isUserOnline(userId);
 }
 
 /* ── Wire shapes ─────────────────────────────────────────────────────────
@@ -127,25 +250,39 @@ function emitToUser(userId, event, payload) {
  * other devices get it too, which is how a chat stays in sync across a phone
  * and a laptop.
  */
-function publishMessage({ conversation, message, recipientId, senderId }) {
-  const payload = {
+function publishMessage({ conversation, message, participantIds, senderId }) {
+  const ids = (participantIds || []).map(String);
+  /* The archived flag is PER RECIPIENT: the same event must tell each member
+   * "this thread is archived for you" without exposing anyone else's inbox
+   * (§24). With two participants that is one flag; with a team it is a
+   * per-recipient value, so the payload is built per recipient rather than
+   * shared and mutated. */
+  const archivedBy = (conversation.archivedBy || []).map(String);
+
+  const base = {
     conversationId: String(conversation._id),
     message: wireMessage(message),
-    // The archived flag is per-recipient: the same event must tell the
-    // recipient "this thread is archived for you" without telling the sender
-    // anything about the other person's inbox (§24).
-    recipientArchived: (conversation.archivedBy || []).some((m) => String(m) === String(recipientId)),
-    senderArchived: (conversation.archivedBy || []).some((m) => String(m) === String(senderId)),
-    // Preview for the inbox row, so a list update needs zero extra requests.
+    senderArchived: archivedBy.includes(String(senderId)),
+    // Present only for teams — the client labels the row from the sender.
+    teamName: conversation.type === "team" ? conversation.name || "" : undefined,
     preview: {
       text: (message.content || "Photo").slice(0, 200),
       at: message.createdAt || new Date(),
       senderId: String(senderId),
+      senderName: message.sender
+        ? `${message.sender.firstName || ""} ${message.sender.lastName || ""}`.trim()
+        : "",
     },
   };
-  emitToUser(recipientId, EVENTS.S_DM_MESSAGE, payload);
-  emitToUser(senderId, EVENTS.S_DM_MESSAGE, { ...payload, self: true });
-  return payload;
+
+  for (const pid of ids) {
+    emitToUser(pid, EVENTS.S_DM_MESSAGE, {
+      ...base,
+      self: pid === String(senderId),
+      recipientArchived: archivedBy.includes(pid),
+    });
+  }
+  return base;
 }
 
 /**
@@ -157,32 +294,36 @@ function publishMessage({ conversation, message, recipientId, senderId }) {
  * "typing…". The timer is keyed by user+conversation and reset on every
  * signal, so a continuously typing user keeps their indicator alive.
  */
-function publishTyping({ conversationId, fromUserId, toUserId, typing }) {
-  const key = `${toUserId}:${conversationId}`;
-  const existing = typingTimers.get(key);
-  if (existing) clearTimeout(existing);
-
-  emitToUser(toUserId, EVENTS.S_DM_TYPING, {
-    conversationId: String(conversationId),
+function publishTyping({ conversationId, fromUserId, toUserIds, typing }) {
+  const targets = (toUserIds || []).map(String);
+  const cid = String(conversationId);
+  const event = {
+    conversationId: cid,
     userId: String(fromUserId),
     typing: Boolean(typing),
-  });
+  };
 
-  if (typing) {
-    typingTimers.set(
-      key,
-      setTimeout(() => {
-        typingTimers.delete(key);
-        emitToUser(toUserId, EVENTS.S_DM_TYPING, {
-          conversationId: String(conversationId),
-          userId: String(fromUserId),
-          typing: false,
-          expired: true,
-        });
-      }, TYPING_TTL_MS)
-    );
-  } else {
-    typingTimers.delete(key);
+  for (const toUserId of targets) {
+    const key = `${toUserId}:${cid}`;
+    const existing = typingTimers.get(key);
+    if (existing) clearTimeout(existing);
+
+    emitToUser(toUserId, EVENTS.S_DM_TYPING, event);
+
+    if (typing) {
+      /* One expiry per recipient, because each is an independent signal: with
+       * a shared timer a single peer clearing their indicator would cancel
+       * everyone else's. */
+      typingTimers.set(
+        key,
+        setTimeout(() => {
+          typingTimers.delete(key);
+          emitToUser(toUserId, EVENTS.S_DM_TYPING, { ...event, typing: false, expired: true });
+        }, TYPING_TTL_MS)
+      );
+    } else {
+      typingTimers.delete(key);
+    }
   }
 }
 
@@ -193,26 +334,22 @@ function publishTyping({ conversationId, fromUserId, toUserId, typing }) {
  * This only tells the other side so their ticks turn to "read" without a
  * refetch. `at` is the timestamp the batch was applied at.
  */
-function publishRead({ conversationId, readerId, otherId, at }) {
-  emitToUser(otherId, EVENTS.S_DM_READ, {
-    conversationId: String(conversationId),
-    readerId: String(readerId),
-    at,
-  });
+function publishRead({ conversationId, readerId, otherIds, at }) {
+  const base = { conversationId: String(conversationId), readerId: String(readerId), at };
+  for (const id of (otherIds || []).map(String)) {
+    emitToUser(id, EVENTS.S_DM_READ, base);
+  }
   // The reader's own other devices also need to hear it, so a second tab
-  // that showed the same unread badge clears it.
-  emitToUser(readerId, EVENTS.S_DM_READ, {
-    conversationId: String(conversationId),
-    readerId: String(readerId),
-    at,
-    self: true,
-  });
+  // showing the same unread badge clears itself.
+  emitToUser(readerId, EVENTS.S_DM_READ, { ...base, self: true });
 }
 
 /** A message was unsent — the peer must drop its content too. */
-function publishDeleted({ conversationId, messageId, fromUserId, otherId }) {
+function publishDeleted({ conversationId, messageId, fromUserId, otherIds }) {
   const payload = { conversationId: String(conversationId), messageId: String(messageId) };
-  emitToUser(otherId, EVENTS.S_DM_DELETED, payload);
+  for (const id of (otherIds || []).map(String)) {
+    emitToUser(id, EVENTS.S_DM_DELETED, payload);
+  }
   emitToUser(fromUserId, EVENTS.S_DM_DELETED, { ...payload, self: true });
 }
 
@@ -241,16 +378,57 @@ function registerDmHandlers(socket, { rateLimit }) {
       if (rateLimit && !rateLimit()) return;
       const convo = await participantOf(payload.conversationId);
       if (!convo) return; // silently ignore — not a participant
-      const otherId = convo.participants.find((p) => String(p) !== String(me));
-      if (!otherId) return;
+      /* Every other member of the thread. In a direct chat that is one peer;
+       * in a team it is the whole roster, because "someone is typing" is
+       * meaningful to everyone reading the room. */
+      const others = (convo.participants || [])
+        .map(String)
+        .filter((p) => p !== String(me));
+      if (!others.length) return;
       publishTyping({
         conversationId: convo._id,
         fromUserId: me,
-        toUserId: otherId,
+        toUserIds: others,
         typing: Boolean(payload.typing),
       });
     } catch {
       /* typing is best-effort; a failure must never surface as an error */
+    }
+  });
+
+  /* dm:watch { conversationId } / dm:unwatch { conversationId }
+   * The client says "this thread is on screen". Presence updates for its
+   * members are then routed here and nowhere else — a user who is not looking
+   * at a conversation has no reason to receive its members' comings and
+   * goings, and no reason to pay for them. */
+  socket.on(EVENTS.C_DM_WATCH, async (payload = {}) => {
+    try {
+      if (!payload.conversationId) return;
+      const convo = await Conversation.findOne({ _id: payload.conversationId, participants: me })
+        .select("participants")
+        .lean();
+      if (!convo) return; // not a participant — ignore silently
+      watchConversation(socket, convo._id, convo.participants.map(String));
+
+      /* Answer immediately with everyone's current state, so opening a thread
+       * does not wait for the first transition to learn who is around. */
+      const states = await Promise.all(
+        convo.participants
+          .map(String)
+          .filter((id) => id !== String(me))
+          .map(async (id) => ({ userId: id, ...(await presenceOf(id)) }))
+      );
+      for (const st of states) socket.emit(EVENTS.S_DM_PRESENCE, st);
+    } catch (e) {
+      console.error("dm:watch failed:", e.message);
+    }
+  });
+
+  socket.on(EVENTS.C_DM_UNWATCH, (payload = {}) => {
+    try {
+      unwatchConversation(socket, payload.conversationId);
+    } catch {
+      /* best-effort */
     }
   });
 
@@ -286,7 +464,11 @@ module.exports = {
   publishTyping,
   publishRead,
   publishDeleted,
+  emitToUser,
   isUserConnected,
+  isUserOnline,
+  presenceOf,
+  unwatchConversation,
   userRoomKey,
   typingErrorCount: () => typingTimers.size,
   _resetTimers: () => {

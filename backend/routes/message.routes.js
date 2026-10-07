@@ -30,6 +30,15 @@ router.get("/unread-count", requireAuth, messageController.getUnreadCount);
 // Part 10 §25 — server-side search. Must precede /:id so "search"
 // is not captured as a message id.
 router.get("/search", requireAuth, messageController.searchMessages);
+
+/* ── Teams (Part 11) — named conversations with 2+ members ──
+ * Registered before the "/conversations/:id" family so "/teams" is never
+ * captured as a conversation id. */
+router.post("/teams", requireAuth, limiters.messaging, messageController.createTeam);
+router.get("/teams/:id/members", requireAuth, messageController.getTeamMembers);
+router.post("/teams/:id/members", requireAuth, limiters.messaging, messageController.addTeamMembers);
+router.delete("/teams/:id/members/:userId", requireAuth, messageController.removeTeamMember);
+router.patch("/teams/:id", requireAuth, messageController.updateTeam);
 router.delete("/:id", requireAuth, messageController.deleteMessage);
 router.post("/conversations/:id/mute", requireAuth, messageController.toggleMute);
 router.post("/conversations/:id/hide", requireAuth, messageController.hideConversation);

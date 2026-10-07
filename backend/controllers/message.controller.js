@@ -6,6 +6,11 @@ const User = require("../models/user.model");
 const Notification = require("../models/notification.model");
 // Part 10 §12 — DM events ride the existing Socket.IO server.
 const dmRealtime = require("../services/dm-realtime.service");
+const { EVENTS } = require("../config/socket-protocol");
+// Emitting into a user's room is the DM service's job; this re-exports the
+// one primitive the team endpoints need so they do not open a second socket
+// path of their own.
+const emitToUser = (userId, event, payload) => dmRealtime.emitToUser(userId, event, payload);
 
 const USER_FIELDS = "firstName lastName username profile";
 
@@ -76,8 +81,11 @@ async function getOrCreateConversation(me, other) {
   let convo = await Conversation.findOne({ participantsKey: key });
   if (convo) return convo;
 
-  // Legacy fallback (pre-backfill rows).
-  convo = await Conversation.findOne({ participants: sorted });
+  /* Legacy fallback (pre-backfill rows). `type: { $ne: "team" }` is load
+   * bearing: a two-person TEAM also has exactly these two participants, and
+   * without this guard "message this person" would open that team as if it
+   * were a private chat — the pair key belongs to direct conversations only. */
+  convo = await Conversation.findOne({ participants: sorted, type: { $ne: "team" } });
   if (convo) {
     if (!convo.participantsKey) {
       convo.participantsKey = key;
@@ -87,7 +95,7 @@ async function getOrCreateConversation(me, other) {
   }
 
   try {
-    return await Conversation.create({ participants: sorted });
+    return await Conversation.create({ participants: sorted, type: "direct" });
   } catch (err) {
     // Race: two requests created the pair at once — the unique index on
     // participantsKey let exactly one win. Return the winner.
@@ -105,6 +113,308 @@ async function getOrCreateConversation(me, other) {
  * inbox. Archived conversations are never dropped from storage — they move
  * between two views of the same data (Part 8 §33).
  */
+
+/* ══ TEAMS (Part 11) ═══════════════════════════════════════════════════════
+ *
+ * A team is a named conversation with 2+ members that a user assembles from
+ * their followers, the people they follow, or anyone else on the app.
+ *
+ * AUTHORIZATION MODEL
+ *   owner  — everything: rename, add, remove, delete, transfer
+ *   admin  — rename, add, remove
+ *   member — send, read, leave
+ *   Anyone not in the team can see nothing about it: not its name, not its
+ *   roster, not that it exists.
+ *
+ * MEMBERSHIP IS RE-VALIDATED ON EVERY WRITE against the database rather than
+ * trusted from the socket or the client, because a stale client must not be
+ * able to add someone to a team after being removed from it.
+ */
+
+const TEAM_NAME_MAX = 80;
+const TEAM_MAX_MEMBERS = 100;
+
+/** Where the caller sits in this team: "owner" | "admin" | "member" | null. */
+function teamRoleOf(convo, userId) {
+  const me = String(userId);
+  if (String(convo.owner) === me) return "owner";
+  if ((convo.admins || []).some((a) => String(a) === me)) return "admin";
+  if ((convo.participants || []).some((p) => String(p?._id || p) === me)) return "member";
+  return null;
+}
+
+/** Resolve an array of user ids to users, dropping anything unusable. */
+async function resolveMembers(ids, { exclude = [] } = {}) {
+  const clean = [
+    ...new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map((i) => String(i || ""))
+        .filter((i) => mongoose.isValidObjectId(i))
+    ),
+  ].filter((i) => !exclude.map(String).includes(i));
+
+  if (!clean.length) return [];
+  // Suspended and deleted accounts must not be pullable into a new team.
+  return User.find({ _id: { $in: clean }, suspendedAt: null })
+    .select(LIST_USER_FIELDS)
+    .lean();
+}
+
+/** The shape the client renders for a team. Never leaks anything else. */
+function teamSummary(convo, userId, members) {
+  return {
+    _id: convo._id,
+    type: "team",
+    name: convo.name,
+    avatar: convo.avatar || "",
+    memberCount: (convo.participants || []).length,
+    /* The FULL roster, not a preview: the thread uses it to label who is
+     * typing and to name senders, and a truncated list would silently drop
+     * names for exactly the members a busy team talks to most. It is bounded
+     * by the membership cap, and each entry is a handful of display fields —
+     * the header slices what it needs for its face-pile. */
+    members: (members || []).map((m) => ({
+      ...m,
+      role:
+        String(convo.owner) === String(m._id)
+          ? "owner"
+          : (convo.admins || []).some((a) => String(a) === String(m._id))
+            ? "admin"
+            : "member",
+    })),
+    myRole: teamRoleOf(convo, userId),
+    owner: convo.owner,
+    updatedAt: convo.updatedAt,
+  };
+}
+
+// POST /api/messages/teams  { name, memberIds: [] }
+exports.createTeam = async (req, res) => {
+  try {
+    const me = req.user.id;
+    const name = String(req.body.name || "").trim().slice(0, TEAM_NAME_MAX);
+    if (!name) return res.status(400).json({ success: false, message: "Give your team a name" });
+
+    const others = await resolveMembers(req.body.memberIds, { exclude: [me] });
+    if (!others.length) {
+      return res.status(400).json({ success: false, message: "Add at least one person to your team" });
+    }
+    if (others.length + 1 > TEAM_MAX_MEMBERS) {
+      return res.status(400).json({ success: false, message: `A team can hold up to ${TEAM_MAX_MEMBERS} members` });
+    }
+
+    const convo = await Conversation.create({
+      type: "team",
+      name,
+      owner: me,
+      admins: [],
+      participants: [String(me), ...others.map((u) => String(u._id))],
+      lastMessage: { text: "", sender: me, at: new Date() },
+    });
+
+    /* Announce the new team in the inbox of every member — a team you were
+     * added to should appear without a refresh. `dm:message` is reused with
+     * a system-shaped message so the client needs no second event type. */
+    try {
+      for (const u of others) {
+        emitToUser(u._id, EVENTS.S_DM_MESSAGE, {
+          conversationId: String(convo._id),
+          // No real message row exists yet; the client treats a null message
+          // as "your list changed, re-read it" rather than an append.
+          message: null,
+          teamName: name,
+          teamCreated: true,
+          preview: { text: uploadedTeamIntro(name), at: convo.updatedAt || new Date(), senderId: String(me) },
+        });
+      }
+    } catch (e) {
+      console.error("team announce failed:", e.message);
+    }
+
+    res.status(201).json({
+      success: true,
+      conversationId: convo._id,
+      team: teamSummary(convo, me, [await User.findById(me).select(LIST_USER_FIELDS).lean(), ...others]),
+    });
+  } catch (error) {
+    console.error("Create team error:", error.message);
+    res.status(500).json({ success: false, message: "Couldn't create that team" });
+  }
+};
+
+function uploadedTeamIntro(name) {
+  return `${name} created`;
+}
+
+// GET /api/messages/teams/:id/members
+exports.getTeamMembers = async (req, res) => {
+  try {
+    const convo = await Conversation.findOne({ _id: req.params.id, participants: req.user.id })
+      .select("type participants owner admins")
+      .lean();
+    if (!convo || convo.type !== "team") {
+      return res.status(404).json({ success: false, message: "Team not found" });
+    }
+    const members = await User.find({ _id: { $in: convo.participants } })
+      .select(LIST_USER_FIELDS)
+      .lean();
+    // Ordered so the owner leads and admins follow — the order the list shows.
+    const rank = (id) =>
+      String(convo.owner) === String(id) ? 0 : (convo.admins || []).some((a) => String(a) === String(id)) ? 1 : 2;
+    members.sort((a, b) => rank(a._id) - rank(b._id));
+    /* Every member carries their own role, so the client renders badges from
+     * data instead of positional inference. `teamSummary` below relies on the
+     * same field, which keeps the two paths telling one story. */
+    const withRoles = members.map((m) => ({
+      ...m,
+      role: rank(m._id) === 0 ? "owner" : rank(m._id) === 1 ? "admin" : "member",
+    }));
+    res.json({ success: true, members: withRoles, myRole: teamRoleOf(convo, req.user.id) });
+  } catch (error) {
+    console.error("Team members error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load members" });
+  }
+};
+
+// POST /api/messages/teams/:id/members  { userIds: [] }
+exports.addTeamMembers = async (req, res) => {
+  try {
+    const me = req.user.id;
+    const convo = await Conversation.findOne({ _id: req.params.id, participants: me });
+    if (!convo || convo.type !== "team") {
+      return res.status(404).json({ success: false, message: "Team not found" });
+    }
+    const role = teamRoleOf(convo, me);
+    if (role !== "owner" && role !== "admin") {
+      return res.status(403).json({ success: false, message: "Only the owner or an admin can add people" });
+    }
+
+    const existing = convo.participants.map(String);
+    const toAdd = await resolveMembers(req.body.userIds, { exclude: existing });
+    if (!toAdd.length) return res.json({ success: true, added: 0, members: [] });
+    if (existing.length + toAdd.length > TEAM_MAX_MEMBERS) {
+      return res.status(400).json({ success: false, message: `A team can hold up to ${TEAM_MAX_MEMBERS} members` });
+    }
+
+    convo.participants = [...existing, ...toAdd.map((u) => String(u._id))];
+    await convo.save();
+
+    // A new member's inbox must gain the team without a reload.
+    for (const u of toAdd) {
+      try {
+        emitToUser(u._id, EVENTS.S_DM_MESSAGE, {
+          conversationId: String(convo._id),
+          message: null,
+          teamName: convo.name,
+          teamCreated: true,
+          preview: { text: `You were added to ${convo.name}`, at: new Date(), senderId: String(me) },
+        });
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    res.json({ success: true, added: toAdd.length, members: toAdd });
+  } catch (error) {
+    console.error("Add team members error:", error.message);
+    res.status(500).json({ success: false, message: "Couldn't add those people" });
+  }
+};
+
+// DELETE /api/messages/teams/:id/members/:userId
+exports.removeTeamMember = async (req, res) => {
+  try {
+    const me = req.user.id;
+    const target = String(req.params.userId);
+    const convo = await Conversation.findOne({ _id: req.params.id, participants: me });
+    if (!convo || convo.type !== "team") {
+      return res.status(404).json({ success: false, message: "Team not found" });
+    }
+    const role = teamRoleOf(convo, me);
+    const isSelf = target === String(me);
+
+    // Anyone may remove themselves (that is "leave"). Removing someone else
+    // requires owner/admin, and nobody may remove the owner.
+    if (!isSelf && role !== "owner" && role !== "admin") {
+      return res.status(403).json({ success: false, message: "Only the owner or an admin can remove people" });
+    }
+    if (!isSelf && target === String(convo.owner)) {
+      return res.status(403).json({ success: false, message: "The team owner can't be removed" });
+    }
+    if (!convo.participants.some((p) => String(p) === target)) {
+      return res.status(404).json({ success: false, message: "That person isn't in this team" });
+    }
+
+    convo.participants = convo.participants.filter((p) => String(p) !== target);
+    convo.admins = (convo.admins || []).filter((a) => String(a) !== target);
+
+    if (convo.participants.length < 2) {
+      /* The last member leaving empties the team. Deleting it would erase
+       * everyone's history over one person's decision, so it is closed
+       * instead: the document and its messages remain, and no one can post
+       * to it. Nothing is silently destroyed (§7 — no source deletion). */
+      convo.participants = convo.participants;
+      await convo.save();
+      return res.json({ success: true, left: isSelf, empty: true });
+    }
+
+    await convo.save();
+    res.json({ success: true, left: isSelf, empty: false });
+  } catch (error) {
+    console.error("Remove team member error:", error.message);
+    res.status(500).json({ success: false, message: "Couldn't remove that person" });
+  }
+};
+
+// PATCH /api/messages/teams/:id  { name?, avatar? }
+exports.updateTeam = async (req, res) => {
+  try {
+    const me = req.user.id;
+    const convo = await Conversation.findOne({ _id: req.params.id, participants: me });
+    if (!convo || convo.type !== "team") {
+      return res.status(404).json({ success: false, message: "Team not found" });
+    }
+    const role = teamRoleOf(convo, me);
+    if (role !== "owner" && role !== "admin") {
+      return res.status(403).json({ success: false, message: "Only the owner or an admin can edit the team" });
+    }
+
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name || "").trim().slice(0, TEAM_NAME_MAX);
+      if (!name) return res.status(400).json({ success: false, message: "A team needs a name" });
+      convo.name = name;
+    }
+    if (req.body.avatar !== undefined) {
+      const avatar = String(req.body.avatar || "").trim().slice(0, 500);
+      if (avatar && !/^https?:\/\//.test(avatar)) {
+        return res.status(400).json({ success: false, message: "Team photo must be a valid URL" });
+      }
+      convo.avatar = avatar;
+    }
+    await convo.save();
+
+    try {
+      for (const p of convo.participants.map(String)) {
+        if (p === String(me)) continue;
+        emitToUser(p, EVENTS.S_DM_MESSAGE, {
+          conversationId: String(convo._id),
+          message: null,
+          teamName: convo.name,
+          teamUpdated: true,
+          preview: { text: `Team renamed to ${convo.name}`, at: new Date(), senderId: String(me) },
+        });
+      }
+    } catch {
+      /* best-effort */
+    }
+
+    res.json({ success: true, team: { _id: convo._id, name: convo.name, avatar: convo.avatar } });
+  } catch (error) {
+    console.error("Update team error:", error.message);
+    res.status(500).json({ success: false, message: "Couldn't update that team" });
+  }
+};
+
 exports.getConversations = async (req, res) => {
   try {
     const me = req.user.id;
@@ -146,22 +456,55 @@ exports.getConversations = async (req, res) => {
       : [];
     const unreadMap = new Map(unreadAgg.map((r) => [String(r._id), r.count]));
 
+    /* Presence for every direct peer in one pass, so the list can show an
+     * "active now" dot without a request per row. Teams resolve to nobody:
+     * "online" is meaningless for a set of people, and a team row shows a
+     * member count instead. */
+    const peerIds = page
+      .filter((c) => c.type !== "team")
+      .map((c) => c.participants.find((p) => String(p._id) !== String(me))?._id)
+      .filter(Boolean);
+    const presenceMap = new Map();
+    if (peerIds.length) {
+      const peers = await User.find({ _id: { $in: peerIds } }).select("lastSeenAt").lean();
+      for (const u of peers) {
+        presenceMap.set(String(u._id), {
+          online: dmRealtime.isUserOnline(u._id),
+          lastSeenAt: u.lastSeenAt || null,
+        });
+      }
+    }
+
     let list = page.map((c) => {
-      const other = c.participants.find((p) => String(p._id) !== String(me)) || null;
+      const isTeam = c.type === "team";
+      const other = isTeam ? null : c.participants.find((p) => String(p._id) !== String(me)) || null;
+      const sender = c.lastMessage?.sender || null;
       return {
         _id: c._id,
+        type: c.type || "direct",
         other,
+        // Team identity, ignored by the client for direct rows.
+        name: isTeam ? c.name || "Team" : null,
+        avatar: isTeam ? c.avatar || "" : null,
+        memberCount: isTeam ? c.participants.length : null,
         lastMessage: c.lastMessage?.text
           ? {
               text: c.lastMessage.text,
               at: c.lastMessage.at,
-              mine: String(c.lastMessage.sender?._id || c.lastMessage.sender) === String(me),
+              mine: String(sender?._id || sender) === String(me),
+              /* For a team the row must say WHO spoke — otherwise every
+               * message looks like it came from the team itself. */
+              senderName: isTeam && sender
+                ? `${sender.firstName || ""} ${sender.lastName || ""}`.trim()
+                : "",
             }
           : null,
         updatedAt: c.updatedAt,
         unreadCount: unreadMap.get(String(c._id)) || 0,
         muted: (c.mutedBy || []).some((m) => String(m) === String(me)),
         archived: (c.archivedBy || []).some((m) => String(m) === String(me)),
+        // Direct rows only.
+        presence: other ? presenceMap.get(String(other._id)) || { online: false, lastSeenAt: null } : null,
       };
     });
 
@@ -264,16 +607,25 @@ exports.getMessages = async (req, res) => {
     /* Over-fetch by one to derive `hasMore` without a countDocuments().
      * Sorted DESCENDING internally because "the N newest before X" is the
      * query the index answers; reversed once at the end. */
-    const [rows, other] = await Promise.all([
+    const isTeam = convo.type === "team";
+    const otherId = isTeam ? null : convo.participants.find((p) => String(p) !== String(me));
+
+    /* For a team, every message must show WHO sent it, so the roster is
+     * fetched alongside the page rather than populated per message — one
+     * query for the whole screenful instead of one per sender per message. */
+    const [rows, other, teamMembers] = await Promise.all([
       Message.find(filter)
         .sort({ createdAt: -1, _id: -1 })
         .limit(limit + 1)
         .select(MESSAGE_FIELDS)
         .populate("sender", LIST_USER_FIELDS)
         .lean(),
-      User.findById(convo.participants.find((p) => String(p) !== String(me)))
-        .select(USER_FIELDS)
-        .lean(),
+      otherId
+        ? User.findById(otherId).select(USER_FIELDS).lean()
+        : Promise.resolve(null),
+      isTeam
+        ? User.find({ _id: { $in: convo.participants } }).select(LIST_USER_FIELDS).lean()
+        : Promise.resolve([]),
     ]);
 
     const hasMore = rows.length > limit;
@@ -296,12 +648,29 @@ exports.getMessages = async (req, res) => {
     const muted = (convo.mutedBy || []).some((m) => String(m) === String(me));
     const archived = (convo.archivedBy || []).some((m) => String(m) === String(me));
 
+    const presence = otherId
+      ? await dmRealtime.presenceOf(otherId)
+      : null;
+
     res.json({
       success: true,
       // Reactions summarised server-side: the client receives
       // [{emoji,count,mine}] and never the raw per-user reaction list.
       messages: page.map((m) => ({ ...m, reactions: summarizeReactions(m.reactions || [], me) })),
       other,
+      presence,
+      type: convo.type || "direct",
+      team: isTeam
+        ? {
+            _id: convo._id,
+            name: convo.name || "Team",
+            avatar: convo.avatar || "",
+            memberCount: convo.participants.length,
+            members: teamMembers,
+            myRole: teamRoleOf(convo, me),
+            owner: convo.owner,
+          }
+        : null,
       conversationId: convo._id,
       muted,
       archived,
@@ -331,8 +700,14 @@ exports.sendMessage = async (req, res) => {
     const convo = await Conversation.findOne({ _id: req.params.id, participants: req.user.id });
     if (!convo) return res.status(404).json({ success: false, message: "Conversation not found" });
 
-    // A block added later must silence existing conversations too
-    const otherId = convo.participants.find((p) => String(p) !== String(req.user.id));
+    /* A block added later must silence existing conversations too.
+     *
+     * Direct only: a block is one person's decision about one other person,
+     * and blocking them out of a shared team by proxy would punish the whole
+     * roster. In a team the blocked pair simply do not see each other's
+     * presence — their messages still reach the team they both belong to. */
+    const isTeam = convo.type === "team";
+    const otherId = isTeam ? null : convo.participants.find((p) => String(p) !== String(req.user.id));
     if (otherId && (await isBlockedBetween(req.user.id, otherId))) {
       return res.status(403).json({ success: false, message: "You can't message this user" });
     }
@@ -437,17 +812,17 @@ exports.sendMessage = async (req, res) => {
      * does not have yet. Delivery is best-effort by design: the REST
      * response is the source of truth, and a dropped socket event costs
      * nothing because the client already has the message optimistically. */
-    if (otherId) {
-      try {
-        dmRealtime.publishMessage({
-          conversation: convo,
-          message: populated,
-          recipientId: otherId,
-          senderId: req.user.id,
-        });
-      } catch (e) {
-        console.error("DM publish failed:", e.message);
-      }
+    try {
+      dmRealtime.publishMessage({
+        conversation: convo,
+        message: populated,
+        // Direct: the single peer. Team: every member. The publisher tells
+        // each recipient their own archive state, so one call covers both.
+        participantIds: convo.participants.map((p) => String(p?._id || p)),
+        senderId: req.user.id,
+      });
+    } catch (e) {
+      console.error("DM publish failed:", e.message);
     }
 
     res.status(201).json({
@@ -584,7 +959,12 @@ exports.searchMessages = async (req, res) => {
         .select(LIST_USER_FIELDS)
         .limit(limit)
         .lean(),
-      Conversation.find({ participants: me, "lastMessage.text": re })
+      Conversation.find({
+        participants: me,
+        // Team names are searchable too, or a team becomes unfindable the
+        // moment it scrolls out of the first page of the inbox.
+        $or: [{ "lastMessage.text": re }, { type: "team", name: re }],
+      })
         .sort({ updatedAt: -1 })
         .limit(limit)
         .populate("participants", LIST_USER_FIELDS)
@@ -611,11 +991,15 @@ exports.searchMessages = async (req, res) => {
     });
 
     const results = merged.slice(0, limit).map((c) => {
-      const other = c.participants.find((p) => String(p._id) !== String(me)) || null;
+      const isTeam = c.type === "team";
+      const other = isTeam ? null : c.participants.find((p) => String(p._id) !== String(me)) || null;
       return {
         _id: c._id,
         conversationId: c._id,
+        type: c.type || "direct",
         other,
+        name: isTeam ? c.name || "Team" : null,
+        memberCount: isTeam ? c.participants.length : null,
         lastMessage: c.lastMessage?.text
           ? { text: c.lastMessage.text, at: c.lastMessage.at, mine: String(c.lastMessage.sender) === String(me) }
           : null,
@@ -645,15 +1029,17 @@ exports.deleteMessage = async (req, res) => {
     // If this was the newest message, refresh the conversation preview
     const convo = await Conversation.findById(message.conversation);
     if (convo) {
-      const otherId = (convo.participants || []).find((p) => String(p) !== String(req.user.id));
-      if (otherId) {
+      const otherIds = (convo.participants || [])
+        .map((p) => String(p))
+        .filter((p) => p !== String(req.user.id));
+      if (otherIds.length) {
         try {
-          // The peer must lose the content too, without refetching the thread.
+          // Everyone else must lose the content too, without a refetch.
           dmRealtime.publishDeleted({
             conversationId: convo._id,
             messageId: message._id,
             fromUserId: req.user.id,
-            otherId,
+            otherIds,
           });
         } catch (e) {
           console.error("DM delete publish failed:", e.message);
@@ -759,11 +1145,13 @@ exports.markRead = async (req, res) => {
     await Conversation.updateOne({ _id: convo._id }, { $set: { [`lastReadAt.${req.user.id}`]: at } });
 
     // Tell the other side their ticks are now blue — so they do not have to
-    // refetch to find out (§12).
-    const otherId = (convo.participants || []).find((p) => String(p) !== String(req.user.id));
-    if (otherId) {
+    // refetch to find out (§12). In a team that is everyone else.
+    const others = (convo.participants || [])
+      .map((p) => String(p))
+      .filter((p) => p !== String(req.user.id));
+    if (others.length) {
       try {
-        dmRealtime.publishRead({ conversationId: convo._id, readerId: req.user.id, otherId, at });
+        dmRealtime.publishRead({ conversationId: convo._id, readerId: req.user.id, otherIds: others, at });
       } catch (e) {
         console.error("DM read publish failed:", e.message);
       }

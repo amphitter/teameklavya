@@ -14,7 +14,13 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSessionUser } from "@/components/shell/use-session-user";
-import { ConversationList, ConversationListSkeleton, type InboxTab } from "@/components/messages/conversation-list";
+import {
+  ConversationList,
+  ConversationListSkeleton,
+  isTeamRow,
+  type InboxTab,
+} from "@/components/messages/conversation-list";
+import { TeamCreateSheet } from "@/components/messages/team-create-sheet";
 import { useConversationSearch, useInbox, useResolveConversation, useUnread } from "@/hooks/use-messages";
 import { useDmSocket } from "@/hooks/use-dm-socket";
 import type { ConversationRow } from "@/lib/messages/store";
@@ -50,9 +56,7 @@ function MessagesInbox() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
   const archived = tab === "archived";
-  // `groups` is rendered but disabled — group conversations do not exist in
-  // the backend, so an active Groups tab would show a permanent empty state
-  // for a feature that is not there (§8: render only what is supported).
+  const [teamSheetOpen, setTeamSheetOpen] = useState(false);
 
   /* Only the archive is a different SERVER view. Unread is a filter over
    * rows we already have — every row carries its own `unreadCount` — so
@@ -90,10 +94,13 @@ function MessagesInbox() {
     if (resolvedId) router.replace(`/messages/${resolvedId}`);
   }, [resolvedId, router]);
 
-  const rowsForList = useMemo(
-    () => (tab === "unread" ? allRows.filter((r) => (r.unreadCount || 0) > 0) : allRows),
-    [allRows, tab]
-  );
+  /* Every tab is a filter over the rows we already hold — no tab costs a
+   * request, so switching is instant (§"chats load slowly"). */
+  const rowsForList = useMemo(() => {
+    if (tab === "unread") return allRows.filter((r) => (r.unreadCount || 0) > 0);
+    if (tab === "teams") return allRows.filter(isTeamRow);
+    return allRows;
+  }, [allRows, tab]);
 
   if (!ready) {
     return (
@@ -149,8 +156,19 @@ function MessagesInbox() {
           archivedUnread={unreadArchived}
           searching={Boolean(debouncedQuery) && searching}
           searchResults={searchResults as unknown as ConversationRow[]}
+          onCreateTeam={() => setTeamSheetOpen(true)}
         />
       </div>
+
+      {/* Part 11 §5 — create a team and go straight into it. */}
+      <TeamCreateSheet
+        open={teamSheetOpen}
+        onClose={() => setTeamSheetOpen(false)}
+        onCreated={(id) => {
+          setTeamSheetOpen(false);
+          router.push(`/messages/${id}`);
+        }}
+      />
     </div>
   );
 }

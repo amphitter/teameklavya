@@ -86,6 +86,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isChatRoute = /^\/messages\/[^/]+$/.test(pathname ?? "");
   const router = useRouter();
   const { user, role } = useSessionUser();
+
+  /* Wake the API as soon as the app boots.
+   *
+   * The backend is hosted on Render, which suspends an idle instance; the
+   * first request after a quiet period waits for a cold start. That delay was
+   * landing on the user's first tap — opening Messages, of all things, which
+   * is exactly where "chats load slowly" was reported. Pinging a cheap
+   * endpoint while the user looks at the home screen means the instance is
+   * usually warm before any real request is made.
+   *
+   * Deliberately once per page load, silent, and non-blocking. If it fails,
+   * nothing is reported — the real request will surface any genuine problem. */
+  useEffect(() => {
+    api.get("/health").catch(() => {});
+  }, []);
     const [communities, setCommunities] = useState<{ _id: string; name: string; slug: string; logoUrl?: string }[]>([]);
 
   // Communities = organizations the user follows (real follows only)

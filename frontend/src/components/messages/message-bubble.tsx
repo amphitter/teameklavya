@@ -16,6 +16,8 @@ export interface MessageBubbleProps {
   mine: boolean;
   /** Show the sender's avatar + name (first message of a group only, §29). */
   showHeader: boolean;
+  /** Part 11 — names matter inside a team and are noise in a pair. */
+  showSenderName?: boolean;
   /** Show a day separator above this message. */
   showDay: boolean;
   dayLabel?: string;
@@ -51,6 +53,7 @@ export const MessageBubble = memo(function MessageBubble({
   message,
   mine,
   showHeader,
+  showSenderName = false,
   showDay,
   dayLabel,
   onReact,
@@ -92,7 +95,7 @@ export const MessageBubble = memo(function MessageBubble({
         )}
 
         <div className={cn("flex min-w-0 max-w-[78%] flex-col", mine ? "items-end" : "items-start")}>
-          {showHeader && !mine ? (
+          {showHeader && !mine && showSenderName ? (
             <span className="mb-0.5 px-1 text-[11px] font-semibold text-on-surface-variant">{nameOf(message)}</span>
           ) : null}
 

@@ -35,7 +35,7 @@ architecture; it makes the existing architecture production-safe.
 | 11 | Frontend + upload + rate-limit review | §27, §28, §29 | ✅ |
 | 12 | Restore drill, backups, secret separation | §18, §19 | ✅ |
 | 13 | Documentation set | §32 | ✅ |
-| 14 | Final report | §33 | pending |
+| 14 | Final report | §33 | ✅ |
 
 ### Phase 3 — RESULT: ✅ **DONE** (`tests/real-providers.selftest.js`)
 
@@ -570,6 +570,39 @@ product failure and is not one. It now reclaims stale state **only after
 mongod has actually refused to start** (never speculatively), and retries once.
 
 Regression: 1328 → **1364 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
+### Phase 14 — RESULT: ✅ **DONE** (§33 — `PART7_FINAL_REPORT.md`)
+
+The verification report, and the honesty audit behind it.
+
+**Floor vs actual: 924 required, 1364 passing, 0 failed, 6/6 e2e.** No
+pre-existing test was removed or weakened; Part 7 added **440 assertions**
+across five new files and left every prior assertion untouched.
+
+**§33 asked for an existing-vs-new split, so the report gives one per suite.**
+It also names what was *not* executed and why, which is the part of a report
+most tempting to fudge:
+
+- **Real-provider tests were never run.** Gated behind
+  `REAL_PROVIDER_TESTS=true` by design; they must never run in CI.
+- **Load profiles B, E, F, G, H were specified but not run** — F alone is a
+  two-hour soak. The harness is ready; the runs belong to the operator.
+- **The restore drill was not performed on real infrastructure.** No
+  `mongodump`/`pg_dump`/`psql` here, and no real Atlas/Supabase projects. The
+  doc is written to be followed, and the report names this as the one item to
+  complete before deploying.
+- **Profile C was verified at 25 clients, not 500.** The `test:load:500` script
+  exists and raises the IP caps that would otherwise throttle it.
+
+**A consolidated limitations table** carries seven entries with a consequence
+and a trigger each — including the rate-limit NAT finding from §29, now backed
+by a measurement (422 of 722 responses rate-limited from a single IP at 60 rps).
+
+**The closing principle check** maps each of the eight Part 7 principles to what
+actually upheld it, including the one that matters most: *EventHub is not more
+complicated than it was.* Zero new dependencies were added — the load harness
+uses Node's `http` only, and profile C delegates to the existing Part 4 harness
+rather than duplicating it.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

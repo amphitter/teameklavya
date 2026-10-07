@@ -27,3 +27,7 @@ dist/
 
 # scratch commit-message file (never commit)
 .commitmsg.tmp
+
+# Part 10 — transpiled output for the messages-store test runner (regenerated
+# by `node tests/run-messages-store-tests.js`, never committed)
+frontend/tests/.store-build/

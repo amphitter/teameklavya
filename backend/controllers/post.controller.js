@@ -148,9 +148,54 @@ exports.getFeed = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
-    const tab = req.query.tab === "following" ? "following" : "for-you";
+    /* Part 8 §6 — five filters: for-you, following, events, communities,
+       campus. Only the first two existed; "events" and "communities" select
+       posts that genuinely carry an event / community reference, so neither
+       tab can ever show an empty list padded with unrelated content.
+       "campus" is not added: there is no institution field on a post to
+       filter by, and inventing one would fabricate a feed. */
+    const VALID_TABS = new Set(["for-you", "following", "events", "communities"]);
+    const rawTab = String(req.query.tab || "for-you");
+    const tab = VALID_TABS.has(rawTab) ? rawTab : "for-you";
     const cursor = req.query.cursor ? String(req.query.cursor) : null;
     const viewerId = req.user?.id || null;
+
+    /* ── events / communities: real post references, chronological ── */
+    if (tab === "events" || tab === "communities") {
+      const ctx = await PostRepository.getFeedContext(viewerId);
+      const visible = PostRepository.visibilityFilter(ctx, viewerId);
+      const scope =
+        tab === "events"
+          ? { event: { $ne: null } }
+          : { community: { $ne: null } };
+      const filter = { status: "published", $and: [scope, visible] };
+      if (cursor) {
+        const [at, id] = cursor.split("|");
+        const d = new Date(at);
+        if (!isNaN(d.getTime())) {
+          filter.$and.push({ $or: [{ createdAt: { $lt: d } }, { createdAt: d, _id: { $lt: id } }] });
+        }
+      }
+      const rows = await Post.find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(cursor ? 0 : (page - 1) * limit)
+        .limit(limit + 1)
+        .populate("author", AUTHOR_FIELDS)
+        .populate("event", EVENT_FIELDS)
+        .populate("organization", ORG_FIELDS)
+        .lean();
+      const hasMore = rows.length > limit;
+      const posts = hasMore ? rows.slice(0, limit) : rows;
+      const last = posts[posts.length - 1];
+      return res.json({
+        success: true,
+        posts,
+        page,
+        hasMore,
+        nextCursor: hasMore && last ? `${last.createdAt.toISOString()}|${last._id}` : null,
+        tab,
+      });
+    }
 
     /* ── following: chronological from followed sources ── */
     if (tab === "following") {

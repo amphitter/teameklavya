@@ -283,6 +283,32 @@ const PORT = process.env.PORT;
   r = await call("GET", `/api/messages/conversations/${convId}`, null, ta);
   ok(Array.isArray(r.d.messages?.[0]?.reactions), "thread returns summarised reactions");
 
+  /* ── §6 — feed filters ──────────────────────────────────────────────── */
+  section("§6 — feed filters (events / communities)");
+  await Post.deleteMany({ author: ua._id });
+  const ev = await (require("../models/event.model")).create({
+    title: "HackCraft 3.0", slug: `hackcraft-${stamp}`, description: "d",
+    startDate: new Date(Date.now() + 86400000), endDate: new Date(Date.now() + 172800000),
+    venue: "Oslo", organizer: ua._id, status: "published", visibility: "public", category: "hackathon",
+  });
+  await Post.create({ author: ua._id, content: "about the hack", status: "published", visibility: "public", event: ev._id });
+  await Post.create({ author: ua._id, content: "plain post", status: "published", visibility: "public" });
+
+  r = await call("GET", "/api/posts/feed?tab=events", null, ta);
+  ok(r.d.tab === "events", "events tab accepted");
+  ok(r.d.posts?.length === 1, "events tab returns only event posts", `got ${r.d.posts?.length}`);
+  ok(String(r.d.posts?.[0]?.event?._id) === String(ev._id), "the event is populated");
+
+  r = await call("GET", "/api/posts/feed?tab=communities", null, ta);
+  ok(r.d.tab === "communities", "communities tab accepted");
+  ok(r.d.posts?.length === 0, "communities tab empty when no community posts — not padded");
+
+  r = await call("GET", "/api/posts/feed?tab=nonsense", null, ta);
+  ok(r.d.tab === "for-you", "unknown tab falls back to for-you");
+
+  r = await call("GET", "/api/posts/feed?tab=for-you", null, ta);
+  ok(r.d.posts?.length === 2, "for-you still returns everything");
+
   /* ── §37/§52 — no fabricated metrics ───────────────────────────────── */
   section("§52 — no fabricated engagement");
   const fresh = await Post.create({ author: ua._id, content: "no engagement yet", status: "published", visibility: "public" });

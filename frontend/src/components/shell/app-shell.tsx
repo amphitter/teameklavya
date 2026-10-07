@@ -165,6 +165,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="text-[11px] text-muted-foreground">Share something with your followers</div>
           </div>
         </DropdownMenuItem>
+
+        {/* §41 — Story belongs in the create sheet now that stories exist.
+            Routed with ?story=1; the feed owns the composer so it can
+            refetch the rail after a publish. */}
+        <DropdownMenuItem onClick={() => router.push("/?story=1")} className="gap-2.5 py-2.5">
+          <span className="material-symbols-outlined text-[18px] leading-none text-foreground">add_photo_alternate</span>
+          <div>
+            <div className="text-sm font-semibold">Create Story</div>
+            <div className="text-[11px] text-muted-foreground">Post a 9:16 photo or video for 24 hours</div>
+          </div>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={() => router.push("/communities")} className="gap-2.5 py-2.5">
+          <UsersRound className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <div className="text-sm font-semibold">Create Community</div>
+            <div className="text-[11px] text-muted-foreground">Start a space for your people</div>
+          </div>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

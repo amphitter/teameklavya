@@ -23,7 +23,9 @@ import type { FeedPostData } from "@/components/feed/types";
 import { cn } from "@/lib/utils";
 import { useInfiniteQuery, useQuery } from "@/lib/query";
 
-type Tab = "for-you" | "following";
+type Tab = "for-you" | "following" | "events" | "communities";
+/** §6 — "Feed should remember the selected filter during navigation." */
+const TAB_KEY = "eventhub.feed.tab";
 const PAGE_SIZE = 10;
 
 /** The user's live-quiz on an ongoing event (drives leaderboard widgets). */
@@ -50,6 +52,17 @@ export function FeedView() {
   const { user, ready } = useSessionUser();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("for-you");
+  // Restore the last filter, and write it back on change.
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(TAB_KEY) as Tab | null;
+      if (saved && ["for-you", "following", "events", "communities"].includes(saved)) setTab(saved);
+    } catch { /* storage disabled — default is fine */ }
+  }, []);
+  const selectTab = (t: Tab) => {
+    setTab(t);
+    try { sessionStorage.setItem(TAB_KEY, t); } catch { /* ignore */ }
+  };
   const [homeQuery, setHomeQuery] = useState("");
 
   /* Local overlay: a post the user just composed, and posts they deleted.
@@ -302,6 +315,7 @@ export function FeedView() {
         <StoryRailSection
           canCreate={Boolean(user)}
           onCompose={() => composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+          autoOpenComposer={searchParams.get("story") === "1"}
         />
 
         <div className="mt-4 space-y-5">
@@ -311,18 +325,21 @@ export function FeedView() {
               [
                 { id: "for-you", label: "For You" },
                 { id: "following", label: "Following" },
+                { id: "events", label: "Events" },
+                { id: "communities", label: "Communities" },
               ] as const
             ).map((t) => (
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setTab(t.id)}
+                onClick={() => selectTab(t.id)}
                 aria-pressed={tab === t.id}
                 className={cn(
-                  "shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition-colors",
+                  "shrink-0 rounded-full px-4 py-2 text-[13px] font-semibold transition-colors",
                   tab === t.id
-                    ? "bg-gradient-to-r from-[#2563FF] to-[#6C35FF] text-white shadow-[0_4px_12px_rgba(37,99,255,0.25)]"
-                    : "bg-card text-muted-foreground shadow-sm hover:text-foreground"
+                    ? // §3 — gradient is a reserved selected-state treatment.
+                      "brand-gradient text-white shadow-[0_4px_12px_rgba(37,99,255,0.25)]"
+                    : "border border-outline-variant bg-surface-container-lowest text-on-surface-variant hover:text-on-surface"
                 )}
               >
                 {t.label}
@@ -438,13 +455,20 @@ function EmptyBlock({
 function StoryRailSection({
   canCreate,
   onCompose,
+  autoOpenComposer,
 }: {
   canCreate: boolean;
   onCompose: () => void;
+  /** §41 — the Create menu routes here with /?story=1. */
+  autoOpenComposer?: boolean;
 }) {
   const { groups, categories, isLoading, refetch } = useStoriesSafe();
   const markViewed = useMarkStoryViewed();
   const [composerOpen, setComposerOpen] = useState(false);
+
+  useEffect(() => {
+    if (autoOpenComposer && canCreate) setComposerOpen(true);
+  }, [autoOpenComposer, canCreate]);
   const [openGroup, setOpenGroup] = useState<number | null>(null);
   const [startIndex, setStartIndex] = useState(0);
   const [categoryStories, setCategoryStories] = useState<StoryGroup[]>([]);

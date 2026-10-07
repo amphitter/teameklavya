@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { BadgeCheck, CalendarDays, MapPin } from "lucide-react";
-import { UserAvatar, versionedUrl } from "@/components/user-avatar";
+import { UserAvatar, avatarUrlOf, versionedUrl } from "@/components/user-avatar";
+import { AvatarPreview } from "@/components/profile/avatar-preview";
 import { handleOf, compactCount } from "@/lib/social";
 import { OptimizedImage } from "@/components/ui/optimized-image";
 
@@ -57,6 +59,8 @@ export function ProfileHeader({
   actions,
   onOpenFollowers,
   onOpenFollowing,
+  onChangePhoto,
+  isOwn,
 }: {
   user: {
     _id?: string;
@@ -72,7 +76,11 @@ export function ProfileHeader({
   actions?: React.ReactNode;
   onOpenFollowers?: () => void;
   onOpenFollowing?: () => void;
+  /** Own profile: the edit flow owns "change photo"; the preview hands off to it. */
+  onChangePhoto?: () => void;
+  isOwn?: boolean;
 }) {
+  const [avatarOpen, setAvatarOpen] = useState(false);
   const p = user.profile || {};
   const chips = [p.institution, p.course, p.year].filter(Boolean);
   const interests = (p.interests || []).slice(0, 6);
@@ -118,7 +126,23 @@ export function ProfileHeader({
               the card — a giant pill outline lying across the cover, with the
               photo parked at its left edge. The ring must hug the avatar. */}
           <div className="w-fit shrink-0 rounded-full border-4 border-card">
-            <UserAvatar user={user} size={96} className="!h-24 !w-24" />
+            {/* Tapping the avatar opens it at full size (Phase 4). This is the
+                one surface where the avatar had no handler: in the feed it is a
+                Link to the profile, and hijacking that would put two meanings
+                on one image. On your own profile the camera button below still
+                owns "change photo" — the preview is how you check the canonical
+                crop Phase 2 produced. */}
+            <button
+              type="button"
+              onClick={() => setAvatarOpen(true)}
+              /* The label says what is actually there: with no photo the preview
+                 shows the initials fallback (and, on your own profile, the way to
+                 add one), so announcing "View profile photo" would be a lie. */
+              aria-label={avatarUrlOf(user) ? "View profile photo" : "Profile photo, not added yet"}
+              className="block rounded-full transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2"
+            >
+              <UserAvatar user={user} size={96} className="!h-24 !w-24" />
+            </button>
           </div>
 
           <div className="min-w-0 flex-1">
@@ -226,6 +250,14 @@ export function ProfileHeader({
           </div>
         )}
       </div>
+
+      <AvatarPreview
+        open={avatarOpen}
+        onClose={() => setAvatarOpen(false)}
+        user={user}
+        isOwn={isOwn}
+        onChangePhoto={onChangePhoto}
+      />
     </div>
   );
 }

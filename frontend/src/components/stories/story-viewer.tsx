@@ -262,9 +262,16 @@ export function StoryViewer({
           )}
         </div>
 
-        {/* Media — tap zones layered over the canvas */}
+        {/* Media — tap zones layered over the canvas.
+            `key={story._id}` + `animate-viewer-in` gives the story-to-story
+            swap a 200ms enter (scale 1.03 → 1, fade) instead of an instant
+            frame change. The keyframes had been in globals.css unused since
+            they were written (docs/PHASE4_FEED_AUDIT.md F3), and the overlay
+            itself only faded in ONCE, on open. Reduced-motion neutralises it
+            globally via the existing @media block. */}
         <div
-          className="relative flex-1 overflow-hidden bg-black"
+          key={story._id}
+          className="relative flex-1 overflow-hidden bg-black animate-viewer-in"
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             const x = e.clientX - rect.left;

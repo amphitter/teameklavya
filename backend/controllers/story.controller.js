@@ -113,9 +113,26 @@ function shape(story, { viewerId } = {}) {
 }
 
 /** Stories the viewer follows, grouped per author — the shape the rail wants. */
+/**
+ * The ids this viewer follows — the audience for their story rail.
+ *
+ * This read `select("following")` and mapped `r.following`, but the Follow
+ * model's field is **`followee`**. `r.following` was therefore always
+ * `undefined`, the `$in` audience matched nobody, and a signed-in viewer saw
+ * only their OWN stories: the rail's whole promise ("stories from people you
+ * follow") silently rendered an empty list for everyone whose friends had
+ * posted. It looked like "nobody posted a story today", which is why it
+ * survived.
+ *
+ * `status: "accepted"` is deliberate: a follow request to a private account is
+ * not a relationship yet, and pending rows must not reveal that account's
+ * stories.
+ */
 async function followingIds(userId) {
-  const rows = await Follow.find({ follower: userId }).select("following").lean();
-  return rows.map((r) => r.following);
+  const rows = await Follow.find({ follower: userId, status: "accepted" })
+    .select("followee")
+    .lean();
+  return rows.map((r) => r.followee).filter(Boolean);
 }
 
 const AUTHOR_SELECT = "firstName lastName username verified profile.avatar profile.coverImage";

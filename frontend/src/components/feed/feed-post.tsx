@@ -62,6 +62,13 @@ export function FeedPost({
   const [archived, setArchived] = useState(Boolean(post.archivedAt));
   const [archiving, setArchiving] = useState(false);
   const [heartBursts, setHeartBursts] = useState<{ id: number; x: number; y: number }[]>([]);
+  /* Bumped only when the post becomes liked — drives `animate-like-pop` and,
+     just as importantly, drives it for a DOUBLE-TAP too (the burst plays over
+     the media; the small icon in the action row confirms it). */
+  const [likePop, setLikePop] = useState(0);
+  /* Same idea for the bookmark: `animate-save-press` had been sitting in
+     globals.css unused since it was written. */
+  const [savePress, setSavePress] = useState(0);
   const lastTapRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const lastTapTimeRef = useRef(0);
 
@@ -110,6 +117,10 @@ export function FeedPost({
       toast.info("Sign in to like posts");
       return;
     }
+    // `animate-like-pop` (globals.css) keyed on a counter, so the pop fires on
+    // the moment the post BECOMES liked — the part of the gesture that means
+    // something — and not on an unlike.
+    if (!liked) setLikePop((n) => n + 1);
     // optimistic
     setLiked((p) => !p);
     setLikeCount((p) => p + (liked ? -1 : 1));
@@ -139,6 +150,7 @@ export function FeedPost({
    */
   const likeFromDoubleTap = async () => {
     setHeartBursts((prev) => [...prev, { id: Date.now() + Math.random(), x: lastTapRef.current.x, y: lastTapRef.current.y }]);
+    setLikePop((n) => n + 1);
     if (!user) {
       toast.info("Sign in to like posts");
       return;
@@ -166,6 +178,7 @@ export function FeedPost({
       toast.info("Sign in to save posts");
       return;
     }
+    if (!saved) setSavePress((n) => n + 1);
     setSaved((p) => !p);
     try {
       const res = await api.post(`/posts/${post._id}/save`);
@@ -245,7 +258,14 @@ export function FeedPost({
 
   return (
     <>
-    <article className="relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5">
+    <article
+      /* The id makes one post addressable. Every harness that tried to talk
+         about "the post with the photo" by position matched a different post as
+         soon as the feed grew, and a like that lands on the wrong post is
+         indistinguishable from a like that never landed. */
+      data-post-id={post._id}
+      className="relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5"
+    >
       {/* Header */}
       <header className="flex items-center gap-3">
         <Link href={profilePathOf(post.author)} aria-label={`View ${post.author?.firstName}'s profile`}>
@@ -367,6 +387,11 @@ export function FeedPost({
           intercept a scroll or the second tap of the gesture. */}
       {post.images?.length > 0 && (
         <div
+          /* The double-tap surface. It carries a testid because every harness
+             that tried to find "the post's image" by `article img` hit the
+             40x40 avatar in the header instead — and a double-tap on an avatar
+             is a different gesture entirely. */
+          data-testid="post-media"
           className={cn(
             "mt-3 grid gap-1.5 overflow-hidden rounded-xl",
             post.images.length === 1 ? "grid-cols-1" : "grid-cols-2"
@@ -446,7 +471,10 @@ export function FeedPost({
           )}
         >
           <motion.span whileTap={{ scale: 1.35 }} transition={{ type: "spring", stiffness: 500, damping: 15 }}>
-            <Heart className={cn("h-[18px] w-[18px]", liked && "fill-destructive")} />
+            <Heart
+              key={likePop}
+              className={cn("h-[18px] w-[18px]", liked && "fill-destructive", likePop > 0 && "animate-like-pop")}
+            />
           </motion.span>
           {likeCount > 0 && compactCount(likeCount)}
         </button>
@@ -480,7 +508,10 @@ export function FeedPost({
             saved ? "text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
           )}
         >
-          <Bookmark className={cn("h-[18px] w-[18px]", saved && "fill-primary")} />
+          <Bookmark
+            key={savePress}
+            className={cn("h-[18px] w-[18px]", saved && "fill-primary", savePress > 0 && "animate-save-press")}
+          />
         </button>
       </div>
 

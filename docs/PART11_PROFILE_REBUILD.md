@@ -22,8 +22,8 @@ blocking the whole feature turned out to be a paint-order bug that made the
 | 1 | Edit profile reachable, one click = one save, messages layout bug | **done** `170c4e5` |
 | 2 | Canonical avatar/cover (crop, one square, every surface) | **done** `4bf3a70` — `docs/PHASE2_AVATAR_CANONICAL.md` |
 | 3 | Profile rebuild: header, tabs, feed post component, media grid, Saved/Liked/Archive | **done** — `docs/PHASE3_PROFILE_AND_LISTS.md` (audit: `docs/PHASE3_PROFILE_AUDIT.md`) |
-| 4 | Feed aliveness + micro-interactions (§20–21) | not started |
-| 5 | Final acceptance sweep + the 14-point report | not started |
+| 4 | Feed aliveness + micro-interactions (§20–21) | **done** — `docs/PHASE4_FEED_AND_MOTION.md` (audit: `docs/PHASE4_FEED_AUDIT.md`) |
+| 5 | Final acceptance sweep + the 14-point report | next |
 
 ---
 
@@ -91,6 +91,13 @@ whatever the user uploaded and every surface crops it independently.
   six widths (320/360/375/390/412/430) with zero horizontal overflow, and the
   cross-surface avatar check: profile, feed, comments, messages, notifications.
 * The §34 report, answering all fourteen points from measurement.
+
+> **Before starting:** the literal §33 / §34 lists from the original brief are
+> not in this repository — the plan only refers to them. Phase 4 and Phase 3
+> both delivered against the parts of that list they could reconstruct
+> (six widths, the avatar check, real data only, the request budget). The list
+> itself needs to come from the brief or from `docs/UI-UX-AUDIT.md` rather than
+> being invented.
 
 ---
 

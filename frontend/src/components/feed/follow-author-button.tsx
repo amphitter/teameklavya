@@ -103,11 +103,17 @@ export function FollowAuthorButton({
     <button
       type="button"
       onClick={toggle}
-      disabled={busy}
+      aria-busy={busy}
       aria-pressed={isFollowing}
       className={cn(
+        /* 36px tall, not the 25px this pill used to be. Measured at every width
+           in docs/mobile-qa/phase4-widths.js: 77x25 is 40% of Apple's 44px
+           target and awkward for a thumb, and this pill IS the point of the
+           people card. 36px stays compact in a three-row card while being a real
+           target. Height rather than padding — padding fights the line-height,
+           and `h-9` also survives a longer label like "Requested". */
         "shrink-0 rounded-full font-bold transition-colors",
-        size === "sm" ? "px-3 py-1 text-[11px]" : "px-4 py-1.5 text-xs",
+        size === "sm" ? "h-9 px-3 text-[11px]" : "h-9 px-4 text-xs",
         isFollowing
           ? "border border-border bg-muted text-muted-foreground hover:border-destructive/40 hover:bg-destructive/5 hover:text-destructive"
           : isRequested

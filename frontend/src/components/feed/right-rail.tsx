@@ -5,11 +5,11 @@ import { api } from "@/utils/api";
 import Link from "next/link";
 import { cloudinaryUrl } from "@/utils/image";
 import { compactCount } from "@/lib/social";
-import { fetchEventsWithCounts } from "@/lib/events";
 import { UserAvatar } from "@/components/user-avatar";
 import { FollowAuthorButton } from "@/components/feed/follow-author-button";
 import type { SessionUser } from "@/components/shell/use-session-user";
 import type { FeedPostData } from "@/components/feed/types";
+import { useFeedDiscovery } from "@/components/feed/use-feed-discovery";
 
 /** Minimal shape both registered events and public event cards satisfy. */
 interface RailEvent {
@@ -32,15 +32,6 @@ interface LbEntry {
   rank: number;
   score: number;
   user?: { _id: string; firstName?: string; lastName?: string; email?: string; profile?: { avatar?: string } } | null;
-}
-
-/** GET /api/users/suggested shape (deterministic: mutuals / co-registration / institution). */
-interface SuggestedUser {
-  _id: string;
-  firstName?: string;
-  lastName?: string;
-  username?: string;
-  profile?: { avatar?: string; institution?: string };
 }
 
 interface TrendingTopic {
@@ -104,8 +95,9 @@ function railDate(iso?: string): string {
  *     has a quiz currently live.
  *  3. Trending now — real topic volume (30d posts) + trending events
  *     (registrations + recent engagement). Deterministic, no ML.
- *  4. Builders to follow — /users/suggested (mutuals, co-registered,
- *     same institution) with a feed-authors fallback for brand-new users.
+ *  4. Builders to follow — /users/suggested (mutuals, co-registered, same
+ *     institution). There is no generic fallback: with no signal the endpoint
+ *     correctly returns nobody, and this section renders empty.
  *  5. Organizations to follow — orgs behind the user's registered events.
  */
 export function RightRail({
@@ -121,49 +113,37 @@ export function RightRail({
   entries: LbEntry[];
   posts: FeedPostData[];
 }) {
-  const [publicUpcoming, setPublicUpcoming] = useState<RailEvent[]>([]);
-  const [suggested, setSuggested] = useState<SuggestedUser[]>([]);
   const [trendingTopics, setTrendingTopics] = useState<TrendingTopic[]>([]);
   const [trendingEvents, setTrendingEvents] = useState<RailEvent[]>([]);
   const [suggestedOrgs, setSuggestedOrgs] = useState<SuggestedOrg[]>([]);
 
-  // Logged-out visitors still get real upcoming events (public discovery)
-  useEffect(() => {
-    if (user) return;
-    let cancelled = false;
-    fetchEventsWithCounts({ status: "upcoming", limit: 3 })
-      .then(({ events }) => {
-        if (!cancelled)
-          setPublicUpcoming(
-            events.map((e) => ({
-              _id: e._id,
-              title: e.title,
-              slug: e.slug,
-              bannerUrl: e.bannerUrl,
-              startDate: e.startDate || "",
-              venue: e.venue,
-              participantCount: e.participantCount,
-            }))
-          );
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  // Suggested people (deterministic signals) — signed-in only
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    api
-      .get("/users/suggested", { params: { limit: 3 } })
-      .then((r) => !cancelled && setSuggested(r.data?.users || []))
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
+  /* Upcoming events and suggested people now come from the SHARED discovery
+     hook, which the feed's interleaved cards also use.
+   *
+   * Why this changed: the phase-4 cards need exactly this data, and leaving the
+   * rail to fetch it separately made a phone load `/users/suggested` twice and
+   * `/events?status=upcoming` twice per visit (measured — see
+   * docs/PHASE4_FEED_AUDIT.md D4, which promised one fetch per kind). The two
+   * effects that used to live here also had a subtler fault: the logged-out
+   * events fetch guarded on `!user`, but `user` is null for the first render of
+   * every signed-in visit, so it fired and then threw the result away.
+   *
+   * The trade: the rail's public "upcoming" list no longer carries
+   * `participantCount`, because that costs a second batch call
+   * (`/registration/responses/counts/batch`) purely to decorate a card a
+   * signed-out visitor cannot act on. Signed-in users still see their own
+   * registered events with real counts — that data arrives with the events
+   * themselves and costs nothing. */
+  const discovery = useFeedDiscovery();
+  const publicUpcoming: RailEvent[] = discovery.events.slice(0, 3).map((e) => ({
+    _id: e._id,
+    title: e.title,
+    slug: e.slug,
+    bannerUrl: e.bannerUrl,
+    startDate: e.startDate || "",
+    venue: e.venue,
+  }));
+  const suggested = discovery.people.slice(0, 3);
 
   // Suggested organizations — orgs behind my registered events
   useEffect(() => {

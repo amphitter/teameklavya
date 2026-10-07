@@ -18,6 +18,8 @@ import { LiveEventHero } from "@/components/feed/live-event-hero";
 import type { LiveEventData } from "@/components/feed/live-event-hero";
 import { LivePulseStrip } from "@/components/feed/live-pulse-strip";
 import { RightRail } from "@/components/feed/right-rail";
+import { DiscoveryCard } from "@/components/feed/discovery-card";
+import { useFeedDiscovery } from "@/components/feed/use-feed-discovery";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import type { FeedPostData } from "@/components/feed/types";
 import { cn } from "@/lib/utils";
@@ -227,6 +229,54 @@ export function FeedView() {
     return [...created, ...feed.items.filter((p) => !gone.has(p._id))];
   }, [created, removed, feed.items]);
 
+  /* ── The rhythm ──────────────────────────────────────────────────────────
+   *
+   * Phase 4. Ten identical post cards in a column is what "static" looks like,
+   * and every piece of real discovery content in this app was `hidden
+   * xl:block` inside the desktop rail — invisible on every phone
+   * (docs/PHASE4_FEED_AUDIT.md F1/F2).
+   *
+   * One card after every third post, cycling events → people → communities,
+   * skipping any kind with no rows. `for-you` only: Following's contract is
+   * "posts from people you follow, in order", and a suggestion in there would
+   * be a lie about what that tab is.
+   *
+   * The list is built from `posts` AFTER the created/removed overlays, so
+   * composing a post or archiving one shifts the cards with it instead of
+   * leaving a stale gap.
+   */
+  const discovery = useFeedDiscovery();
+  const stream = useMemo(() => {
+    type Item =
+      | { key: string; kind: "post"; post: FeedPostData }
+      | { key: string; kind: "events" | "people" | "communities" };
+
+    const items: Item[] = posts.map((p) => ({ key: `post-${p._id}`, kind: "post" as const, post: p }));
+    if (tab !== "for-you") return items;
+
+    const available = (["events", "people", "communities"] as const).filter((k) => discovery[k].length > 0);
+    if (available.length === 0) return items;
+
+    const out: Item[] = [];
+    let sinceCard = 0;
+    let cardIndex = 0;
+    for (const item of items) {
+      out.push(item);
+      if (item.kind !== "post") continue;
+      sinceCard += 1;
+      /* Never on the last post of the list: a card that lands after the final
+         card has nothing to break up and reads as a stray. */
+      const isLast = item === items[items.length - 1];
+      if (sinceCard >= 3 && !isLast && out.length > 3) {
+        const kind = available[cardIndex % available.length];
+        out.push({ key: `card-${kind}-${cardIndex}`, kind });
+        cardIndex += 1;
+        sinceCard = 0;
+      }
+    }
+    return out;
+  }, [posts, tab, discovery]);
+
   const onCreated = (post: FeedPostData) => {
     setCreated((c) => [post, ...c]);
     window.scrollTo({ top: topOfFeed.current, behavior: "smooth" });
@@ -421,9 +471,24 @@ export function FeedView() {
             )
           ) : (
             <>
-              {posts.map((p) => (
-                <FeedPost key={p._id} post={p} onDeleted={onDeleted} onArchived={onArchived} />
-              ))}
+              {stream.map((item) =>
+                item.kind === "post" ? (
+                  <FeedPost
+                    key={item.key}
+                    post={item.post}
+                    onDeleted={onDeleted}
+                    onArchived={onArchived}
+                  />
+                ) : (
+                  <DiscoveryCard
+                    key={item.key}
+                    kind={item.kind}
+                    events={discovery.events}
+                    people={discovery.people}
+                    communities={discovery.communities}
+                  />
+                )
+              )}
               {feed.hasMore && (
                 <div className="pt-1 text-center">
                   <Button variant="outline" onClick={() => feed.fetchNextPage()} disabled={feed.isFetchingMore}>

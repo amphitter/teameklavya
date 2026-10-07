@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -229,12 +229,33 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  const followInFlight = useRef(false);
+
+  /* Optimistic follow — same behaviour as the shared FollowAuthorButton pill in
+     the feed, which this button quietly disagreed with.
+   *
+   * Before: the label only changed after `api.post` resolved, and the button was
+   * `disabled` for the whole round-trip, so on a slow connection tapping Follow
+   * looked like nothing happened (measured on a real phone-sized viewport: the
+   * label flipped at +2038ms, 6ms AFTER the response). The follow itself always
+   * worked; the transition did not exist.
+   *
+   * The server still has the last word — a private account answers "requested",
+   * not "following" — and a genuine failure rolls the label back. Cancelled,
+   * stale and unmounted requests stay silent, as everywhere else in this app. */
   const toggleFollow = async () => {
     if (!me) {
       router.push(`/login?returnUrl=${encodeURIComponent(`/profile/${id}`)}`);
       return;
     }
+    if (followInFlight.current) return; // one tap, one request
+    const wasFollowing = following;
+    const wasRequested = requested;
+    const next = !(following || requested);
+    followInFlight.current = true;
     setFollowBusy(true);
+    setFollowing(next);
+    setRequested(false);
     try {
       const res = await api.post(`/follow/${profileUser._id}`);
       if (res.data?.success) {
@@ -251,10 +272,17 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
           setStats((s) => (s ? { ...s, followers: s.followers - 1 } : s));
           toast.success(res.data.wasPending ? "Request cancelled" : "Unfollowed");
         }
+      } else {
+        setFollowing(wasFollowing);
+        setRequested(wasRequested);
       }
     } catch {
+      /* A genuine failure rolls the optimistic label back and says so. */
+      setFollowing(wasFollowing);
+      setRequested(wasRequested);
       toast.error("Couldn't update follow");
     } finally {
+      followInFlight.current = false;
       setFollowBusy(false);
     }
   };
@@ -341,6 +369,8 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
     <>
     <div className="mx-auto w-full max-w-4xl space-y-5 px-3 py-5 sm:px-6 sm:py-7">
       <ProfileHeader
+        isOwn={isMe}
+        onChangePhoto={() => setEditOpen(true)}
         user={profileUser}
         stats={stats}
         onOpenFollowers={() => setListModal("followers")}
@@ -363,7 +393,7 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
                 size="sm"
                 variant={following || requested ? "outline" : "default"}
                 onClick={toggleFollow}
-                disabled={followBusy}
+                aria-busy={followBusy}
                 className="gap-1.5"
               >
                 <UserPlus className="h-3.5 w-3.5" />

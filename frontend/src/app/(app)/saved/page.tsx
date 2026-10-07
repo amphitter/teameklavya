@@ -53,7 +53,7 @@ export default function SavedPage() {
         <EmptyState
           icon={Bookmark}
           title="Nothing saved yet"
-          description="Tap the bookmark on any post to keep it here for later."
+          description="Save something you want to come back to — tap the bookmark on any post."
           actionLabel="Back to feed"
           onAction={() => router.push("/")}
         />

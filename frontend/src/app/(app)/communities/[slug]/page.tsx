@@ -729,7 +729,7 @@ export default function CommunityPage() {
             {posts.length === 0 ? (
               <EmptyState
                 icon={UsersRound}
-                title="No posts yet"
+                title="Your story starts here."
                 description="Start the conversation — only members can see community posts."
               />
             ) : (

@@ -407,7 +407,7 @@ export default function OrganizationPage() {
               (posts.length === 0 ? (
                 <EmptyState
                   icon={Megaphone}
-                  title="No posts yet"
+                  title="Your story starts here."
                   description={`Announcements and event shares from ${org.name} will appear here.`}
                 />
               ) : (

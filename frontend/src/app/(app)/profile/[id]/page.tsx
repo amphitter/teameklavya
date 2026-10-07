@@ -339,7 +339,7 @@ export default function PublicProfilePage() {
             (posts.length === 0 ? (
               <EmptyState
                 icon={CalendarDays}
-                title="No posts yet"
+                title="Your story starts here."
                 description={`When ${profileUser.firstName} shares event moments, they'll appear here.`}
               />
             ) : (

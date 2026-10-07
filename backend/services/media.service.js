@@ -71,6 +71,130 @@ function validateImageBuffer(buffer, mimetype, folder = "misc") {
     // Not leaked to the client in detail — just a clean rejection (§61).
     return "File contents don't match the declared image type";
   }
+
+  // §28 — the file is a real image of the declared type. Now check it is not a
+  // decompression bomb: a valid 60 000x60 000 PNG is a few KB on the wire.
+  const dimensionError = validateDimensions(buffer);
+  if (dimensionError) return dimensionError;
+
+  return null;
+}
+
+
+/**
+ * Read an image's pixel dimensions from its header (§28).
+ *
+ * Magic bytes prove a file IS a PNG; they say nothing about how big it is. A
+ * 60 000 × 60 000 PNG is a few kilobytes on the wire and several gigabytes
+ * once decoded — the classic decompression bomb. The byte-size ceiling does
+ * not catch it, because the wire size is tiny by design.
+ *
+ * Only the header is parsed. We deliberately never decode the image, because
+ * decoding is where the bomb goes off.
+ *
+ * @returns {{width:number,height:number}|null} null when the header is
+ *          unrecognisable — which validateImageBuffer already rejects via
+ *          magic bytes, so this is belt-and-braces only.
+ */
+function readDimensions(buffer) {
+  // No global minimum length here: the formats need different amounts (GIF 10
+  // bytes, PNG 24, JPEG more), and one shared floor silently disables the
+  // check for the shortest format — which is the one an attacker would pick.
+  if (!buffer || buffer.length < 10) return null;
+
+  // PNG: 8-byte signature, then IHDR with width/height as big-endian uint32.
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    if (buffer.length < 24) return null;
+    const width = buffer.readUInt32BE(16);
+    const height = buffer.readUInt32BE(20);
+    return { width, height };
+  }
+
+  // GIF: "GIF8" then width/height as little-endian uint16.
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+    if (buffer.length < 10) return null;
+    return { width: buffer.readUInt16LE(6), height: buffer.readUInt16LE(8) };
+  }
+
+  // WebP: "RIFF"...."WEBP", then a chunk. VP8/VP8L/VP8X each encode
+  // dimensions differently; VP8X carries the true canvas size.
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" &&
+      buffer.slice(8, 12).toString("ascii") === "WEBP") {
+    const fmt = buffer.slice(12, 16).toString("ascii");
+    try {
+      if (fmt === "VP8X" && buffer.length >= 30) {
+        // 24-bit canvas width-1 / height-1, little-endian.
+        const w = 1 + (buffer[24] | (buffer[25] << 8) | (buffer[26] << 16));
+        const h = 1 + (buffer[27] | (buffer[28] << 8) | (buffer[29] << 16));
+        return { width: w, height: h };
+      }
+      if (fmt === "VP8 " && buffer.length >= 30) {
+        // Lossy: 14-bit width/height after the 3-byte frame tag.
+        return {
+          width: buffer.readUInt16LE(26) & 0x3fff,
+          height: buffer.readUInt16LE(28) & 0x3fff,
+        };
+      }
+      if (fmt === "VP8L" && buffer.length >= 25) {
+        const bits = buffer.readUInt32LE(21);
+        return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  // JPEG: scan segments for SOF0–SOF3, SOF5–SOF7, SOF9–SOF11, SOF13–SOF15,
+  // which carry height (uint16 BE) then width.
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < buffer.length) {
+      if (buffer[offset] !== 0xff) { offset += 1; continue; }
+      const marker = buffer[offset + 1];
+      // Standalone markers carry no length field.
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) {
+        offset += 2; continue;
+      }
+      const length = buffer.readUInt16BE(offset + 2);
+      if (length < 2) return null;
+      const isSOF =
+        (marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf);
+      if (isSOF) {
+        if (offset + 9 >= buffer.length) return null;
+        return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) };
+      }
+      offset += 2 + length;
+    }
+    return null;
+  }
+
+  return null;
+}
+
+/**
+ * §28 dimensions ceiling. Width and height are capped individually — a
+ * 10 000 × 10 pixel strip is not a photo — and total pixels are capped too,
+ * because memory at decode time scales with pixels, not with either side.
+ */
+const MAX_DIMENSION_PX = 12000;      // per side
+const MAX_TOTAL_PIXELS = 80_000_000; // ~80 MP; well beyond any real photo
+
+function validateDimensions(buffer) {
+  const dims = readDimensions(buffer);
+  if (!dims) return null; // magic-byte check already handles unrecognised files
+
+  const { width, height } = dims;
+  if (width <= 0 || height <= 0) return "That image has invalid dimensions";
+  if (width > MAX_DIMENSION_PX || height > MAX_DIMENSION_PX) {
+    return `Image dimensions are too large (max ${MAX_DIMENSION_PX}px per side)`;
+  }
+  if (width * height > MAX_TOTAL_PIXELS) {
+    return "Image has too many pixels to process safely";
+  }
   return null;
 }
 
@@ -247,6 +371,10 @@ module.exports = {
   validateImageFile,
   validateImageBuffer,
   validateImageMimetype,
+  validateDimensions,
+  readDimensions,
+  MAX_DIMENSION_PX,
+  MAX_TOTAL_PIXELS,
   markAttached,
   markCleanupPending,
   ALLOWED_MIME_TYPES,

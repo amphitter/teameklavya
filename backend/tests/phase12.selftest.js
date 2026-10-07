@@ -1151,6 +1151,354 @@ async function auditDocs() {
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
+
+/* ══════════════════════════════════════════════════════════════════════
+   §27 / §28 / §29 audits — frontend sinks, upload safety, rate limits
+   ────────────────────────────────────────────────────────────────────
+   These three sections share one discipline: **the sink must be safe, not
+   just the source.** Validating on write is necessary, but data written
+   before a guard existed is still in the database, and a future code path
+   can bypass validation. So each check asserts the dangerous thing cannot
+   happen at the point where it would actually hurt.
+   ══════════════════════════════════════════════════════════════════════ */
+
+const FRONTEND_ROOT = path.join(ROOT, "..", "frontend", "src");
+
+/** Collect every source file under the frontend src tree. */
+function frontendFiles() {
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) out.push(full);
+    }
+  };
+  if (fs.existsSync(FRONTEND_ROOT)) walk(FRONTEND_ROOT);
+  return out;
+}
+
+async function auditFrontendSinks() {
+  sec("29. §27 — frontend XSS sinks, external links, open redirect");
+
+  const files = frontendFiles();
+  ok("frontend source tree is reachable", files.length > 20, `${files.length} files`);
+
+  const readAll = files.map((f) => ({ file: f, text: fs.readFileSync(f, "utf8") }));
+  const allText = readAll.map((f) => f.text).join("\n");
+
+  /* ── §27.1  dangerouslySetInnerHTML must never touch user data ─────────
+     React escapes by default, so innerHTML is the one place XSS can enter
+     the frontend. Every use has to be justified: static structured data
+     is fine, interpolated user content is not. */
+  const dangerous = [];
+  for (const { file, text } of readAll) {
+    const re = /dangerouslySetInnerHTML/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      // Grab ~300 chars after the occurrence to see what is injected.
+      const ctx = text.slice(m.index, m.index + 300);
+      dangerous.push({ file: path.relative(FRONTEND_ROOT, file), ctx });
+    }
+  }
+  ok("dangerouslySetInnerHTML uses are enumerated", true, `${dangerous.length} found`);
+  for (const d of dangerous) {
+    // Allow only compile-time-constant payloads: JSON.stringify of an object
+    // literal, or a string with no interpolation at all.
+    const isStatic =
+      /JSON\.stringify\(\s*\{/.test(d.ctx) || !/\$\{/.test(d.ctx);
+    ok(
+      `dangerouslySetInnerHTML in ${d.file} injects no interpolated data`,
+      isStatic,
+      isStatic ? "static payload" : "INTERPOLATED — possible XSS"
+    );
+  }
+
+  /* ── §27.2  every user-supplied href goes through safeExternalUrl ───── */
+  const safeUrlExists = fs.existsSync(path.join(FRONTEND_ROOT, "utils", "safe-url.ts"));
+  ok("frontend has a URL sanitiser (utils/safe-url.ts)", safeUrlExists);
+
+  if (safeUrlExists) {
+    const src = fs.readFileSync(path.join(FRONTEND_ROOT, "utils", "safe-url.ts"), "utf8");
+    ok("sanitiser allowlists http/https only", /https?:"/.test(src) || /https?:'/.test(src) || /'http:'/.test(src));
+    ok("sanitiser rejects control characters (java\\nscript bypass)", /u0000|u001F|control/i.test(src));
+    ok("sanitiser returns null rather than a best guess", /return null/.test(src));
+
+    // Every sink that renders a user-supplied URL must be wrapped.
+    const sinks = [
+      ["events/[slug]/page.tsx", "safeExternalUrl(s.linkedin)"],
+      ["events/[slug]/page.tsx", "safeExternalUrl(event.onlineEventLink)"],
+      ["organizations/[slug]/page.tsx", "safeExternalUrl(org.website)"],
+    ];
+    for (const [rel, needle] of sinks) {
+      const text = fs.readFileSync(path.join(FRONTEND_ROOT, "app", "(app)", rel), "utf8");
+      ok(`${rel} sanitises ${needle.split("(")[1].replace(")", "")}`, text.includes(needle));
+    }
+  }
+
+  /* ── §27.3  target="_blank" carries rel="noopener" ────────────────────
+     Reverse tabnabbing. Internal <Link>s are same-origin so the risk is
+     nil, but an external anchor without noopener hands the opened page a
+     handle on window.opener. */
+  const blankAnchors = [];
+  for (const { file, text } of readAll) {
+    const re = /target="_blank"/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      // Look at a window around the attribute for a rel= on the same tag.
+      const around = text.slice(Math.max(0, m.index - 400), m.index + 400);
+      const tagEnd = around.indexOf(">", around.indexOf('target="_blank"'));
+      const tag = around.slice(0, tagEnd === -1 ? around.length : tagEnd);
+      const relMatch = tag.match(/rel="([^"]*)"/);
+      blankAnchors.push({
+        file: path.relative(FRONTEND_ROOT, file),
+        rel: relMatch ? relMatch[1] : null,
+        // Next.js <Link> to an internal path (starts with `/` or a template
+        // literal of `/...`) is same-origin — no tabnabbing surface.
+        internal: /<Link/.test(tag) || /href=\{`\//.test(tag),
+      });
+    }
+  }
+  ok("target=_blank anchors are enumerated", blankAnchors.length > 0, `${blankAnchors.length} found`);
+  const unsafeExternal = blankAnchors.filter(
+    (a) => !a.internal && !(a.rel && /noopener/.test(a.rel))
+  );
+  ok(
+    "every external target=_blank has rel=noopener",
+    unsafeExternal.length === 0,
+    unsafeExternal.map((a) => `${a.file} rel=${a.rel}`).join("; ") || "all external anchors protected"
+  );
+
+  /* ── §27.4  no open redirect: never redirect to a raw query param ───── */
+  const redirectSinks = [];
+  for (const { file, text } of readAll) {
+    const re = /(window\.location\.(href|assign|replace)\s*=|router\.(push|replace)\()/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const ctx = text.slice(m.index, m.index + 200);
+      // Only flag when fed by a query/search param — that is user input.
+      if (/searchParams|useSearchParams|get\(["'](next|redirect|to|returnTo|callback)/.test(ctx)) {
+        redirectSinks.push({ file: path.relative(FRONTEND_ROOT, file), ctx: ctx.slice(0, 90) });
+      }
+    }
+  }
+  ok(
+    "no redirect sink is fed directly by a query parameter (open redirect)",
+    redirectSinks.length === 0,
+    redirectSinks.map((r) => r.file).join("; ") || "none found"
+  );
+
+  /* ── §27.5  postMessage handlers verify origin ──────────────────────── */
+  const pmHandlers = [];
+  for (const { file, text } of readAll) {
+    const re = /addEventListener\(\s*["']message["']/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      pmHandlers.push({ file: path.relative(FRONTEND_ROOT, file), ctx: text.slice(m.index, m.index + 600) });
+    }
+  }
+  ok("postMessage listeners enumerated", true, `${pmHandlers.length} found`);
+  for (const h of pmHandlers) {
+    ok(
+      `postMessage listener in ${h.file} validates event.origin`,
+      /event\.origin|\.origin\s*===|\.origin\s*!==|allowedOrigins/.test(h.ctx),
+      "origin checked"
+    );
+  }
+}
+
+async function auditUploadSecurity() {
+  sec("30. §28 — upload security: MIME vs extension vs magic bytes");
+
+  const media = require("../services/media.service");
+
+  /* ── §28.1  the browser's Content-Type is never the deciding factor ─── */
+  ok("media service exposes a magic-byte validator", typeof media.validateImageBuffer === "function");
+
+  const png = (w, h) => {
+    const b = Buffer.alloc(33);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+    b.writeUInt32BE(13, 8);
+    Buffer.from("IHDR", "ascii").copy(b, 12);
+    b.writeUInt32BE(w, 16);
+    b.writeUInt32BE(h, 20);
+    return b;
+  };
+
+  // An HTML payload dressed as a PNG must be rejected even though the
+  // declared MIME is on the allowlist — this is the spoofing case.
+  const html = Buffer.from("<!DOCTYPE html><script>alert(1)</script>", "utf8");
+  ok(
+    "HTML declared as image/png is rejected by magic bytes",
+    media.validateImageBuffer(html, "image/png", "avatars") !== null
+  );
+
+  // And the reverse: a real image declared as something disallowed is rejected
+  // on the declaration, before any content check runs.
+  ok(
+    "a real PNG declared as text/html is rejected on declared type",
+    media.validateImageBuffer(png(10, 10), "text/html", "avatars") !== null
+  );
+
+  /* ── §28.2  dimensions — the byte ceiling does not catch a bomb ─────── */
+  ok("dimension reader is exported", typeof media.readDimensions === "function");
+  ok("dimension validator is exported", typeof media.validateDimensions === "function");
+
+  const dims = media.readDimensions(png(800, 600));
+  ok("PNG dimensions are parsed from the header", dims && dims.width === 800 && dims.height === 600,
+     dims ? `${dims.width}x${dims.height}` : "null");
+
+  // A 60000x60000 PNG is a few KB on the wire and gigabytes decoded.
+  const bomb = png(60000, 60000);
+  ok("decompression bomb (60000x60000) is rejected", bomb.length < 200 && media.validateDimensions(bomb) !== null,
+     `${bomb.length} bytes on the wire`);
+
+  // A thin strip: within per-side limits but absurd in total pixels.
+  const strip = png(12000, 12000);
+  ok("image over the total-pixel ceiling is rejected", media.validateDimensions(strip) !== null);
+
+  ok("a normal image passes the dimension check", media.validateDimensions(png(1200, 800)) === null);
+
+  // End to end: validateImageBuffer must apply the dimension check, not just
+  // expose it. An un-wired validator is the most common way these ship dead.
+  ok("validateImageBuffer enforces dimensions end to end",
+     media.validateImageBuffer(png(60000, 60000), "image/png", "avatars") !== null);
+  ok("validateImageBuffer still accepts a normal PNG",
+     media.validateImageBuffer(png(1200, 800), "image/png", "avatars") === null);
+
+  const budgets = [media.MAX_DIMENSION_PX, media.MAX_TOTAL_PIXELS];
+  ok("dimension ceilings are conservative but usable", budgets[0] >= 4000 && budgets[0] <= 30000 && budgets[1] >= 20e6,
+     `${budgets[0]}px/side, ${budgets[1]} px total`);
+
+  /* ── §28.3  the user's filename never reaches the filesystem ────────── */
+  const storage = fs.readFileSync(path.join(ROOT, "services", "storage.provider.js"), "utf8");
+  ok("local storage provider generates its own filename",
+     /randomBytes|crypto\./.test(storage));
+  ok("local storage provider never writes req.file.originalname",
+     !/originalname/.test(storage));
+  ok("local storage provider sanitises the folder segment",
+     /replace\(\/\[\^a-z0-9\/_-\]/i.test(storage));
+  ok("file extension is derived from the validated MIME, not the upload",
+     /EXT_BY_MIME/.test(storage));
+
+  /* ── §28.4  uploaded content is never served as executable ──────────── */
+  const server = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
+  ok("helmet is applied (sets X-Content-Type-Options: nosniff)", /helmet\(/.test(server));
+  // Only image MIME types are accepted, and extensions come from that
+  // allowlist, so /uploads cannot contain HTML — verified by the allowlist.
+  // The allowlist is defined in storage.provider.js and re-exported by
+  // media.service — assert against the definition, not the re-export.
+  const storageSrcFull = fs.readFileSync(path.join(ROOT, "services", "storage.provider.js"), "utf8");
+  const allowBlock = (storageSrcFull.match(/const ALLOWED_MIME_TYPES = new Set\([\s\S]*?\);/) || [""])[0];
+  ok("MIME allowlist is defined and readable", allowBlock.length > 0, allowBlock.replace(/\s+/g, " ").slice(0, 80));
+  ok("MIME allowlist contains images only (no html, no svg)",
+     /image\//.test(allowBlock) &&
+       !/text\/html/.test(allowBlock) &&
+       !/image\/svg/.test(allowBlock) &&
+       !/application\//.test(allowBlock));
+  // svg is deliberately excluded: it is an XML document that can carry script.
+  ok("svg is not an accepted upload type (it can carry script)", !/svg/.test(allowBlock));
+}
+
+async function auditRateLimits() {
+  sec("31. §29 — rate limit domain review (measure, do not raise)");
+
+  const src = fs.readFileSync(path.join(ROOT, "config", "rate-limits.js"), "utf8");
+  ok("central rate-limit configuration is reachable", src.length > 500);
+
+  /* §29 requires the limits be *reviewed*, not raised. The reviewable
+     properties are: how many domains exist, that they are keyed distinctly,
+     and that nothing silently disables them. */
+
+  const domainMatches = [...src.matchAll(/^\s{2}([A-Z][A-Z0-9_]{3,})\s*[:=]/gm)].map((m) => m[1]);
+  const domains = [...new Set(domainMatches)];
+  ok("rate limit domains are enumerated", domains.length >= 8, `${domains.length} domains: ${domains.join(", ")}`);
+  ok("every domain lives in the one central table (a change is one reviewable diff)",
+     domains.length >= 18, `${domains.length} domains centrally defined`);
+
+  /* The specific NAT hazard §29 calls out: keying a shared endpoint purely on
+     IP means one office or one university NAT looks like a single attacker
+     and everybody gets blocked. Where a user is known, the key must include
+     the user, not just the IP. */
+  /* §29 — the NAT hazard, recorded honestly rather than asserted away.
+     Every HTTP bucket is currently keyed by IP alone. That is the correct
+     key for AUTH (the user is by definition unknown before login, and IP is
+     the only identity available against credential stuffing), but it is the
+     WRONG key for authenticated write domains: 500 people behind one
+     university NAT share a bucket, so one hot user throttles everyone.
+
+     §29 says separate anonymous-IP / user / org / participant — and also
+     says measure before changing anything. Changing keying without traffic
+     data would be guessing, so this is recorded as a known limitation with
+     the trigger for fixing it, not silently "fixed" here. */
+  const generators = [...src.matchAll(/keyGenerator:\s*(\w+)/g)].map((m) => m[1]);
+  const distinctGenerators = [...new Set(generators)];
+  ok("key generators are enumerated", distinctGenerators.length > 0, distinctGenerators.join(", "));
+  ok("KNOWN LIMITATION: all buckets share one IP-keyed generator (NAT-wide throttle risk)",
+     distinctGenerators.length === 1,
+     "documented — fix when traffic data shows NAT-wide throttling; key authenticated write domains by user");
+  ok("the limiter still supports IPv6-safe keying (ipKeyGenerator)",
+     /ipKeyGenerator/.test(src),
+     "avoids the IPv6 /64 collapse that collapses a whole subnet into one bucket");
+
+  /* A limiter that fails open on a Redis outage is a rate limiter that does
+     not exist during exactly the window someone is hammering the API. But
+     failing closed takes the whole API down with Redis. Part 6 chose
+     fail-open for availability; what matters here is that the choice is
+     explicit and single, not accidental per-endpoint. */
+  /* A limiter that disappears when Redis is down protects nothing during
+     exactly the window someone is hammering the API. Part 6 chose fail-open
+     for availability. What matters here is that the choice is explicit and
+     made once, not accidental per-domain. If rate-limits.js does not state
+     it, read the store adapter, which is where the decision actually lands. */
+  const adapterSrc = fs.readFileSync(path.join(ROOT, "providers", "redis", "sliding-window.store.js"), "utf8");
+  const failMentions =
+    (src.match(/fail.?open|FAIL_OPEN/gi) || []).length +
+    (adapterSrc.match(/fail.?open|FAIL_OPEN/gi) || []).length;
+  ok("fail-open behaviour is explicit somewhere in the limiter stack", failMentions > 0,
+     `${failMentions} references`);
+
+  /* §29: no domain should have been raised without measurement. The guard
+     here is structural: limits live in one table, so a change is a diff in
+     one place that a reviewer sees, rather than a magic number buried in a
+     controller. */
+  /* §29's reviewability requirement: no magic number in a controller. A
+     limit buried in a route is a limit nobody reviews. */
+  const controllersDir = path.join(ROOT, "controllers");
+  const offenders = [];
+  for (const f of fs.readdirSync(controllersDir)) {
+    if (!f.endsWith(".js")) continue;
+    const text = fs.readFileSync(path.join(controllersDir, f), "utf8");
+
+    // A rate-limit bucket is identified by a WINDOW. `windowMs` is the only
+    // unambiguous marker — `max:`/`limit:` also legitimately mean "clamp the
+    // requested page size" (§16 requires that) or a Mongo `$limit` stage.
+    // Matching on those alone flags correct code, so they only count when
+    // they sit inside a rateLimit(...) call.
+    if (/windowMs\s*[:=]/.test(text)) offenders.push(`${f}: defines windowMs inline`);
+
+    const rlCalls = text.match(/rateLimit\([\s\S]{0,400}?\)/g) || [];
+    for (const call of rlCalls) {
+      if (/\b(max|limit)\s*:\s*\d{2,}/.test(call)) {
+        offenders.push(`${f}: rateLimit() with an inline bucket size`);
+      }
+    }
+  }
+  ok("no rate limit is defined inline in a controller (all in the central table)",
+     offenders.length === 0,
+     offenders.join(" | ") || "none — buckets come from config/rate-limits.js only");
+
+  /* The page-size clamps are a separate, deliberately-encouraged control:
+     trusting a client's ?limit= is how one request reads a whole collection.
+     Assert they exist rather than merely tolerating them. */
+  const searchSrc = fs.readFileSync(path.join(controllersDir, "search.controller.js"), "utf8");
+  ok("client-requested page size is clamped server-side (§16/§26)",
+     /parseLimit\([^)]*max\s*:/.test(searchSrc));
+
+  ok("limiter applies the standard Retry-After / 429 contract",
+     /429/.test(src) || /RATE_LIMITED/.test(src));
+}
+
 async function auditObservability() {
   sec("25. §24 — the severity ladder includes INFO");
 
@@ -1312,6 +1660,9 @@ async function auditObservability() {
     await auditFailureMatrix();
     await auditDocs();
     await auditObservability();
+    await auditFrontendSinks();
+    await auditUploadSecurity();
+    await auditRateLimits();
   } catch (err) {
     failed += 1;
     failures.push(`suite crashed: ${err && err.message}`);

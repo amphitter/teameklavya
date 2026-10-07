@@ -411,6 +411,61 @@ presenting a clean-looking panel with holes in it.
 
 Regression: 1203 → **1240 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
+### Phase 11 — RESULT: ✅ **DONE** (§27, §28, §29 — `services/url-safety.service.js`, `services/media.service.js` +dimension checks, `frontend/src/utils/safe-url.ts`, 44 new assertions)
+
+**§27 — a real stored-XSS, fixed at the sink.** `org.website`,
+`speaker.linkedin` and `event.onlineEventLink` are user-supplied and were
+rendered straight into `href={...}`. A stored value of
+`javascript:alert(document.cookie)` is a stored XSS: React warns about it in
+development and then renders it anyway. The same value was also interpolated
+into an HTML email with no escaping at all, so `"><script>` broke out of the
+attribute entirely.
+
+There was **no URL validation anywhere** — not frontend, not backend. Rejecting
+at write time is now the primary control (only `http:`/`https:` survive, and
+control characters are rejected outright because browsers strip them before
+parsing the scheme, so `java\nscript:` would execute while looking harmless).
+The frontend sanitiser is deliberately *not* redundant: data written before the
+backend guard existed is still in the database, and a future code path could
+bypass validation. **The sink has to be safe, not just the source.**
+
+**§28 — magic bytes were not enough.** The existing check proved a file *was*
+a PNG. It said nothing about how big it was. A 60 000 × 60 000 PNG is a few
+kilobytes on the wire and gigabytes once decoded — the classic decompression
+bomb, which the byte-size ceiling cannot catch because the wire size is tiny
+*by design*. Dimensions are now read from the header and capped per side and
+in total (12 000 px / 80 MP). Only the header is parsed; the image is never
+decoded, because decoding is where the bomb goes off.
+
+Writing the header parser produced two bugs worth recording. My first version
+had **one shared 24-byte minimum length** for all four formats, which silently
+disabled the check for GIF (needs 10 bytes) — the shortest format is exactly
+the one an attacker would pick. And the parser's correctness was masked twice
+by **malformed test buffers of my own making**, which I nearly read as parser
+bugs. Verify the fixture before believing the failure.
+
+**§28 also confirmed already-correct behaviour** rather than assuming it: the
+local storage provider generates its own filename (`crypto.randomBytes`), never
+writes `originalname`, sanitises the folder segment, and derives the extension
+from the validated MIME — so no user filename ever reaches the filesystem.
+
+**§29 — recorded, not "fixed".** All 18 buckets live in one central table
+(good: any change is one reviewable diff). But every bucket shares a single
+**IP-keyed** generator. That is correct for AUTH, where the user is by
+definition unknown before login and IP is the only identity available against
+credential stuffing. It is wrong for authenticated write domains: 500 people
+behind one university NAT share a bucket, so one hot user throttles everyone —
+precisely the hazard §29 names. §29 also says *measure before changing
+anything*, and there is no traffic data to measure. So this is recorded as a
+known limitation with its trigger, not silently changed.
+
+**One existing test fixture was corrected.** Phase 4's PNG fixture was a
+truncated header that `sniffMime` accepted but which decoded to 0×0 pixels.
+The new dimension check correctly rejected it. No assertion was changed or
+weakened — the input was made a structurally valid PNG instead.
+
+Regression: 1240 → **1284 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 
 - `services/reconciliation.service.js` — checkpointed, bounded, idempotent.

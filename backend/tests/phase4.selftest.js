@@ -65,7 +65,19 @@ const { MongoMemoryServer } = require("mongodb-memory-server");
 /* ── Real file signatures for the spoofing tests ───────────────────────── */
 const SIGNATURES = {
   "image/jpeg": Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]),
-  "image/png": Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]),
+  // A structurally valid PNG header: 8-byte signature, then the IHDR chunk
+  // length (13), "IHDR", and a real width/height. The old fixture stopped
+  // after the length field, which sniffMime() accepted but which is not a
+  // decodable image — anything that reads the dimensions saw 0x0.
+  "image/png": (() => {
+    const b = Buffer.alloc(24);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+    b.writeUInt32BE(13, 8); // IHDR chunk length
+    Buffer.from("IHDR", "ascii").copy(b, 12);
+    b.writeUInt32BE(64, 16); // width
+    b.writeUInt32BE(64, 20); // height
+    return b;
+  })(),
   "image/webp": Buffer.concat([
     Buffer.from("RIFF"),
     Buffer.from([0x1a, 0x00, 0x00, 0x00]),

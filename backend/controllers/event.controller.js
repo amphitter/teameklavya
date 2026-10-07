@@ -15,6 +15,7 @@ const Post = require("../models/post.model");
 const Reaction = require("../models/reaction.model");
 const Comment = require("../models/comment.model");
 const { EventRepository, PostRepository } = require("../repositories");
+const urlSafety = require("../services/url-safety.service");
 
 // ─── Visibility helpers ─────────────────────────────────────
 const VISIBILITY_LEVELS = ["public", "unlisted", "private"];
@@ -34,12 +35,12 @@ const getEventLocationHTML = (event) => {
   switch (event.eventType) {
     case 'online':
       return `<p><strong>🌐 Platform:</strong> ${event.platform || 'Online'}</p>
-              ${event.onlineEventLink ? `<p><strong>🔗 Event Link:</strong> <a href="${event.onlineEventLink}">Join Online</a></p>` : ''}`;
+              ${event.onlineEventLink ? `<p><strong>🔗 Event Link:</strong> ${urlSafety.safeEmailLink(event.onlineEventLink, "Join Online")}</p>` : ''}`;
     case 'offline':
       return `<p><strong>📍 Venue:</strong> ${event.venue}</p>`;
     case 'hybrid':
       return `<p><strong>📍 Venue:</strong> ${event.venue}</p>
-              ${event.onlineEventLink ? `<p><strong>🌐 Online Option:</strong> <a href="${event.onlineEventLink}">Join Online</a></p>` : ''}`;
+              ${event.onlineEventLink ? `<p><strong>🌐 Online Option:</strong> ${urlSafety.safeEmailLink(event.onlineEventLink, "Join Online")}</p>` : ''}`;
     default:
       return `<p><strong>📍 Venue:</strong> ${event.venue}</p>`;
   }
@@ -88,6 +89,11 @@ exports.createEvent = async (req, res, next) => {
         message: "Venue is required for offline and hybrid events" 
       });
     }
+
+    // §27 — reject javascript:/data: URLs at write time. This value is rendered
+    // as an href on the frontend and interpolated into emails; storing a
+    // javascript: URL would be a stored XSS.
+    if (urlSafety.rejectUnsafeUrls(req, res, ["onlineEventLink"])) return;
 
     if ((body.eventType === 'online' || body.eventType === 'hybrid') && !body.onlineEventLink) {
       return res.status(400).json({ 

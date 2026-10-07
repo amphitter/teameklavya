@@ -1,5 +1,6 @@
 "use client";
 
+import { safeExternalUrl } from '@/utils/safe-url';
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -622,7 +623,7 @@ export default function EventDetailPage() {
                         {s.name}
                         {s.linkedin && (
                           <a
-                            href={s.linkedin}
+                            href={safeExternalUrl(s.linkedin) ?? '#'}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-muted-foreground hover:text-primary"
@@ -938,7 +939,7 @@ export default function EventDetailPage() {
                 {/* Online join link (only when present in public data) */}
                 {event.onlineEventLink && status !== "past" && (
                   <Button variant="secondary" className="mt-2.5 w-full" asChild>
-                    <a href={event.onlineEventLink} target="_blank" rel="noopener noreferrer">
+                    <a href={safeExternalUrl(event.onlineEventLink) ?? '#'} target="_blank" rel="noopener noreferrer">
                       <ExternalLink className="mr-2 h-4 w-4" /> Join online
                     </a>
                   </Button>

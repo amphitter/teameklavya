@@ -9,6 +9,7 @@ const RegistrationResponse = require("../models/registrationResponse.model");
 const AuditLog = require("../models/auditLog.model");
 const { isSuperAdminEmail } = require("../middleware/auth.middleware");
 const { ERROR_CODES } = require("../utils/app-error");
+const urlSafety = require("../services/url-safety.service");
 
 const slugify = (s) =>
   String(s).toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/[\s_]+/g, "-").replace(/-+/g, "-").slice(0, 60);
@@ -35,6 +36,9 @@ const MAX_SLUG_LEN = 80;
 
 exports.createOrganization = async (req, res, next) => {
   try {
+    // §27 — website is rendered as an href; only http(s) may be stored.
+    if (urlSafety.rejectUnsafeUrls(req, res, ["website"])) return;
+
     const { name, description = "", logoUrl = "", coverUrl = "", website = "" } = req.body;
     if (!String(name || "").trim()) {
       return res.status(400).json({ success: false, message: "Organization name is required" });
@@ -89,6 +93,9 @@ exports.updateOrganization = async (req, res) => {
     }
 
     const { name, description, logoUrl, coverUrl, website } = req.body;
+
+    // §27 — same guard on update.
+    if (urlSafety.rejectUnsafeUrls(req, res, ["website"])) return;
     if (name !== undefined && String(name).trim()) org.name = String(name).trim();
     if (description !== undefined) org.description = String(description).slice(0, 1000);
     if (logoUrl !== undefined) org.logoUrl = String(logoUrl);

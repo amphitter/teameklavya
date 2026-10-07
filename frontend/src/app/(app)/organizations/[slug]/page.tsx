@@ -1,5 +1,6 @@
 "use client";
 
+import { safeExternalUrl } from '@/utils/safe-url';
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -262,9 +263,9 @@ export default function OrganizationPage() {
                 </span>
                 {org.website && (
                   <a
-                    href={org.website}
+                    href={safeExternalUrl(org.website) ?? '#'}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 font-semibold text-primary hover:underline"
                   >
                     <Globe className="h-3.5 w-3.5" /> Website

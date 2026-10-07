@@ -32,7 +32,7 @@ architecture; it makes the existing architecture production-safe.
 | 8 | Observability, alerting, perf & query budgets | §23, §24, §25, §26 | ✅ |
 | 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | pending |
 | 10 | Error taxonomy | §30 | ✅ |
-| 11 | Frontend + upload + rate-limit review | §27, §28, §29 | pending |
+| 11 | Frontend + upload + rate-limit review | §27, §28, §29 | ✅ |
 | 12 | Restore drill, backups, secret separation | §18, §19 | pending |
 | 13 | Documentation set | §32 | ✅ |
 | 14 | Final report | §33 | pending |

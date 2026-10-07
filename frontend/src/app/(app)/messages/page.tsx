@@ -1,20 +1,18 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  Archive,
+  ArchiveRestore,
   BellOff,
   BellRing,
-  EyeOff,
-  ImagePlus,
   Loader2,
   MessageCircle,
   Search,
-  SendHorizontal,
-  X,
 } from "lucide-react";
 import { api } from "@/utils/api";
 import { usePolling } from "@/lib/query";
@@ -23,8 +21,12 @@ import { EmptyState, ErrorState, Skeleton } from "@/components/states";
 import { UserAvatar } from "@/components/user-avatar";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { handleOf, timeAgo } from "@/lib/social";
-import { cloudinaryUrl } from "@/utils/image";
 import { cn } from "@/lib/utils";
+import { Icon } from "@/components/ui/icon";
+import { compressFor } from "@/utils/compress-image";
+import { MessageList, MessageListSkeleton } from "@/components/messages/message-list";
+import type { ChatMessage as SharedChatMessage } from "@/hooks/use-social";
+import { MessageComposer } from "@/components/messages/message-composer";
 
 interface Conversation {
   _id: string;
@@ -33,16 +35,22 @@ interface Conversation {
   updatedAt: string;
   unreadCount: number;
   muted?: boolean;
+  archived?: boolean;
 }
 
 interface ChatMessage {
   _id: string;
-  sender: { _id: string; firstName: string; lastName: string } | null;
+  sender: { _id: string; firstName?: string; lastName?: string; username?: string; profile?: any } | null;
   content: string;
   image?: string;
+  attachment?: { url?: string; name?: string; size?: number; mime?: string };
+  replyTo?: string | null;
+  reactions?: { emoji: string; count: number; mine: boolean }[];
   deletedAt?: string | null;
   readAt?: string | null;
   createdAt: string;
+  pending?: boolean;
+  failed?: boolean;
 }
 
 export default function MessagesPage() {
@@ -55,51 +63,56 @@ export default function MessagesPage() {
 
 function MessagesView() {
   const { user, ready } = useSessionUser();
+  const router = useRouter();
   const params = useSearchParams();
   const withUser = params.get("with");
-  const openConv = params.get("c"); // from a "sent you a message" notification
+  const openConv = params.get("c");
+  const initialArchive = params.get("view") === "archived";
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState(false);
   const [search, setSearch] = useState("");
+  const [showArchived, setShowArchived] = useState(initialArchive);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [other, setOther] = useState<Conversation["other"]>(null);
   const [muted, setMuted] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
-  const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [pendingImage, setPendingImage] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [replyTo, setReplyTo] = useState<SharedChatMessage | null>(null);
+  const [mobilePane, setMobilePane] = useState<"list" | "thread">("list");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /* ── conversations list ──
-   * §6 (audit) — was a flat 12s interval. Now paused while the tab is hidden
-   * and stretched to 60s when consecutive polls return an identical list, so
-   * an idle tab costs a trickle instead of ~300 requests/hour. */
+  /* ── conversations list ───────────────────────────────────────────────
+   * Adaptive polling: paused while the tab is hidden, and stretched toward
+   * 60s when consecutive polls return an identical list — so an idle tab
+   * costs a trickle instead of ~300 requests/hour. Preserved from the
+   * previous implementation. */
   const listSigRef = useRef("");
   const reportListRef = useRef<(changed: boolean) => void>(() => {});
 
-  const loadList = useCallback(async (silent = false) => {
-    if (!silent) setListLoading(true);
-    try {
-      const r = await api.get("/messages/conversations");
-      const convs: Conversation[] = r.data?.conversations || [];
-      // A conversation changed if the set of ids or any unread count moved.
-      const sig = convs.map((c) => `${c._id}:${c.unreadCount || 0}`).join(",");
-      reportListRef.current(sig !== listSigRef.current);
-      listSigRef.current = sig;
-      setConversations(convs);
-      setListError(false);
-    } catch {
-      if (!silent) setListError(true);
-    } finally {
-      setListLoading(false);
-    }
-  }, []);
+  const loadList = useCallback(
+    async (silent = false) => {
+      if (!silent) setListLoading(true);
+      try {
+        const url = showArchived ? "/messages/conversations?view=archived" : "/messages/conversations";
+        const r = await api.get(url);
+        const convs: Conversation[] = r.data?.conversations || [];
+        const sig = convs.map((c) => `${c._id}:${c.unreadCount || 0}`).join(",");
+        reportListRef.current(sig !== listSigRef.current);
+        listSigRef.current = sig;
+        setConversations(convs);
+        setListError(false);
+      } catch {
+        if (!silent) setListError(true);
+      } finally {
+        setListLoading(false);
+      }
+    },
+    [showArchived]
+  );
 
   const { reportResult: reportList } = usePolling(loadList, {
     intervalMs: 12_000,
@@ -108,7 +121,7 @@ function MessagesView() {
   });
   reportListRef.current = reportList;
 
-  /* ── ?with=userId → open (or create) that conversation ── */
+  /* ?with=userId → open (or create) that conversation */
   useEffect(() => {
     if (!user || !withUser || withUser === user._id) return;
     api
@@ -117,51 +130,46 @@ function MessagesView() {
         if (r.data?.conversationId) {
           setActiveId(r.data.conversationId);
           setOther(r.data.other);
+          setMobilePane("thread");
         }
       })
       .catch((e) => toast.error(e.response?.data?.message || "Couldn't open conversation"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, withUser]);
 
-  /* ── ?c=conversationId → open that thread (notification deep-link) ── */
+  /* ?c=conversationId → notification deep-link */
   useEffect(() => {
     if (!user || !openConv || activeId === openConv) return;
     const found = conversations.find((c) => c._id === openConv);
     setActiveId(openConv);
+    setMobilePane("thread");
     if (found?.other) setOther(found.other);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, openConv, conversations.length]);
 
-  /* ── active thread ──
-   * §6 (audit) — was the hottest loop in the app at a flat 6s (600
-   * requests/hour per open tab). Now: paused while hidden, and the gap
-   * stretches from 6s toward 30s whenever nothing new arrives, snapping
-   * straight back to 6s the moment a message lands. */
+  /* ── active thread (adaptive polling, preserved) ── */
   const threadSigRef = useRef("");
   const reportThreadRef = useRef<(changed: boolean) => void>(() => {});
 
-  const loadThread = useCallback(
-    async (silent = false) => {
-      if (!activeId) return;
-      if (!silent) setThreadLoading(true);
-      try {
-        const r = await api.get(`/messages/conversations/${activeId}`);
-        const msgs: ChatMessage[] = r.data?.messages || [];
-        const last = msgs[msgs.length - 1];
-        const sig = `${msgs.length}:${last?._id || ""}`;
-        reportThreadRef.current(sig !== threadSigRef.current);
-        threadSigRef.current = sig;
-        setMessages(msgs);
-        if (r.data?.other) setOther(r.data.other);
-        if (typeof r.data?.muted === "boolean") setMuted(r.data.muted);
-      } catch {
-        /* silent: a dropped background poll must not blank the thread */
-      } finally {
-        setThreadLoading(false);
-      }
-    },
-    [activeId]
-  );
+  const loadThread = useCallback(async (silent = false) => {
+    if (!activeId) return;
+    if (!silent) setThreadLoading(true);
+    try {
+      const r = await api.get(`/messages/conversations/${activeId}`);
+      const msgs: ChatMessage[] = r.data?.messages || [];
+      const last = msgs[msgs.length - 1];
+      const sig = `${msgs.length}:${last?._id || ""}`;
+      reportThreadRef.current(sig !== threadSigRef.current);
+      threadSigRef.current = sig;
+      setMessages(msgs);
+      if (r.data?.other) setOther(r.data.other);
+      if (typeof r.data?.muted === "boolean") setMuted(r.data.muted);
+    } catch {
+      /* silent: a dropped background poll must not blank the thread */
+    } finally {
+      setThreadLoading(false);
+    }
+  }, [activeId]);
 
   const { reportResult: reportThread } = usePolling(loadThread, {
     intervalMs: 6_000,
@@ -170,392 +178,446 @@ function MessagesView() {
   });
   reportThreadRef.current = reportThread;
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: messages.length > 20 ? "auto" : "smooth" });
-  }, [messages.length]);
+  const openThread = useCallback((c: Conversation) => {
+    setActiveId(c._id);
+    setOther(c.other);
+    setMobilePane("thread");
+  }, []);
 
-  const send = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    const content = text.trim();
-    const image = pendingImage;
-    if ((!content && !image) || !activeId || sending) return;
-    if (content && image) return; // one or the other (backend-enforced)
-    setSending(true);
-    const optimistic: ChatMessage = {
-      _id: `tmp-${Date.now()}`,
-      sender: user ? { _id: user._id ?? "", firstName: user.firstName ?? "", lastName: user.lastName ?? "" } : null,
-      content,
-      image,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((p) => [...p, optimistic]);
-    setText("");
-    setPendingImage("");
-    try {
-      const res = await api.post(`/messages/conversations/${activeId}`, { content, image: image || undefined });
-      if (res.data?.success) {
-        setMessages((p) => p.map((m) => (m._id === optimistic._id ? res.data.message : m)));
-        loadList(true);
-      } else throw new Error();
-    } catch (err: any) {
-      setMessages((p) => p.filter((m) => m._id !== optimistic._id));
-      setText(content);
-      setPendingImage(image);
-      toast.error(err.response?.data?.message || "Couldn't send message");
-    } finally {
-      setSending(false);
-      inputRef.current?.focus();
-    }
-  };
-
-  const uploadImage = async (file: File) => {
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await api.post("/upload/image?folder=messages", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      if (res.data?.success && res.data.url) setPendingImage(res.data.url);
-      else throw new Error();
-    } catch {
-      toast.error("Photo upload failed");
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  };
-
-  const deleteMessage = (id: string) => {
-    api
-      .delete(`/messages/${id}`)
-      .then((r) => {
-        if (r.data?.success) {
-          setMessages((p) => p.map((m) => (m._id === id ? { ...m, content: "", image: "", deletedAt: new Date().toISOString() } : m)));
+  /* ── send (optimistic, §45 / §58) ── */
+  const send = useCallback(
+    async (content: string) => {
+      if (!activeId || sending) return;
+      const optimistic: ChatMessage = {
+        _id: `tmp-${Date.now()}`,
+        sender: user ? { _id: user._id ?? "", firstName: user.firstName ?? "", lastName: user.lastName ?? "" } : null,
+        content,
+        replyTo: replyTo?._id ?? null,
+        createdAt: new Date().toISOString(),
+        pending: true,
+      };
+      setMessages((p) => [...p, optimistic]);
+      setReplyTo(null);
+      setSending(true);
+      try {
+        const res = await api.post(`/messages/conversations/${activeId}`, {
+          content,
+          ...(optimistic.replyTo ? { replyTo: optimistic.replyTo } : {}),
+        });
+        if (res.data?.success) {
+          setMessages((p) => p.map((m) => (m._id === optimistic._id ? res.data.message : m)));
           loadList(true);
-        } else toast.error(r.data?.message || "Couldn't delete");
-      })
-      .catch(() => toast.error("Couldn't delete"));
-  };
+        } else throw new Error();
+      } catch {
+        // §45 — roll the optimistic bubble back, but mark rather than vanish it
+        // so the user can see the send failed instead of wondering where it went.
+        setMessages((p) => p.map((m) => (m._id === optimistic._id ? { ...m, pending: false, failed: true } : m)));
+        toast.error("Message didn't send — tap to retry");
+      } finally {
+        setSending(false);
+      }
+    },
+    [activeId, sending, user, replyTo, loadList]
+  );
 
-  const toggleMute = () => {
-    if (!activeId) return;
-    api
-      .post(`/messages/conversations/${activeId}/mute`)
-      .then((r) => {
-        if (r.data?.success) {
-          setMuted(Boolean(r.data.muted));
-          toast.success(r.data.muted ? "Chat muted — no more notifications" : "Chat unmuted");
-          setConversations((p) => p.map((c) => (c._id === activeId ? { ...c, muted: Boolean(r.data.muted) } : c)));
+  const retrySend = useCallback(
+    (m: ChatMessage) => {
+      setMessages((p) => p.filter((x) => x._id !== m._id));
+      send(m.content);
+    },
+    [send]
+  );
+
+  const sendImage = useCallback(
+    async (file: File) => {
+      if (!activeId) return;
+      setUploading(true);
+      try {
+        const { file: compressed } = await compressFor(file, "post");
+        const fd = new FormData();
+        fd.append("file", compressed, file.name || "photo.jpg");
+        const up = await api.post("/upload/image?folder=messages", fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        const url = up.data?.url;
+        if (!url) throw new Error("Upload failed");
+        const res = await api.post(`/messages/conversations/${activeId}`, { image: url });
+        if (res.data?.success) {
+          setMessages((p) => [...p, res.data.message]);
+          loadList(true);
         }
-      })
-      .catch(() => toast.error("Couldn't update mute"));
-  };
+      } catch {
+        toast.error("Couldn't send that photo");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [activeId, loadList]
+  );
 
-  const hideConversation = () => {
-    if (!activeId) return;
-    api
-      .post(`/messages/conversations/${activeId}/hide`)
-      .then((r) => {
-        if (r.data?.success) {
-          toast.success("Chat hidden — it returns when a new message arrives");
-          setConversations((p) => p.filter((c) => c._id !== activeId));
-          setActiveId(null);
-          setOther(null);
+  const sendFile = useCallback(
+    async (file: File) => {
+      if (!activeId) return;
+      setUploading(true);
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const up = await api.post("/upload/image?folder=messages", fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        const url = up.data?.url;
+        if (!url) throw new Error("Upload failed");
+        const res = await api.post(`/messages/conversations/${activeId}`, {
+          attachment: { url, name: file.name, size: file.size, mime: file.type },
+        });
+        if (res.data?.success) {
+          setMessages((p) => [...p, res.data.message]);
+          loadList(true);
         }
-      })
-      .catch(() => toast.error("Couldn't hide chat"));
-  };
+      } catch {
+        toast.error("Couldn't send that file");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [activeId, loadList]
+  );
 
-  /* ── auth gate ── */
-  if (ready && !user) {
+  /* ── reactions (§31) ── */
+  const react = useCallback(async (messageId: string, emoji: string) => {
+    // Optimistic: toggle locally, reconcile with the server summary.
+    setMessages((p) =>
+      p.map((m) => {
+        if (m._id !== messageId) return m;
+        const list = [...(m.reactions || [])];
+        const existing = list.find((r) => r.emoji === emoji);
+        if (existing?.mine) {
+          const next = list.map((r) => (r.emoji === emoji ? { ...r, count: r.count - 1, mine: false } : r)).filter((r) => r.count > 0);
+          return { ...m, reactions: next };
+        }
+        // Switching emoji replaces the previous pick (server behaviour).
+        const cleared = list.map((r) => (r.mine ? { ...r, count: r.count - 1, mine: false } : r)).filter((r) => r.count > 0);
+        const target = cleared.find((r) => r.emoji === emoji);
+        if (target) target.count += 1, (target.mine = true);
+        else cleared.push({ emoji, count: 1, mine: true });
+        return { ...m, reactions: cleared };
+      })
+    );
+    try {
+      const res = await api.post(`/messages/${messageId}/react`, { emoji });
+      if (res.data?.success) {
+        setMessages((p) => p.map((m) => (m._id === messageId ? { ...m, reactions: res.data.reactions } : m)));
+      }
+    } catch {
+      toast.error("Couldn't add that reaction");
+      loadThread(true);
+    }
+  }, [loadThread]);
+
+  const unsend = useCallback(async (messageId: string) => {
+    try {
+      await api.delete(`/messages/${messageId}`);
+      setMessages((p) => p.map((m) => (m._id === messageId ? { ...m, deletedAt: new Date().toISOString(), content: "" } : m)));
+    } catch {
+      toast.error("Couldn't unsend that message");
+    }
+  }, []);
+
+  /* ── archive (§32-33) ── */
+  const toggleArchive = useCallback(async () => {
+    if (!activeId) return;
+    const isArchived = conversations.find((c) => c._id === activeId)?.archived || showArchived;
+    try {
+      await api.post(`/messages/conversations/${activeId}/archive`, { archived: !isArchived });
+      toast.success(isArchived ? "Moved back to inbox" : "Conversation archived");
+      await loadList();
+      if (!isArchived) {
+        setActiveId(null);
+        setMessages([]);
+        setMobilePane("list");
+      }
+    } catch {
+      toast.error("Couldn't update that conversation");
+    }
+  }, [activeId, conversations, showArchived, loadList]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) => {
+      const n = `${c.other?.firstName || ""} ${c.other?.lastName || ""} ${c.other?.username || ""}`.toLowerCase();
+      return n.includes(q) || (c.lastMessage?.text || "").toLowerCase().includes(q);
+    });
+  }, [conversations, search]);
+
+  if (!ready) {
     return (
-      <div className="mx-auto max-w-xl px-3 py-16">
-        <EmptyState
-          icon={MessageCircle}
-          title="Sign in to see your messages"
-          description="Chat with people you meet at events — speakers, teammates and organizers."
-        />
-        <div className="mt-4 flex justify-center gap-2">
-          <Button asChild>
-            <Link href="/login">Sign in</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/signup">Create account</Link>
-          </Button>
-        </div>
+      <div className="mx-auto max-w-5xl px-3 py-6">
+        <Skeleton className="h-[70vh] w-full rounded-2xl" />
       </div>
     );
   }
 
-  const q = search.trim().toLowerCase();
-  const visible = q
-    ? conversations.filter(
-        (c) =>
-          `${c.other?.firstName || ""} ${c.other?.lastName || ""}`.toLowerCase().includes(q) ||
-          (c.other?.username || "").toLowerCase().includes(q)
-      )
-    : conversations;
-  const active = visible.find((c) => c._id === activeId);
-  const lastMine = [...messages].reverse().find((m) => m.sender?._id === user?._id && !m.deletedAt);
+  const activeConv = conversations.find((c) => c._id === activeId);
+  const isArchivedView = showArchived;
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-9.5rem)] max-w-5xl gap-0 px-0 py-0 sm:h-[calc(100dvh-10rem)] sm:gap-5 sm:px-6 sm:py-5 lg:h-[calc(100dvh-7rem)]">
-      {/* ── Conversation list ── */}
-      <div
-        className={cn(
-          "flex w-full flex-col border-border sm:w-[330px] sm:shrink-0 sm:rounded-2xl sm:border sm:bg-card",
-          activeId && "hidden sm:flex"
-        )}
-      >
-        <div className="border-b border-border px-4 py-3.5">
-          <h1 className="text-lg font-extrabold tracking-tight text-foreground">Messages</h1>
-          <p className="text-xs text-muted-foreground">Direct chats with people from EventHub</p>
-          <div className="relative mt-2.5">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search chats by name or username…"
-              className="w-full rounded-xl border border-border bg-background py-2 pl-8 pr-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
-            />
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {listLoading && conversations.length === 0 ? (
-            Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="mb-2 h-16" />)
-          ) : listError ? (
-            <div className="p-3">
-              <ErrorState title="Couldn't load chats" onRetry={() => loadList()} />
+    <div className="mx-auto flex h-[calc(100vh-4rem)] w-full max-w-5xl flex-col overflow-hidden sm:h-[calc(100vh-5rem)]">
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-none border border-outline-variant bg-surface-container-lowest sm:my-3 sm:rounded-2xl sm:elevation-card">
+        {/* ── Conversation list ───────────────────────────────────────── */}
+        <aside
+          className={cn(
+            "flex w-full shrink-0 flex-col border-r border-outline-variant bg-surface-container-lowest md:flex md:w-[21rem]",
+            mobilePane === "thread" ? "hidden" : "flex"
+          )}
+        >
+          <div className="shrink-0 space-y-2 border-b border-outline-variant px-3 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <h1 className="text-headline-sm font-bold tracking-tight text-on-surface">
+                {isArchivedView ? "Archived" : "Messages"}
+              </h1>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowArchived((v) => !v);
+                  setActiveId(null);
+                  setMessages([]);
+                  loadList();
+                }}
+                className="gap-1.5 text-[12px]"
+                aria-label={isArchivedView ? "Back to inbox" : "View archived chats"}
+              >
+                {isArchivedView ? (
+                  <>
+                    <ArchiveRestore className="h-4 w-4" /> Inbox
+                  </>
+                ) : (
+                  <>
+                    <Archive className="h-4 w-4" /> Archive
+                  </>
+                )}
+              </Button>
             </div>
-          ) : visible.length === 0 ? (
-            <div className="p-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={isArchivedView ? "Search archived chats" : "Search messages"}
+                aria-label="Search conversations"
+                className="w-full rounded-xl border border-outline-variant bg-surface py-2 pl-9 pr-3 text-[14px] outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12"
+              />
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {listLoading ? (
+              <div className="space-y-1 p-2">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <div key={i} className="flex items-center gap-3 px-2 py-2">
+                    <Skeleton className="h-11 w-11 rounded-full" />
+                    <div className="flex-1 space-y-1.5">
+                      <Skeleton className="h-3.5 w-28" />
+                      <Skeleton className="h-3 w-40" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : listError ? (
+              <ErrorState title="Could not load conversations." onRetry={() => loadList()} />
+            ) : filtered.length === 0 ? (
               <EmptyState
                 icon={MessageCircle}
-                title={q ? "No matching chats" : "No conversations yet"}
-                description={q ? "Try a different name." : "Visit someone's profile and tap Message to start a chat."}
+                title={isArchivedView ? "No archived conversations." : "No conversations yet"}
+                description={
+                  isArchivedView
+                    ? "Conversations you archive will be kept here — they're never deleted."
+                    : "Message someone from their profile to start a conversation."
+                }
+              />
+            ) : (
+              <ul className="divide-y divide-outline-variant/60">
+                {filtered.map((c) => {
+                  const isActive = c._id === activeId;
+                  const unread = c.unreadCount > 0;
+                  return (
+                    <li key={c._id}>
+                      <button
+                        type="button"
+                        onClick={() => openThread(c)}
+                        aria-current={isActive ? "true" : undefined}
+                        className={cn(
+                          "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors",
+                          isActive ? "bg-purple-light" : "hover:bg-surface-container"
+                        )}
+                      >
+                        <div className="relative shrink-0">
+                          <UserAvatar user={c.other} size={44} />
+                          {/* Archived marker — visually separate from the inbox (§34) */}
+                          {c.archived ? (
+                            <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-surface-container-lowest bg-on-surface-variant">
+                              <Archive className="h-2 w-2 text-white" />
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline justify-between gap-2">
+                            {/* §34 — unread chats get stronger typography */}
+                            <span className={cn("truncate text-[14px] text-on-surface", unread ? "font-bold" : "font-semibold")}>
+                              {`${c.other?.firstName || ""} ${c.other?.lastName || ""}`.trim() || "Unknown"}
+                            </span>
+                            <span className="shrink-0 text-[11px] text-on-surface-variant">
+                              {c.lastMessage?.at ? timeAgo(c.lastMessage.at) : ""}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className={cn("min-w-0 flex-1 truncate text-[13px]", unread ? "font-semibold text-on-surface" : "text-on-surface-variant")}>
+                              {c.lastMessage ? `${c.lastMessage.mine ? "You: " : ""}${c.lastMessage.text}` : `@${handleOf(c.other)} — say hi`}
+                            </span>
+                            {unread ? (
+                              <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-white">
+                                {c.unreadCount > 9 ? "9+" : c.unreadCount}
+                              </span>
+                            ) : null}
+                            {c.muted ? <BellOff className="h-3 w-3 shrink-0 text-on-surface-variant" /> : null}
+                          </div>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </aside>
+
+        {/* ── Thread ──────────────────────────────────────────────────── */}
+        <section
+          className={cn(
+            "min-w-0 flex-1 flex-col bg-surface md:flex",
+            mobilePane === "thread" ? "flex" : "hidden"
+          )}
+        >
+          {!activeId ? (
+            <div className="hidden flex-1 items-center justify-center md:flex">
+              <EmptyState
+                icon={MessageCircle}
+                title="Select a conversation"
+                description="Pick a chat on the left, or message someone from their profile."
               />
             </div>
           ) : (
-            visible.map((c) => (
-              <button
-                key={c._id}
-                type="button"
-                onClick={() => {
-                  setActiveId(c._id);
-                  setOther(c.other);
-                  setMuted(Boolean(c.muted));
-                }}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
-                  c._id === activeId ? "bg-brand-light" : "hover:bg-muted"
-                )}
-              >
-                <UserAvatar user={c.other} size={42} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <p className="truncate text-sm font-bold text-foreground">
-                      {c.other?.firstName} {c.other?.lastName}
-                    </p>
-                    {c.lastMessage?.at && (
-                      <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(c.lastMessage.at)}</span>
-                    )}
-                  </div>
-                  <p className={cn("truncate text-xs", c.unreadCount > 0 ? "font-bold text-foreground" : "text-muted-foreground")}>
-                    {c.lastMessage ? `${c.lastMessage.mine ? "You: " : ""}${c.lastMessage.text}` : `@${handleOf(c.other)} — say hi`}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {c.muted && <BellOff className="h-3.5 w-3.5 text-muted-foreground" aria-label="Muted" />}
-                  {c.unreadCount > 0 && (
-                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground">
-                      {c.unreadCount}
-                    </span>
-                  )}
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* ── Chat thread ── */}
-      <div
-        className={cn(
-          "flex min-w-0 flex-1 flex-col overflow-hidden sm:rounded-2xl sm:border sm:border-border sm:bg-card",
-          !activeId && "hidden sm:flex"
-        )}
-      >
-        {activeId ? (
-          <>
-            <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-              <button
-                type="button"
-                onClick={() => setActiveId(null)}
-                className="-ml-1 rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
-                aria-label="Back to conversations"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </button>
-              {other && (
-                <>
-                  <UserAvatar user={other} size={36} />
-                  <div className="min-w-0 flex-1">
-                    <Link href={`/profile/${other._id}`} className="block truncate text-sm font-bold text-foreground hover:underline">
-                      {other.firstName} {other.lastName}
-                    </Link>
-                    <p className="truncate text-xs text-muted-foreground">@{handleOf(other)}</p>
-                  </div>
-                </>
-              )}
-              <button
-                type="button"
-                onClick={toggleMute}
-                title={muted ? "Unmute chat" : "Mute chat notifications"}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                {muted ? <BellOff className="h-4 w-4" /> : <BellRing className="h-4 w-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={hideConversation}
-                title="Hide chat (returns when a new message arrives)"
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <EyeOff className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-4">
-              {threadLoading && messages.length === 0 && (
-                <p className="py-8 text-center text-sm text-muted-foreground">Loading messages…</p>
-              )}
-              {!threadLoading && messages.length === 0 && (
-                <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-                  <MessageCircle className="h-8 w-8 text-muted-foreground/50" />
-                  <p className="text-sm font-semibold text-foreground">Start the conversation</p>
-                  <p className="max-w-60 text-xs text-muted-foreground">Say hi to {other?.firstName} — messages are private between you two.</p>
-                </div>
-              )}
-              {messages.map((m) => {
-                const mine = user && m.sender?._id === user._id;
-                const deleted = Boolean(m.deletedAt);
-                return (
-                  <div key={m._id} className={cn("group/msg flex", mine ? "justify-end" : "justify-start")}>
-                    <div
-                      className={cn(
-                        "max-w-[78%] rounded-2xl px-3.5 py-2 text-sm",
-                        mine
-                          ? "rounded-br-md bg-primary text-primary-foreground"
-                          : "rounded-bl-md bg-muted text-foreground",
-                        deleted && "italic opacity-60"
-                      )}
-                    >
-                      {deleted ? (
-                        <p className="text-xs">Message deleted</p>
-                      ) : m.image ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={cloudinaryUrl(m.image, { w: 560, h: 560 }) || m.image}
-                          alt="Photo message"
-                          className="max-h-72 rounded-xl object-cover"
-                        />
-                      ) : (
-                        <p className="whitespace-pre-wrap break-words">{m.content}</p>
-                      )}
-                      {!deleted && m.content ? (
-                        <p className={cn("mt-0.5 text-right text-[10px]", mine ? "text-primary-foreground/70" : "text-muted-foreground")}>
-                          {new Date(m.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                        </p>
-                      ) : null}
-                    </div>
-                    {mine && !deleted && !m._id.startsWith("tmp-") && (
-                      <button
-                        type="button"
-                        onClick={() => deleteMessage(m._id)}
-                        title="Unsend"
-                        className="ml-1 self-center rounded-lg p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-[#ba1a1a] group-hover/msg:opacity-100"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-              {lastMine?.readAt && (
-                <p className="pr-1 text-right text-[10px] font-semibold text-muted-foreground">Seen</p>
-              )}
-              <div ref={bottomRef} />
-            </div>
-
-            {/* Pending image preview */}
-            {pendingImage && (
-              <div className="flex items-center gap-2 border-t border-border px-3 py-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={cloudinaryUrl(pendingImage, { w: 120, h: 120 })} alt="" className="h-12 w-12 rounded-lg object-cover" />
-                <p className="flex-1 text-xs text-muted-foreground">Photo ready to send</p>
-                <button type="button" onClick={() => setPendingImage("")} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" aria-label="Remove photo">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            )}
-
-            <form onSubmit={send} className="flex items-end gap-2 border-t border-border p-3">
-              <label className="cursor-pointer">
-                <span
-                  className={cn(
-                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                    uploading && "opacity-60"
-                  )}
-                  title="Send a photo"
+            <>
+              {/* Thread header */}
+              <header className="flex shrink-0 items-center gap-2 border-b border-outline-variant bg-surface-container-lowest px-2 py-2 sm:px-3">
+                <button
+                  type="button"
+                  onClick={() => setMobilePane("list")}
+                  className="-ml-1 rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container md:hidden"
+                  aria-label="Back to conversations"
                 >
-                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
-                </span>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])}
-                />
-              </label>
-              <textarea
-                ref={inputRef}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+                {other ? (
+                  <Link href={`/profile/${other.username || other._id}`} className="flex min-w-0 items-center gap-2.5">
+                    <UserAvatar user={other} size={38} />
+                    <div className="min-w-0">
+                      <p className="truncate text-[14px] font-bold text-on-surface">
+                        {`${other.firstName || ""} ${other.lastName || ""}`.trim()}
+                      </p>
+                      <p className="truncate text-[11px] text-on-surface-variant">@{handleOf(other)}</p>
+                    </div>
+                  </Link>
+                ) : (
+                  <div className="h-9 w-40" />
+                )}
+                <div className="ml-auto flex items-center gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const r = await api.post(`/messages/conversations/${activeId}/mute`);
+                        setMuted(Boolean(r.data?.muted));
+                      } catch {
+                        toast.error("Couldn't update notifications");
+                      }
+                    }}
+                    className="h-9 w-9 p-0"
+                    aria-label={muted ? "Unmute conversation" : "Mute conversation"}
+                  >
+                    {muted ? <BellOff className="h-4 w-4" /> : <BellRing className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={toggleArchive}
+                    className="h-9 gap-1.5 px-2 text-[12px]"
+                    aria-label={isArchivedView ? "Unarchive conversation" : "Archive conversation"}
+                  >
+                    {isArchivedView ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                    <span className="hidden lg:inline">{isArchivedView ? "Unarchive" : "Archive"}</span>
+                  </Button>
+                </div>
+              </header>
+
+              {threadLoading && !messages.length ? (
+                <MessageListSkeleton />
+              ) : !other ? null : (
+                <MessageList
+                  messages={messages}
+                  currentUserId={user?._id}
+                  loading={threadLoading}
+                  onReact={react}
+                  onReply={(m) => setReplyTo(m)}
+                  onUnsend={unsend}
+                  emptyState={
+                    <div className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
+                      <MessageCircle className="h-8 w-8 text-on-surface-variant/50" />
+                      <p className="text-[14px] font-bold text-on-surface">Start the conversation</p>
+                      <p className="max-w-[16rem] text-[12px] text-on-surface-variant">
+                        Say hi to {other.firstName} — messages are private between you two.
+                      </p>
+                    </div>
                   }
-                }}
-                rows={1}
-                maxLength={2000}
-                disabled={Boolean(pendingImage)}
-                placeholder={pendingImage ? "Sending photo…" : `Message ${other?.firstName || ""}…`}
-                aria-label="Message"
-                className="max-h-28 min-h-[40px] flex-1 resize-none rounded-2xl border border-input bg-background px-4 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:opacity-60"
+                />
+              )}
+
+              {messages.some((m) => m.failed) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const failed = messages.find((m) => m.failed);
+                    if (failed) retrySend(failed);
+                  }}
+                  className="mx-auto mb-1 rounded-full bg-destructive/10 px-3 py-1 text-[11px] font-semibold text-destructive"
+                >
+                  A message failed to send — tap to retry
+                </button>
+              ) : null}
+
+              <MessageComposer
+                onSend={send}
+                onSendImage={sendImage}
+                onSendFile={sendFile}
+                sending={sending || uploading}
+                disabled={!other}
+                replyingTo={
+                  replyTo
+                    ? {
+                        authorName: `${replyTo.sender?.firstName || ""} ${replyTo.sender?.lastName || ""}`.trim() || "Message",
+                        content: replyTo.content,
+                        image: replyTo.image,
+                      }
+                    : null
+                }
+                onCancelReply={() => setReplyTo(null)}
+                placeholder={other ? `Message ${other.firstName || ""}…`.trim() : "Message…"}
               />
-              <Button
-                type="submit"
-                size="icon"
-                className="h-10 w-10 shrink-0 rounded-full"
-                disabled={sending || uploading || (!text.trim() && !pendingImage)}
-                aria-label="Send message"
-              >
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
-              </Button>
-            </form>
-          </>
-        ) : (
-          <div className="hidden h-full flex-col items-center justify-center gap-2 p-8 text-center sm:flex">
-            <MessageCircle className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm font-semibold text-foreground">Your messages</p>
-            <p className="max-w-64 text-xs text-muted-foreground">
-              Select a conversation, or open someone&apos;s profile and tap Message.
-            </p>
-          </div>
-        )}
+            </>
+          )}
+        </section>
       </div>
     </div>
   );

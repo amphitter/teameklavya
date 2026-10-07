@@ -4,52 +4,103 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ══════════════════════════════════════════════════════════
-   EVENTHUB DESIGN SYSTEM — light-first
-   Brand extracted from the EventHub logo:
-   navy #102030 · blue #0070f0 · purple #5030f0 · cyan #10b0f0
+   EVENTHUB DESIGN SYSTEM — "Vibrant Pulse" (DESIGN.md), light-first
+   ══════════════════════════════════════════════════════════
+
+   One source of truth. The supplied references and DESIGN.md speak a
+   Material-3 vocabulary (`surface`, `on-surface`, `surface-container-low`…)
+   while the existing components speak shadcn (`background`, `card`, `muted`…).
+
+   Rather than replace the existing layer — which would churn every component
+   at once — the DESIGN.md palette is canonical and the shadcn names are
+   ALIASES pointing at it. Both resolve to the same colour, so a component may
+   use either and the two can never drift apart.
+
+   Gradient is reserved (§3): primary CTA, create button, selected state,
+   milestone moments. Not ambient decoration.
    ══════════════════════════════════════════════════════════ */
 @theme {
-  /* Brand palette */
-  --color-brand: #0070f0;
-  --color-brand-dark: #005ac4;
-  --color-brand-light: #e8f2fe;
-  --color-purple: #5030f0;
-  --color-purple-light: #efecfe;
+  /* ── Brand (DESIGN.md) ──────────────────────────────────── */
+  --color-navy: #0b1235; /* display headings, brand mark */
+  --color-navy-deep: #111936; /* layered dark surfaces */
+  --color-brand: #2563ff; /* primary blue */
+  --color-brand-dark: #1677ff; /* hover / focus */
+  --color-purple: #6c35ff; /* transition anchor */
+  --color-violet: #7c3aed; /* badges, selected states */
+  --color-magenta: #d946ef; /* energy highlight */
   --color-cyan: #10b0f0;
-  --color-navy: #102030;
 
-  /* Semantic tokens (shadcn-compatible) */
-  --color-background: #ffffff;
-  --color-foreground: #102030;
-  --color-card: #ffffff;
-  --color-card-foreground: #102030;
-  --color-popover: #ffffff;
-  --color-popover-foreground: #102030;
-  --color-primary: #0070f0;
+  /* ── Canvas & surfaces ──────────────────────────────────── */
+  --color-surface: #f8faff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f4f2ff;
+  --color-surface-container: #ececff;
+  --color-surface-container-high: #e5e6ff;
+  --color-surface-container-highest: #dee0ff;
+  --color-surface-variant: #dee0ff;
+  --color-surface-tint: #004fe5;
+  --color-inverse-surface: #272e52;
+  --color-inverse-on-surface: #f0efff;
+
+  --color-brand-light: #eff6ff; /* unread, info chips, message bubbles */
+  --color-purple-light: #ede9fe; /* lavender tint — selected tags */
+  --color-magenta-light: #fdf4ff;
+
+  /* ── Text ───────────────────────────────────────────────── */
+  --color-on-surface: #12193c;
+  --color-on-surface-variant: #64709a; /* secondary labels, timestamps */
+  --color-outline: #737687;
+  --color-outline-variant: #e4e9f4; /* structural separators */
+
+  /* ── Semantic aliases (shadcn names → DESIGN.md values) ───
+     Every existing component keeps working; these now resolve to the
+     reference palette instead of the older logo-derived one. */
+  --color-background: var(--color-surface);
+  --color-foreground: var(--color-on-surface);
+  --color-card: var(--color-surface-container-lowest);
+  --color-card-foreground: var(--color-on-surface);
+  --color-popover: var(--color-surface-container-lowest);
+  --color-popover-foreground: var(--color-on-surface);
+  --color-primary: var(--color-brand);
   --color-primary-foreground: #ffffff;
-  --color-secondary: #eef4fc;
-  --color-secondary-foreground: #102030;
-  --color-muted: #f4f6fa;
-  --color-muted-foreground: #5b6675;
-  --color-accent: #eef4fc;
-  --color-accent-foreground: #102030;
-  --color-destructive: #dc2626;
+  --color-secondary: var(--color-purple);
+  --color-secondary-foreground: #ffffff;
+  --color-muted: var(--color-surface-container-low);
+  --color-muted-foreground: var(--color-on-surface-variant);
+  --color-accent: var(--color-purple-light);
+  --color-accent-foreground: var(--color-on-surface);
+  --color-border: var(--color-outline-variant);
+  --color-input: var(--color-outline-variant);
+  --color-ring: var(--color-brand);
+
+  --color-destructive: #ba1a1a;
   --color-destructive-foreground: #ffffff;
   --color-success: #16a34a;
   --color-success-light: #e8f9ee;
   --color-warning: #d97706;
   --color-warning-light: #fdf3e3;
-  --color-border: #e5e9f2;
-  --color-input: #d8dfec;
-  --color-ring: #0070f0;
 
-  /* Radius — clean, not overly rounded */
-  --radius-md: 0.5rem;
-  --radius-lg: 0.625rem;
-  --radius-xl: 0.875rem;
+  /* ── Elevation — cool indigo ambient, per DESIGN.md ──────── */
+  --shadow-card: 0px 4px 16px rgba(24, 39, 75, 0.04), 0px 1px 2px rgba(24, 39, 75, 0.02);
+  --shadow-float: 0px 10px 40px rgba(24, 39, 75, 0.08), 0px 2px 6px rgba(24, 39, 75, 0.03);
+  --shadow-glow: 0px 8px 24px rgba(37, 99, 255, 0.25);
 
-  /* Typography */
+  /* ── Shape ────────────────────────────────────────────────
+     Containers 18-24px · controls 10-12px · pills full. */
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.125rem;
+  --radius-2xl: 1.5rem;
+  --radius-control: 0.75rem;
+
+  /* ── Typography — Inter, DESIGN.md scale ────────────────── */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --text-display: 3rem; /* 48/800/-0.03em */
+  --text-headline-lg: 2rem; /* 32/700/-0.02em */
+  --text-headline-md: 1.5rem; /* 24/700/-0.015em */
+  --text-headline-sm: 1.25rem; /* 20/600/-0.01em */
+  --text-title-md: 1.125rem; /* 18/600 */
+  --text-label-sm: 0.6875rem; /* 11/600/+0.03em */
 }
 
 /* ── Dark mode — designed, not inverted ────────────────────
@@ -104,12 +155,86 @@ body {
   background: color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 
-/* ── Signature utilities (used sparingly) ───────────────── */
+/* ── Signature utilities ─────────────────────────────────── */
+
+/* The EventHub brand gradient. 135deg, blue → purple → magenta.
+   RESERVED (§3): primary CTA, create button, selected state, milestone.
+   If you are reaching for this on a surface that is not one of those, use a
+   flat token instead — the gradient reads as decoration when it is everywhere. */
+.brand-gradient {
+  background: linear-gradient(135deg, #2563ff 0%, #6c35ff 52%, #d946ef 100%);
+}
+
 .text-gradient {
-  background: linear-gradient(100deg, #0070f0 0%, #5030f0 100%);
+  background: linear-gradient(135deg, #2563ff 0%, #6c35ff 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+/* ── Elevation helpers (DESIGN.md depth hierarchy) ───────── */
+.elevation-card {
+  box-shadow: 0px 4px 16px rgba(24, 39, 75, 0.04), 0px 1px 2px rgba(24, 39, 75, 0.02);
+}
+.elevation-float {
+  box-shadow: 0px 10px 40px rgba(24, 39, 75, 0.08), 0px 2px 6px rgba(24, 39, 75, 0.03);
+}
+.elevation-glow {
+  box-shadow: 0px 8px 24px rgba(37, 99, 255, 0.25);
+}
+
+/* ── PRIMARY GRADIENT CTA (DESIGN.md buttons) ──────────────
+   48px tall, 12px radius, glow shadow, brightness lift on hover. */
+.btn-gradient {
+  background: linear-gradient(135deg, #2563ff 0%, #6c35ff 52%, #d946ef 100%);
+  color: #ffffff;
+  border: 0;
+  border-radius: 12px;
+  min-height: 48px;
+  font-weight: 600;
+  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+}
+.btn-gradient:hover:not(:disabled) {
+  filter: brightness(1.05);
+  box-shadow: 0px 10px 24px rgba(108, 53, 255, 0.35);
+}
+.btn-gradient:active:not(:disabled) {
+  transform: scale(0.985);
+}
+.btn-gradient:disabled {
+  opacity: 0.55;
+  filter: none;
+  box-shadow: none;
+}
+
+/* ── Focus ring (DESIGN.md form inputs) ──────────────────── */
+.focus-brand:focus-visible {
+  outline: none;
+  border-color: #2563ff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 255, 0.12);
+}
+.focus-error:focus-visible {
+  outline: none;
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+
+/* Thin custom scrollbar for horizontal rails (story rail, filters) */
+.rail-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-snap-type: x proximity;
+}
+.rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Safe-area padding for fixed mobile chrome (bottom nav, sticky composer) */
+.pb-safe {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 /* Subtle dotted texture for hero sections */
@@ -188,6 +313,152 @@ body {
 }
 .animate-live-pulse {
   animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+/* ── Part 8 micro-interactions (§46) ─────────────────────
+   Fast, natural, 60fps. transform/opacity only — nothing here triggers
+   layout, so a like animation cannot stall a feed scroll. */
+
+/* Double-tap heart: scale up, float, fade (§8). */
+@keyframes heart-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  55% {
+    opacity: 1;
+    transform: translate(-50%, -55%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -95%) scale(0.9);
+  }
+}
+.animate-heart-burst {
+  animation: heart-burst 0.75s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  /* §8 — the animation must never intercept a scroll or a second tap. */
+  pointer-events: none;
+}
+
+/* Like button pop */
+@keyframes like-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.28);
+  }
+  70% {
+    transform: scale(0.94);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.animate-like-pop {
+  animation: like-pop 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Bookmark / save press */
+@keyframes save-press {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    transform: scale(1.22) rotate(-8deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+.animate-save-press {
+  animation: save-press 0.32s ease-out;
+}
+
+/* Bottom sheet rise (§12) */
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.animate-sheet-up {
+  animation: sheet-up 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out both;
+}
+
+/* Story ring progress + viewer enter (§15) */
+@keyframes story-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.story-progress {
+  transform-origin: left center;
+  animation-name: story-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+/* Message send: sent bubble settles into place (§46) */
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-msg-in {
+  animation: msg-in 0.18s ease-out;
+}
+
+/* Story / media viewer zoom-in open */
+@keyframes viewer-in {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-viewer-in {
+  animation: viewer-in 0.2s ease-out;
+}
+
+/* ── Reduced motion: respect the OS preference (§49) ────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Legacy helpers still referenced during migration */

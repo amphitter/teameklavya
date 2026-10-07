@@ -18,6 +18,11 @@
  * bands and a 2400×1800 cover in three. Bands are what make the assertions
  * possible — "the circle is green" is a claim about WHICH REGION survived the
  * crop, which a solid-colour fixture could never show.
+ *
+ * The seeded accounts are timestamped and change on every QA-server restart,
+ * so pass the credentials from the QA_READY line:
+ *
+ *   QA_EMAIL=ana<stamp>@qa.com QA_USERNAME=ana_roy node phase2.js
  */
 const { chromium } = require("playwright");
 const zlib = require("zlib");

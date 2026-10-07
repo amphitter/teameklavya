@@ -62,3 +62,31 @@ an unset/absolute `NEXT_PUBLIC_API_URL` behaves exactly as before. The one
 detail that bit us: Next strips the trailing slash before rewrites run, and
 socket.io only answers on `/socket.io/` — hence the literal slash in that
 rewrite, plus `skipTrailingSlashRedirect` (only in this mode).
+
+## Phase 2 — the canonical avatar and cover
+
+```bash
+# the same throwaway backend, but with the browser talking to the app's own
+# origin (the same-origin proxy), so uploads and their /uploads/* files resolve
+cd frontend
+NEXT_PUBLIC_API_URL=same-origin BACKEND_PROXY_URL=http://127.0.0.1:5999 npm run build
+BACKEND_PROXY_URL=http://127.0.0.1:5999 ./node_modules/.bin/next start -p 3000 -H 0.0.0.0
+
+# drive it (the seeded accounts are timestamped, so read the QA_READY line)
+cd /var/tmp/pw
+QA_EMAIL=ana<stamp>@qa.com node phase2.js          # both flows, 390×844 at DPR 3
+QA_EMAIL=ana<stamp>@qa.com node phase2-widths.js   # 320/360/375/390/412/430
+```
+
+`phase2.js` generates its own banded fixtures (a 1200×1600 four-band portrait
+and a 2400×1800 three-band cover) so it can ask a question a flat image cannot
+answer: *which region of the photo survived the crop?* It samples the centre
+pixel of the served avatar and compares it to the band the stored crop points
+at — a default centre crop fails that check, a deliberate framing passes it.
+
+`phase2-widths.js` opens the crop editor at every width the brief names and
+asserts the frame is square, on screen, and that the confirm button and the
+zoom slider are hit-testable (not merely present in the DOM).
+
+Both need `LD_LIBRARY_PATH=/var/tmp/libs/usr/lib/x86_64-linux-gnu` and
+`PLAYWRIGHT_BROWSERS_PATH=/home/user/.cache/ms-playwright` in this sandbox.

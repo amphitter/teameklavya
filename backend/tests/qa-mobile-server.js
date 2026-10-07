@@ -10,7 +10,10 @@
  */
 process.env.NODE_ENV = "test";
 process.env.PORT = process.env.PORT || "5999";
-process.env.FRONTEND_URL = "http://127.0.0.1:3211";
+/* Comma-separated, so the harness can be driven from a laptop AND from a
+ * phone through the sandbox preview proxy — CORS is an allowlist here. */
+process.env.FRONTEND_URL =
+  process.env.FRONTEND_URL || "http://127.0.0.1:3211,http://127.0.0.1:3000";
 process.env.JWT_SECRET = process.env.JWT_SECRET || "qa-secret";
 process.env.GOOGLE_CLIENT_ID = "x";
 process.env.GOOGLE_CLIENT_SECRET = "y";
@@ -106,6 +109,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // A direct chat too, so presence has a pair to report.
   const dm = await call("POST", "/api/messages/conversations", { userId: ben.user._id }, ana.token);
   await call("POST", `/api/messages/conversations/${dm.d.conversationId}`, { content: "hey" }, ben.token);
+
+  const creds = (tag) => ({ email: `${tag}${stamp}@qa.com`, password: "Test1234!" });
+  console.log(`\nLOGIN AS  ana: ${creds("ana").email}  /  Test1234!`);
+  console.log(`LOGIN AS  ben: ${creds("ben").email}  /  Test1234!`);
 
   console.log("\nQA_READY " + JSON.stringify({
     teamId,

@@ -17,7 +17,9 @@ export function getSocket(): Socket {
   if (socket) return socket;
   const token =
     typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  socket = io(API_ROOT, {
+  /* API_ROOT is "" in same-origin mode: io() with no URL connects to the
+     origin serving the page, which is exactly right there. */
+  socket = io(API_ROOT || undefined, {
     auth: { token },
     transports: ["websocket", "polling"],
     reconnection: true,

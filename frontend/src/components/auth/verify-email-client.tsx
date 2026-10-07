@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Loader2, XCircle } from "lucide-react";
 import { AuthCard } from "@/components/auth/auth-card";
+import { API_ORIGIN } from "@/utils/api";
 
 export default function VerifyEmailClient() {
   const searchParams = useSearchParams();
@@ -14,8 +15,7 @@ export default function VerifyEmailClient() {
   useEffect(() => {
     if (token && email) {
       // The backend verifies the token and redirects to /verify-success
-      const backend = process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com";
-      window.location.href = `${backend}/api/auth/verify-email?token=${encodeURIComponent(
+      window.location.href = `${API_ORIGIN}/api/auth/verify-email?token=${encodeURIComponent(
         token
       )}&email=${encodeURIComponent(email)}`;
     } else {

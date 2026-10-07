@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { API_ORIGIN } from "@/utils/api";
 
 /**
  * Google OAuth callback.
@@ -23,7 +24,7 @@ export default function OAuthCallback() {
     (async () => {
       try {
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com"}/api/auth/google/exchange`,
+          `${API_ORIGIN}/api/auth/google/exchange`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },

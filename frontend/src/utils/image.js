@@ -7,7 +7,11 @@ export const getImageUrl = (imagePath) => {
 
   // Relative paths served by the backend (legacy local uploads)
   if (imagePath.startsWith("/uploads")) {
-    const baseURL = process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com";
+    // Same-origin mode serves those paths through this app's proxy.
+    const baseURL =
+      process.env.NEXT_PUBLIC_API_URL === "same-origin"
+        ? ""
+        : process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com";
     return `${baseURL}${imagePath}`;
   }
   return imagePath;

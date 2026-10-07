@@ -72,6 +72,11 @@ function recordLastSeen(userId, { force = false } = {}) {
   const now = Date.now();
   if (!force && now - (lastSeenWriteAt.get(id) || 0) < LAST_SEEN_WRITE_INTERVAL_MS) return;
   lastSeenWriteAt.set(id, now);
+  /* The last-seen flush is fired on the final disconnect, which during a
+   * shutdown/deploy races the connection closing. Nothing is lost — the write
+   * is a best-effort timestamp — so a disconnected client is not an error
+   * worth a log line on every restart. */
+  if (require("mongoose").connection.readyState !== 1) return;
   User.updateOne({ _id: id }, { $set: { lastSeenAt: new Date(now) } }).catch((e) =>
     console.error("lastSeen write failed:", e.message)
   );

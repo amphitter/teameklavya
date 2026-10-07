@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2, Lock, Mail, User } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/utils/api";
+import { api, API_ORIGIN } from "@/utils/api";
 import { AuthSplit, GRADIENT_BTN, FIELD_CLS } from "@/components/auth/auth-split";
 import { cn } from "@/lib/utils";
 
@@ -69,7 +69,7 @@ export default function SignupForm() {
   };
 
   const handleGoogleSignup = () => {
-    window.location.href = `${process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com"}/api/auth/google`;
+    window.location.href = `${API_ORIGIN}/api/auth/google`;
   };
 
   return (

@@ -12,7 +12,23 @@ import type { NextConfig } from "next";
  * Formats: AVIF → WebP → original. On a mobile-first product (§51) this is
  * typically a 30–50% byte reduction over JPEG for identical visual quality.
  */
+/**
+ * Optional same-origin API proxy — every switch below is inert unless
+ * BACKEND_PROXY_URL is set, so production (Vercel → Render) is untouched: no
+ * rewrites are emitted, the trailing-slash behaviour is unchanged, and the
+ * browser still talks to NEXT_PUBLIC_API_URL directly.
+ *
+ * Why it exists: a phone preview served from one sandbox origin cannot call
+ * the API on a second sandbox port (the cross-port host is token-gated), and
+ * the sandbox browser has no egress to Render. Proxying server-side gives the
+ * browser exactly one origin — no CORS preflight, no second port, and the same
+ * URLs the app already uses.
+ */
+const backendProxy = process.env.BACKEND_PROXY_URL?.replace(/\/$/, "");
+
 const nextConfig: NextConfig = {
+  ...(backendProxy ? { skipTrailingSlashRedirect: true } : {}),
+
   images: {
     remotePatterns: [
       {
@@ -37,6 +53,20 @@ const nextConfig: NextConfig = {
   // thousands of unused modules into the client bundle.
   experimental: {
     optimizePackageImports: ["lucide-react", "framer-motion", "react-icons"],
+  },
+
+  async rewrites() {
+    if (!backendProxy) return [];
+    /* The slash-less source is the one that matters: the browser asks for
+       "/socket.io/?EIO=…", Next matches that against "/socket.io/:path*" and
+       drops both the capture and the slash, so the socket server — which only
+       answers on the trailing-slash form — saw "/socket.io" and 404'd. The
+       destination is therefore written literally, with the slash. */
+    return [
+      { source: "/api/:path*", destination: `${backendProxy}/api/:path*` },
+      { source: "/socket.io", destination: `${backendProxy}/socket.io/` },
+      { source: "/socket.io/:path*", destination: `${backendProxy}/socket.io/:path*` },
+    ];
   },
 };
 

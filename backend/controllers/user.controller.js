@@ -239,7 +239,10 @@ exports.getSuggestedUsers = async (req, res) => {
 // GET /api/users/:id/achievements — real unlock state for the profile
 exports.getUserAchievements = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select("_id").lean();
+    // Accepts a username or an id, like the rest of the user routes. This used
+    // to call findById directly, so /users/<username>/achievements threw a
+    // CastError and returned 500 on every profile page.
+    const user = await resolveUser(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
     const { achievementsFor } = require("../services/achievement.service");
     const achievements = await achievementsFor(user._id);

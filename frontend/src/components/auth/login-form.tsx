@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { jwtDecode } from "jwt-decode";
 import { Eye, EyeOff, Loader2, Lock, Mail, MailCheck } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/utils/api";
+import { api, API_ORIGIN } from "@/utils/api";
 import { AuthSplit, GRADIENT_BTN, FIELD_CLS } from "@/components/auth/auth-split";
 
 interface DecodedToken {
@@ -69,7 +69,7 @@ function LoginForm() {
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = `${process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com"}/api/auth/google`;
+    window.location.href = `${API_ORIGIN}/api/auth/google`;
   };
 
   return (

@@ -28,6 +28,8 @@ const { SlidingWindow } = require("../utils/frequency-limiter");
 const { LIMITS, REALTIME_CAPS, isRateLimitingDisabled } = require("../config/rate-limits");
 const metrics = require("../services/metrics.service");
 const { EVENTS, ERROR_CODES, socketError } = require("../config/socket-protocol");
+// Part 10 — private direct messaging rides the same socket server.
+const dmRealtime = require("./dm-realtime.service");
 
 let io = null;
 
@@ -1150,6 +1152,8 @@ const connectGuardUser = new SlidingWindow(LIMITS.REALTIME_CONNECT_USER.limit, L
 const connectGuardIp = new SlidingWindow(LIMITS.REALTIME_CONNECT_IP.limit, LIMITS.REALTIME_CONNECT_IP.windowMs);
 const joinGuard = new SlidingWindow(LIMITS.REALTIME_JOIN.limit, LIMITS.REALTIME_JOIN.windowMs);
 const answerGuard = new SlidingWindow(LIMITS.REALTIME_ANSWER.limit, LIMITS.REALTIME_ANSWER.windowMs);
+// Part 10 §13 — bounds dm:typing broadcast amplification (never persists).
+const typingGuard = new SlidingWindow(LIMITS.REALTIME_TYPING.limit, LIMITS.REALTIME_TYPING.windowMs);
 
 function emitError(socket, code, message) {
   socket.emit(EVENTS.S_ERROR, socketError(code, message));
@@ -2312,6 +2316,7 @@ async function handleLeave(socket, eventId, reason) {
 function init(socketIo) {
   io = socketIo;
   const { socketAuth } = require("../middleware/socket-auth.middleware");
+  dmRealtime.attach(socketIo);
 
   io.use(socketAuth);
 
@@ -2358,14 +2363,34 @@ function init(socketIo) {
     connectionRegistry.add(socket.id, uid, ip);
     metrics.recordSocketConnect();
 
+    /* Part 10 — every authenticated socket joins its own `user:{id}` room.
+     * Done here rather than in a page component so DMs work on any page:
+     * the unread badge, the inbox row and an open thread all update from one
+     * subscription. On reconnect Socket.IO re-runs this handler, so the room
+     * is re-joined automatically and no client-side re-subscribe is needed
+     * (§28 — never a duplicate after a reconnect). */
+    dmRealtime.joinUserRoom(socket);
+
     // Clock synchronization baseline (spec §17) — full offset use in Phase 4
     socket.emit(EVENTS.S_SERVER_TIME, { serverTime: Date.now() });
 
     registerHandlers(socket);
 
+    /* DM handlers: typing and read announcements. `rateLimit` reuses the
+     * same cross-socket sliding window as the live-event commands, so a
+     * client spamming dm:typing is bounded by the existing guard rather than
+     * a second, parallel limit. */
+    dmRealtime.registerDmHandlers(socket, {
+      rateLimit: () => {
+        if (isRateLimitingDisabled()) return true;
+        return typingGuard.allow(`u:${uid || socket.id}`).allowed;
+      },
+    });
+
     socket.on("disconnect", () => {
       connectionRegistry.remove(socket.id);
       metrics.recordSocketDisconnect();
+      dmRealtime.leaveUserRoom(socket);
       if (socket.data?.eventId) {
         handleLeave(socket, socket.data.eventId, "disconnected").catch(() => {});
       }

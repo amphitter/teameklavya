@@ -19,6 +19,13 @@ const EVENTS = {
   C_QA_UPVOTE: "qa:upvote", // Phase 6 { questionId } — toggle, one vote per user
   C_CHAT_SEND: "chat:send", // Phase 6 { eventId, text }
 
+  /* ── direct messages (Part 10) ──
+   * A separate namespace from the event rooms above: `chat:*` is the public
+   * chat INSIDE a live event, `dm:*` is private 1:1 messaging. They share
+   * one socket server but never share rooms or handlers. */
+  C_DM_TYPING: "dm:typing", // { conversationId, typing } — socket only, never persisted (§13)
+  C_DM_READ: "dm:read", // { conversationId } — batched read announcement (§14)
+
   /* ── organizer → server (authorized: owner/admin/moderator only) ── */
   O_EVENT_START: "event:start", // { eventId }
   O_EVENT_PAUSE: "event:pause", // Phase 3
@@ -67,6 +74,11 @@ const EVENTS = {
   S_CHAT_PINNED: "chat:pinned", // Phase 6 { messageId, pinned }
   S_CHAT_MUTED: "chat:muted", // Phase 6 { userId, muted } — public moderation signal
   S_EVENT_COMPLETED: "event:completed", // Phase 3 { result }
+  S_DM_MESSAGE: "dm:message", // Part 10 { conversationId, message, preview, … } — to BOTH user rooms
+  S_DM_TYPING: "dm:typing", // Part 10 { conversationId, userId, typing }
+  S_DM_READ: "dm:read", // Part 10 { conversationId, readerId, at }
+  S_DM_DELETED: "dm:deleted", // Part 10 { conversationId, messageId }
+
   S_ERROR: "error", // { code, message } — structured, never stack traces (§81)
 };
 

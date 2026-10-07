@@ -60,6 +60,13 @@ const DEFAULTS = {
   REALTIME_CONNECT_IP:   { limit: 30, windowMs: MINUTE },
   REALTIME_JOIN:         { limit: 15, windowMs: MINUTE },
   REALTIME_ANSWER:       { limit: 60, windowMs: MINUTE }, // never binds a fast quiz; kills multi-socket spam
+  /* Part 10 §13 — dm:typing is a socket-only signal, so its only cost is
+   * broadcast amplification. A well-debounced client emits ~2 per 5s of
+   * continuous typing (start + stop); a client that emits per keystroke at
+   * 200 wpm would be ~20/min. 40/min therefore absorbs sloppy clients while
+   * still bounding a scripted flood, and because typing is never persisted
+   * exceeding it costs a dropped indicator, not a dropped message. */
+  REALTIME_TYPING:       { limit: 40, windowMs: MINUTE },
 
   /* ── Action guards (§27) — on top of unique indexes + domain buckets ── */
   GUARD_FOLLOW_TOGGLE:    { limit: 20, windowMs: MINUTE },   // follow/unfollow loop cap

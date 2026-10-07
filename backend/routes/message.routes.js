@@ -27,6 +27,9 @@ router.post("/conversations", requireAuth, limiters.messaging, messageController
 router.get("/conversations/:id", requireAuth, messageController.getMessages);
 router.post("/conversations/:id", requireAuth, limiters.messaging, messageController.sendMessage);
 router.get("/unread-count", requireAuth, messageController.getUnreadCount);
+// Part 10 §25 — server-side search. Must precede /:id so "search"
+// is not captured as a message id.
+router.get("/search", requireAuth, messageController.searchMessages);
 router.delete("/:id", requireAuth, messageController.deleteMessage);
 router.post("/conversations/:id/mute", requireAuth, messageController.toggleMute);
 router.post("/conversations/:id/hide", requireAuth, messageController.hideConversation);

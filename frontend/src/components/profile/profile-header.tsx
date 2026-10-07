@@ -71,7 +71,16 @@ export function ProfileHeader({
         ) : null}
       </div>
 
-      <div className="px-5 pb-5 sm:px-7 sm:pb-7">
+      {/* `relative z-10` is load-bearing, not decoration.
+       *
+       * The cover above is `position: relative`, so it paints in the positioned
+       * layer — ABOVE plain in-flow content. This block overlaps it with
+       * `-mt-12`, so without a stacking context of its own the cover covered
+       * the name, the @username and every header action: `elementFromPoint` at
+       * the centre of "Edit profile" returned the cover div, and the whole
+       * edit-profile feature was unclickable with a mouse. Measured before the
+       * fix: button top 174, cover bottom 230. */}
+      <div className="relative z-10 px-5 pb-5 sm:px-7 sm:pb-7">
         <div className="-mt-12 flex flex-col gap-5 sm:-mt-14 sm:flex-row sm:items-start">
           <div className="rounded-full border-4 border-card">
             <UserAvatar user={user} size={96} className="!h-24 !w-24" />

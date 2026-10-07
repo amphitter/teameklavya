@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
 import { AvatarUploader, CoverUploader } from "@/components/profile/media-uploader";
-import { useEditProfile, useUsernameAvailability, type ProfileUser } from "@/hooks/use-social";
+import {
+  classifySaveError,
+  useEditProfile,
+  useUsernameAvailability,
+  type ProfileUser,
+} from "@/hooks/use-social";
 import { SHEET_FOOTER_PADDING, useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
 /**
@@ -50,6 +55,18 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
   const [allowMessagesFrom, setAllowMessagesFrom] = useState("everyone");
   /* The save bar must clear the phone keyboard, not hide behind it. */
   const panelRef = useKeyboardInset<HTMLDivElement>();
+
+  /* One click must produce one PUT.
+   *
+   * `canSave` already goes false while the mutation is loading, but React state
+   * updates are asynchronous: two clicks dispatched in the same tick both read
+   * the old `save.isLoading === false` and both fire. A ref flips
+   * synchronously, so it cannot be raced. */
+  const inFlight = useRef(false);
+  const [justSaved, setJustSaved] = useState(false);
+  useEffect(() => {
+    if (!open) setJustSaved(false);
+  }, [open]);
 
   // Debounced username — the hook fires a request per keystroke otherwise.
   const [debouncedUsername, setDebouncedUsername] = useState("");
@@ -157,13 +174,32 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
     if (avatar !== (user?.profile?.avatar || "")) payload.avatar = avatar;
     if (coverImage !== (user?.profile?.coverImage || "")) payload.coverImage = coverImage;
 
-    const res = await save.mutate(payload);
-    if (res?.success) {
-      toast.success("Profile updated");
-      onSaved?.(res.user);
-      onClose();
-    } else {
-      toast.error((res as any)?.message || "Couldn't save your profile");
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      const res = await save.mutate(payload);
+
+      /* The backend returns `{ success: true, user }`. Treat a 2xx as done —
+         the request has already succeeded by the time we are here, so the only
+         way to report a failure is to have actually caught one. */
+      if (res?.success || res?.user) {
+        setJustSaved(true);
+        onSaved?.(res.user);
+        toast.success("Profile updated");
+        /* Hold the "Saved ✓" state long enough to be read, then close. The
+           parent already has the new identity, so closing is not what makes
+           the change appear — nothing reloads either way. */
+        window.setTimeout(() => onClose(), 900);
+      } else {
+        toast.error("Couldn't save your profile. Please try again.");
+      }
+    } catch (err) {
+      const failure = classifySaveError(err);
+      /* A cancelled request is not a failure: the user navigated away, the
+         component unmounted, or a newer save replaced this one. Say nothing. */
+      if (failure.kind !== "cancelled") toast.error(failure.message);
+    } finally {
+      inFlight.current = false;
     }
   };
 
@@ -373,8 +409,23 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
           <button type="button" onClick={requestClose} className="rounded-xl border border-outline-variant px-4 py-3 text-[15px] font-semibold text-on-surface">
             Cancel
           </button>
-          <button type="button" onClick={submit} disabled={!canSave} className="btn-gradient flex-1 disabled:opacity-55">
-            {save.isLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Saving…</span> : "Save changes"}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSave || justSaved}
+            className="btn-gradient flex-1 disabled:opacity-55"
+          >
+            {justSaved ? (
+              <span className="flex items-center justify-center gap-2">
+                <Check className="h-4 w-4" /> Saved
+              </span>
+            ) : save.isLoading ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Saving…
+              </span>
+            ) : (
+              "Save changes"
+            )}
           </button>
         </div>
       </div>

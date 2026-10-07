@@ -218,7 +218,13 @@ export function MessageComposer({
               submit();
             }
           }}
-          className="max-h-[8.25rem] min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-outline-variant bg-surface px-3.5 py-2.5 text-[15px] leading-snug outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 disabled:opacity-60"
+          /* The textarea grows to 8.25rem and then scrolls internally. With
+             the default `overflow: auto`, once the text passes that cap the
+             browser draws the app's global 10px webkit scrollbar INSIDE the
+             pill — a scrollbar sitting in the message box. Hidden here via the
+             project's own `.no-scrollbar` utility plus `scrollbar-width` for
+             Firefox; wheel, drag and arrow-key scrolling all still work. */
+          className="no-scrollbar max-h-[8.25rem] min-h-[2.5rem] flex-1 resize-none overflow-y-auto [scrollbar-width:none] rounded-2xl border border-outline-variant bg-surface px-3.5 py-2.5 text-[15px] leading-snug outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 disabled:opacity-60"
         />
 
         <button

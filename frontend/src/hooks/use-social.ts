@@ -216,12 +216,63 @@ export function useProfile(idOrUsername?: string | null) {
   return { ...q, profile: q.data?.user ?? null };
 }
 
+/**
+ * Classify a failed profile save so the UI can say something true.
+ *
+ * The report listed a "Couldn't save profile" toast next to a 200 response and
+ * an `API Error: canceled` in the console. Both come from one habit: treating
+ * every rejected promise the same. These are four different situations with
+ * four different answers, and a cancellation is not an error at all — a
+ * component unmounting, a newer save replacing a stale one, or the user
+ * navigating away must be silent.
+ */
+export type SaveFailure =
+  | { kind: "cancelled" }
+  | { kind: "network"; message: string }
+  | { kind: "validation"; message: string }
+  | { kind: "auth"; message: string }
+  | { kind: "server"; message: string };
+
+export function classifySaveError(error: unknown): SaveFailure {
+  const e = error as {
+    code?: string;
+    name?: string;
+    message?: string;
+    response?: { status?: number; data?: { message?: string; errors?: { message?: string }[] } };
+  };
+
+  // AbortController / axios cancellation — never the user's problem.
+  if (e?.code === "ERR_CANCELED" || e?.code === "ECONNABORTED" || e?.name === "CanceledError") {
+    return { kind: "cancelled" };
+  }
+
+  const status = e?.response?.status;
+  const serverMessage =
+    e?.response?.data?.message || e?.response?.data?.errors?.[0]?.message || "";
+
+  if (!status) {
+    // No response at all: offline, DNS, CORS, timeout.
+    return { kind: "network", message: "Couldn't connect. Please check your connection and try again." };
+  }
+  if (status === 401 || status === 403) {
+    return { kind: "auth", message: serverMessage || "Your session expired — please sign in again." };
+  }
+  if (status >= 400 && status < 500) {
+    return { kind: "validation", message: serverMessage || "Some details were rejected. Please review them." };
+  }
+  return { kind: "server", message: serverMessage || "Couldn't save your profile. Please try again." };
+}
+
 export function useEditProfile() {
   return useMutation((body: Record<string, unknown>) =>
     api.put("/auth/me/profile", body).then((r) => r.data), {
     // §56 — one save must refresh the profile everywhere it is rendered:
     // header, nav avatar, post author labels, cached profile.
     invalidate: [["/auth/me"], ["/posts"], ["/users"]],
+    /* Let the sheet see the real failure. Without this a 422 and a cancelled
+       request both arrived as `undefined`, so the sheet showed the same
+       "Couldn't save" line for both — the false failure in the report. */
+    throwOnError: true,
     }
   );
 }
@@ -233,7 +284,14 @@ export function useUsernameAvailability(username: string, enabled = true) {
   const q = useQuery<{ available: boolean; reason?: string; message?: string }>(
     ["/auth/username-availability", clean],
     valid && enabled ? `/auth/username-availability?username=${encodeURIComponent(clean)}` : null,
-    { enabled: valid && enabled, staleTime: 30_000 }
+    {
+      enabled: valid && enabled,
+      /* Five minutes, not thirty seconds. Retyping a name you already checked
+         (deleting a character and putting it back) is a common pattern, and
+         each round trip to a cold API is what made this feel slow. The key is
+         the username, so editing down to a name already checked is free. */
+      staleTime: 5 * 60_000,
+    }
   );
   return {
     available: q.data?.available ?? null,

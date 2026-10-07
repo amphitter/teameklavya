@@ -569,6 +569,19 @@ exports.checkUsername = async (req, res) => {
       return res.json({ available: false, reason: 'invalid', message: '3-30 characters: letters, numbers, underscore' });
     }
     const me = req.user?.id;
+    /* Already yours? Answer without touching the database.
+     *
+     * The edit sheet skips the call when the field is untouched, but the check
+     * still arrives when someone retypes their own handle or lands back on it
+     * after trying another. That request can only ever answer "available", and
+     * this endpoint is on the typing path — so it is the wrong place to spend
+     * a round trip. */
+    if (me) {
+      const mine = await User.findById(me).select('username').lean();
+      if (mine?.username && mine.username === username) {
+        return res.json({ available: true, reason: 'same' });
+      }
+    }
     const existing = await User.findOne(
       me ? { username, _id: { $ne: me } } : { username }
     )

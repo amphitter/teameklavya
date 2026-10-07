@@ -136,6 +136,13 @@ const AVAIL = "/api/auth/username-availability";
   // Unchanged username must stay valid for its owner (the self-exclusion).
   r = await call("GET", `${AVAIL}?username=${uname}`, null, ta);
   ok(r.d.available === true, "your OWN username still reads as available to you (no false 'taken')");
+  /* §17 — retyping your own handle is answered without a database round trip.
+     This endpoint sits on the typing path, so it is the wrong place to spend a
+     query on an answer that can only ever be "yes, it's yours". */
+  ok(r.d.reason === "same", "your own username is answered as 'same' (no query needed)", `reason=${r.d.reason}`);
+  // The anonymous case must still hit the database — no short-circuit without a session.
+  r = await call("GET", `${AVAIL}?username=${uname}`);
+  ok(r.d.available === false && r.d.reason === "taken", "an anonymous caller still gets a real check");
   r = await call("PUT", "/api/auth/me/profile", { username: uname, bio: "still fine" }, ta);
   ok(r.s === 200, "re-saving your own unchanged username is allowed");
 

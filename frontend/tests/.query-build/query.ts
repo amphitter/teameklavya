@@ -1,4 +1,4 @@
-"use client";
+
 
 /**
  * EventHub query layer (Part 5, Phase 5 — spec §16, §15, §17, §30, §39, §52)
@@ -32,9 +32,12 @@
  * failing backend is not hit by a synchronised retry storm.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { AxiosError, AxiosRequestConfig } from "axios";
-import { api } from "@/utils/api";
+const useCallback = <T,>(fn: T): T => fn;
+const useEffect = (_fn: () => void, _deps?: unknown[]) => {};
+const useRef = <T,>(initial: T) => ({ current: initial });
+const useState = <T,>(initial: T): [T, (v: T) => void] => [initial, () => {}];
+type AxiosError = any; type AxiosRequestConfig = any;
+const api: any = {};
 
 /* ── Keys ──────────────────────────────────────────────────────────────── */
 

@@ -124,7 +124,11 @@ function MessagesInbox() {
      * scrolled away and the page can never rubber-band behind a chat. */
     <div
       className={cn(
-        "mx-auto flex w-full max-w-5xl flex-col overflow-hidden",
+        /* Was max-w-5xl (1024px): inside the 1200px column it left an 88px
+           empty band on each side at 1440 — the "faltu gap". A chat is a
+           two-pane surface, so it should use the width it is given, with a
+           readable cap only on very wide monitors. */
+        "mx-auto flex w-full max-w-[1200px] flex-col overflow-hidden 2xl:max-w-[1440px]",
         /* The inbox keeps the bottom nav, so it must subtract it.
          *   3.5rem = shell header, 4.5rem = bottom nav, plus the safe area
          *   the nav itself reserves. From lg the nav is gone and only the

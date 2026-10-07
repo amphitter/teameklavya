@@ -9,6 +9,10 @@
  *  DELETE /api/messages/:id                  unsend own message (auth)
  *  POST /api/messages/conversations/:id/mute toggle chat notifications (auth)
  *  POST /api/messages/conversations/:id/hide hide chat until next message (auth)
+ *  POST /api/messages/conversations/:id/archive archive/unarchive (auth) — Part 8 §32
+ *  GET  /api/messages/conversations?view=archived             archived inbox (auth)
+ *  POST /api/messages/conversations/:id/read    mark thread read (auth)
+ *  POST /api/messages/:id/react  { emoji }      toggle a reaction (auth) — Part 8 §31
  */
 const express = require("express");
 // Part 5, Phase 2 — messaging send bucket (§24)
@@ -26,5 +30,8 @@ router.get("/unread-count", requireAuth, messageController.getUnreadCount);
 router.delete("/:id", requireAuth, messageController.deleteMessage);
 router.post("/conversations/:id/mute", requireAuth, messageController.toggleMute);
 router.post("/conversations/:id/hide", requireAuth, messageController.hideConversation);
+router.post("/conversations/:id/archive", requireAuth, messageController.archiveConversation);
+router.post("/conversations/:id/read", requireAuth, messageController.markRead);
+router.post("/:id/react", requireAuth, limiters.messaging, messageController.reactToMessage);
 
 module.exports = router;

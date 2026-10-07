@@ -184,7 +184,24 @@ exports.login = async (req, res) => {
     }
 
     const token = signJwt(user);
-    return res.json({ token, user: { id: user._id, firstName: user.firstName, lastName: user.lastName, email: user.email } });
+    /* `_id` is the canonical key — /auth/me and every other endpoint return
+       it, and the frontend compares against it to decide ownership (sent vs
+       received messages, post authorship, follow state). Returning only `id`
+       here meant the stored session user had no `_id` at all, so every one of
+       those comparisons silently evaluated false.
+       `id` is kept for any existing client that already depends on it. */
+    return res.json({
+      token,
+      user: {
+        _id: user._id,
+        id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+      },
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });
@@ -333,15 +350,24 @@ exports.getProfile = async (req, res) => {
     const user = await User.findById(req.user.id).select('-passwordHash -resetOtp -passwordResetToken');
     if (!user) return res.status(404).json({ message: 'User not found' });
     
+    /* Part 8 §56 — the client propagates identity (header, nav avatar, post
+       author, mentions) from this payload, so it carries the full canonical
+       shape: `_id` plus every field the profile editor can write. Returning
+       only part of it forced a second fetch and let the nav avatar go stale
+       after an edit. */
     return res.json({ 
       success: true,
       user: {
         _id: user._id,
+        id: user._id,
         firstName: user.firstName,
         lastName: user.lastName,
         email: user.email,
+        username: user.username,
         role: user.role,
+        verified: user.verified,
         profile: user.profile,
+        socialSettings: user.socialSettings,
         emailVerified: user.emailVerified
       }
     });
@@ -351,32 +377,179 @@ exports.getProfile = async (req, res) => {
   }
 };
 
+/* ── Profile update ───────────────────────────────────────────────────────
+ * Writes are an EXPLICIT ALLOWLIST. Never spread req.body onto the document:
+ * User carries `role` and `points`, so a blind spread is a privilege
+ * escalation and a self-serve points mint in one line.
+ *
+ * The previous implementation accepted only institution/course/year, so the
+ * avatar, cover, username, display name, bio, location, interests and privacy
+ * settings the UI sends were all discarded — silently, with a 200 OK. Every
+ * one of those fields already exists on the User schema; they simply had no
+ * write path. */
+const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
+const BIO_MAX = 280;
+const NAME_MAX = 50;
+const LOCATION_MAX = 80;
+const INTERESTS_MAX = 10;
+const URL_MAX = 500;
+
+/** Accepts only http(s) URLs, or '' to clear. Rejects javascript:, data:, etc. */
+function sanitizeUrl(value) {
+  if (value === '' || value == null) return '';
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed.length > URL_MAX) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
 exports.updateProfile = async (req, res) => {
   try {
-    const { institution, course, year } = req.body;
-    console.log("🔐 updateProfile - User ID:", req.user.id); // Add this for debugging
-    
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user.profile) user.profile = {};
+    if (!user.socialSettings) user.socialSettings = {};
 
-    // Initialize profile if it doesn't exist
-    if (!user.profile) {
-      user.profile = {};
+    const b = req.body || {};
+    const fail = (message) => res.status(400).json({ message });
+
+    // ── Identity ────────────────────────────────────────────────────────
+    if (b.firstName !== undefined) {
+      if (typeof b.firstName !== 'string' || !b.firstName.trim()) return fail('First name is required');
+      if (b.firstName.trim().length > NAME_MAX) return fail(`First name must be ${NAME_MAX} characters or fewer`);
+      user.firstName = b.firstName.trim();
+    }
+    if (b.lastName !== undefined) {
+      if (typeof b.lastName !== 'string') return fail('Last name must be a string');
+      if (b.lastName.trim().length > NAME_MAX) return fail(`Last name must be ${NAME_MAX} characters or fewer`);
+      user.lastName = b.lastName.trim();
     }
 
-    user.profile.institution = institution ?? user.profile.institution;
-    user.profile.course = course ?? user.profile.course;
-    user.profile.year = year ?? user.profile.year;
-    
+    // ── Username: validated + uniqueness-checked against other users ────
+    if (b.username !== undefined) {
+      const username = String(b.username || '').trim().toLowerCase();
+      if (!USERNAME_RE.test(username)) {
+        return fail('Username must be 3-30 characters: letters, numbers and underscore only');
+      }
+      const taken = await User.findOne({ username, _id: { $ne: user._id } }).select('_id').lean();
+      if (taken) return res.status(409).json({ message: 'That username is already taken', field: 'username' });
+      user.username = username;
+    }
+
+    // ── Profile sub-document ────────────────────────────────────────────
+    if (b.avatar !== undefined) {
+      const avatar = sanitizeUrl(b.avatar);
+      if (avatar === null) return fail('Profile photo must be a valid http(s) URL');
+      user.profile.avatar = avatar;
+    }
+    if (b.coverImage !== undefined) {
+      const cover = sanitizeUrl(b.coverImage);
+      if (cover === null) return fail('Cover image must be a valid http(s) URL');
+      user.profile.coverImage = cover;
+    }
+    if (b.bio !== undefined) {
+      if (typeof b.bio !== 'string') return fail('Bio must be a string');
+      if (b.bio.length > BIO_MAX) return fail(`Bio must be ${BIO_MAX} characters or fewer`);
+      user.profile.bio = b.bio;
+    }
+    if (b.location !== undefined) {
+      if (typeof b.location !== 'string') return fail('Location must be a string');
+      if (b.location.length > LOCATION_MAX) return fail(`Location must be ${LOCATION_MAX} characters or fewer`);
+      user.profile.location = b.location;
+    }
+    if (b.interests !== undefined) {
+      if (!Array.isArray(b.interests)) return fail('Interests must be an array');
+      const cleaned = [
+        ...new Set(
+          b.interests
+            .filter((i) => typeof i === 'string')
+            .map((i) => i.trim().toLowerCase())
+            .filter(Boolean)
+        ),
+      ].slice(0, INTERESTS_MAX);
+      if (cleaned.length > INTERESTS_MAX) return fail(`You can add up to ${INTERESTS_MAX} interests`);
+      user.profile.interests = cleaned;
+    }
+    if (b.institution !== undefined) {
+      if (typeof b.institution !== 'string') return fail('Institution must be a string');
+      user.profile.institution = b.institution;
+    }
+    if (b.course !== undefined) {
+      if (typeof b.course !== 'string') return fail('Course must be a string');
+      user.profile.course = b.course;
+    }
+    if (b.year !== undefined) {
+      if (typeof b.year !== 'string') return fail('Year must be a string');
+      user.profile.year = b.year;
+    }
+
+    // ── Privacy / notification settings (enum-guarded) ──────────────────
+    if (b.profileVisibility !== undefined) {
+      if (!['public', 'followers', 'private'].includes(b.profileVisibility)) return fail('Invalid profile visibility');
+      user.socialSettings.profileVisibility = b.profileVisibility;
+    }
+    if (b.allowMessagesFrom !== undefined) {
+      if (!['everyone', 'followers', 'nobody'].includes(b.allowMessagesFrom)) return fail('Invalid messaging preference');
+      user.socialSettings.allowMessagesFrom = b.allowMessagesFrom;
+    }
+    if (b.showAttendance !== undefined) user.socialSettings.showAttendance = Boolean(b.showAttendance);
+    if (b.showAchievements !== undefined) user.socialSettings.showAchievements = Boolean(b.showAchievements);
+
     await user.save();
-    
-    return res.json({ 
+
+    /* Return the full updated user, not just `profile`. The client needs to
+       propagate the new identity into the header, nav avatar, post author
+       labels and cached profile in one pass (Part 8 §56) — returning only the
+       sub-document forces a second round-trip and a reload. */
+    return res.json({
       success: true,
-      message: 'Profile updated', 
-      profile: user.profile 
+      message: 'Profile updated',
+      user: {
+        _id: user._id,
+        id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        username: user.username,
+        email: user.email,
+        verified: user.verified,
+        profile: user.profile,
+        socialSettings: user.socialSettings,
+      },
     });
   } catch (err) {
-    console.error("❌ updateProfile error:", err);
+    // Unique-index collision on username races a concurrent update.
+    if (err && err.code === 11000) {
+      return res.status(409).json({ message: 'That username is already taken', field: 'username' });
+    }
+    console.error('updateProfile error:', (err && err.message) || err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/** GET /api/auth/username-availability?username=foo — public, debounced by the client. */
+exports.checkUsername = async (req, res) => {
+  try {
+    const username = String(req.query.username || '').trim().toLowerCase();
+    if (!username) return res.status(400).json({ message: 'Username required' });
+    if (!USERNAME_RE.test(username)) {
+      return res.json({ available: false, reason: 'invalid', message: '3-30 characters: letters, numbers, underscore' });
+    }
+    const me = req.user?.id;
+    const existing = await User.findOne(
+      me ? { username, _id: { $ne: me } } : { username }
+    )
+      .select('_id')
+      .lean();
+    if (existing) return res.json({ available: false, reason: 'taken', message: 'That username is already taken' });
+    return res.json({ available: true });
+  } catch (err) {
+    console.error('checkUsername error:', (err && err.message) || err);
     return res.status(500).json({ message: 'Server error' });
   }
 };

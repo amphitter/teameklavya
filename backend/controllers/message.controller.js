@@ -23,10 +23,22 @@ async function getOrCreateConversation(me, other) {
 }
 
 // GET /api/messages/conversations
+/**
+ * GET /api/messages/conversations
+ *
+ * `?view=archived` returns only archived threads; the default returns the
+ * inbox. Archived conversations are never dropped from storage — they move
+ * between two views of the same data (Part 8 §33).
+ */
 exports.getConversations = async (req, res) => {
   try {
+    const archived = String(req.query.view || "") === "archived";
     // Hidden conversations stay out of the list (a new message un-hides them)
-    const convos = await Conversation.find({ participants: req.user.id, hiddenBy: { $ne: req.user.id } })
+    const filter = { participants: req.user.id, hiddenBy: { $ne: req.user.id } };
+    // $eq / $ne on the same array field keeps the two views mutually exclusive.
+    filter.archivedBy = archived ? req.user.id : { $ne: req.user.id };
+
+    const convos = await Conversation.find(filter)
       .sort({ updatedAt: -1 })
       .limit(50)
       .populate("participants", USER_FIELDS)
@@ -55,6 +67,7 @@ exports.getConversations = async (req, res) => {
         updatedAt: c.updatedAt,
         unreadCount: unreadMap.get(String(c._id)) || 0,
         muted: (c.mutedBy || []).some((m) => String(m) === String(req.user.id)),
+        archived: (c.archivedBy || []).some((m) => String(m) === String(req.user.id)),
       };
     });
 
@@ -114,7 +127,20 @@ exports.getMessages = async (req, res) => {
     await Notification.deleteMany({ user: req.user.id, type: "message", read: false, conversation: convo._id }).catch(() => {});
 
     const muted = (convo.mutedBy || []).some((m) => String(m) === String(req.user.id));
-    res.json({ success: true, messages: messages.reverse(), other, conversationId: convo._id, muted });
+    const archived = (convo.archivedBy || []).some((m) => String(m) === String(req.user.id));
+    res.json({
+      success: true,
+      // Reactions are summarised server-side: the client gets
+      // [{emoji, count, mine}] and never the raw per-user reaction list.
+      messages: messages.reverse().map((m) => ({
+        ...m,
+        reactions: summarizeReactions(m.reactions || [], req.user.id),
+      })),
+      other,
+      conversationId: convo._id,
+      muted,
+      archived,
+    });
   } catch (error) {
     console.error("Get messages error:", error.message);
     res.status(500).json({ success: false, message: "Failed to load messages" });
@@ -142,9 +168,32 @@ exports.sendMessage = async (req, res) => {
       return res.status(403).json({ success: false, message: "You can't message this user" });
     }
 
-    const message = await Message.create({ conversation: convo._id, sender: req.user.id, content, image });
+    // Reply target must belong to this thread, or it is a way to inject a
+    // reference to a message the recipient cannot see.
+    let replyTo = null;
+    if (req.body.replyTo) {
+      const target = await Message.findOne({ _id: req.body.replyTo, conversation: convo._id }).select("_id").lean();
+      if (target) replyTo = target._id;
+    }
+    const att = req.body.attachment && typeof req.body.attachment === "object" ? req.body.attachment : {};
+    const attachment = att.url
+      ? { url: String(att.url).slice(0, 500), name: String(att.name || "").slice(0, 200), size: Number(att.size) || 0, mime: String(att.mime || "").slice(0, 120) }
+      : undefined;
 
-    // Un-hide for both participants (a new message revives a hidden chat)
+    const message = await Message.create({
+      conversation: convo._id,
+      sender: req.user.id,
+      content,
+      image,
+      ...(replyTo ? { replyTo } : {}),
+      ...(attachment ? { attachment } : {}),
+    });
+
+    // Un-hide for both participants (a new message revives a hidden chat).
+    // NOTE: archivedBy is deliberately NOT cleared here — see the archive
+    // behaviour note above. An archived chat stays archived when a new message
+    // arrives; it surfaces with an unread badge in the archive view instead of
+    // silently reappearing in the inbox and reversing the user's decision.
     convo.hiddenBy = [];
     convo.lastMessage = { text: (content || "Photo").slice(0, 200), sender: req.user.id, at: new Date() };
     await convo.save();
@@ -165,7 +214,11 @@ exports.sendMessage = async (req, res) => {
     }
 
     const populated = await Message.findById(message._id).populate("sender", USER_FIELDS).lean();
-    res.status(201).json({ success: true, message: populated });
+    res.status(201).json({
+      success: true,
+      message: { ...populated, reactions: [] },
+      archived: (convo.archivedBy || []).some((m) => String(m) === String(req.user.id)),
+    });
   } catch (error) {
     console.error("Send message error:", error.message);
     res.status(500).json({ success: false, message: "Failed to send message" });
@@ -254,3 +307,105 @@ exports.hideConversation = async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to hide conversation" });
   }
 };
+
+/* ── Archive (Part 8 §32-33) ─────────────────────────────────────────────
+ *
+ * BEHAVIOUR, DEFINED ONCE — a new incoming message does NOT auto-unarchive.
+ *
+ * The alternative (auto-unarchive on reply) silently reverses a deliberate
+ * user action: the thread reappears in the inbox and the user cannot tell
+ * whether they archived it or never did. Keeping it archived and raising an
+ * unread badge on the archive entry is visible, reversible and loses nothing —
+ * the message is one tap away, and the archive view is a permanent destination
+ * rather than a soft delete.
+ *
+ * Archiving is stored per participant, so it never touches the other side's
+ * inbox. Nothing is deleted: archive is a view, not a removal (§33). */
+exports.archiveConversation = async (req, res) => {
+  try {
+    const archived = req.body?.archived !== false; // default to archiving
+    const convo = await Conversation.findOne({ _id: req.params.id, participants: req.user.id });
+    if (!convo) return res.status(404).json({ success: false, message: "Conversation not found" });
+
+    if (archived) {
+      await Conversation.updateOne({ _id: convo._id }, { $addToSet: { archivedBy: req.user.id } });
+    } else {
+      await Conversation.updateOne({ _id: convo._id }, { $pull: { archivedBy: req.user.id } });
+    }
+    res.json({ success: true, archived });
+  } catch (error) {
+    console.error("Archive conversation error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to update conversation" });
+  }
+};
+
+/** Mark everything in this thread read — clears the badge (§58). */
+exports.markRead = async (req, res) => {
+  try {
+    const convo = await Conversation.findOne({ _id: req.params.id, participants: req.user.id }).select("_id");
+    if (!convo) return res.status(404).json({ success: false, message: "Conversation not found" });
+    await Message.updateMany(
+      { conversation: convo._id, sender: { $ne: req.user.id }, readAt: null },
+      { $set: { readAt: new Date() } }
+    );
+    await Conversation.updateOne({ _id: convo._id }, { $set: { [`lastReadAt.${req.user.id}`]: new Date() } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Mark read error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to mark messages read" });
+  }
+};
+
+/**
+ * POST /api/messages/:id/react  { emoji }
+ * Toggles one emoji from the viewer. Sending a different emoji replaces it —
+ * one reaction per person per message keeps the UI readable (§31).
+ */
+const ALLOWED_REACTIONS = ["❤️", "😂", "🔥", "👍", "🎉", "👏", "😮", "😢"];
+
+exports.reactToMessage = async (req, res) => {
+  try {
+    const emoji = String(req.body?.emoji || "").trim();
+    if (!emoji) return res.status(400).json({ success: false, message: "Emoji required" });
+    if (!ALLOWED_REACTIONS.includes(emoji)) {
+      return res.status(400).json({ success: false, message: "Unsupported reaction" });
+    }
+
+    const msg = await Message.findOne({ _id: req.params.id, deletedAt: null });
+    if (!msg) return res.status(404).json({ success: false, message: "Message not found" });
+
+    // Participant check — reactions are only for people in the thread.
+    const convo = await Conversation.findOne({ _id: msg.conversation, participants: req.user.id }).select("_id");
+    if (!convo) return res.status(403).json({ success: false, message: "You can't react to this message" });
+
+    const existing = (msg.reactions || []).find((r) => String(r.user) === String(req.user.id));
+    if (existing && existing.emoji === emoji) {
+      // Same emoji again → remove.
+      msg.reactions = msg.reactions.filter((r) => String(r.user) !== String(req.user.id));
+    } else if (existing) {
+      existing.emoji = emoji;
+      existing.at = new Date();
+    } else {
+      msg.reactions.push({ user: req.user.id, emoji, at: new Date() });
+    }
+    await msg.save();
+
+    res.json({ success: true, reactions: summarizeReactions(msg.reactions, req.user.id) });
+  } catch (error) {
+    console.error("React to message error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to react" });
+  }
+};
+
+/** Group raw reactions into { emoji, count, mine } for the UI (§31). */
+function summarizeReactions(reactions = [], viewerId) {
+  const map = new Map();
+  for (const r of reactions) {
+    const cur = map.get(r.emoji) || { emoji: r.emoji, count: 0, mine: false };
+    cur.count += 1;
+    if (viewerId && String(r.user) === String(viewerId)) cur.mine = true;
+    map.set(r.emoji, cur);
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count);
+}
+exports.summarizeReactions = summarizeReactions;

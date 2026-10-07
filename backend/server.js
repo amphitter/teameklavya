@@ -160,6 +160,7 @@ app.use(passport.initialize());
 // 📦 Routes
 // ────────────────────────────────────────────────────────────
 app.use('/api/upload', require('./routes/upload.routes'));
+app.use('/api/stories', require('./routes/story.routes'));
 app.use('/api/auth', require('./routes/auth.routes'));
 app.use('/api/auth', require('./routes/google.routes'));
 app.use('/api/events', require('./routes/event.routes'));

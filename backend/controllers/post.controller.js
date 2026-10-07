@@ -603,18 +603,33 @@ exports.getComments = async (req, res) => {
     if (!post || post.status !== "published" || !(await canViewPost(post, req.user?.id || null))) {
       return res.status(404).json({ success: false, message: "Post not found" });
     }
-    const comments = await Comment.find({ post: req.params.id, removedAt: null })
+    /* Top-level comments only. Replies load on demand via
+       GET /comments/:commentId/replies — dumping every reply into the first
+       page is what turns a busy thread into an unreadable tree (§13). */
+    const viewerId = req.user?.id || null;
+    const comments = await Comment.find({ post: req.params.id, removedAt: null, parent: null })
       .sort({ createdAt: 1 })
       .populate("author", AUTHOR_FIELDS)
       .lean();
-    res.json({ success: true, comments });
+    res.json({ success: true, comments: comments.map((c) => decorateComment(c, viewerId)) });
   } catch (error) {
     console.error("Get comments error:", error.message);
     res.status(500).json({ success: false, message: "Failed to load comments" });
   }
 };
 
-// POST /api/posts/:id/comments  { content }
+/** Client-safe comment shape: like state for the viewer, never the liker list. */
+function decorateComment(c, viewerId) {
+  return {
+    ...c,
+    likesCount: c.likesCount || 0,
+    replyCount: c.replyCount || 0,
+    likedByMe: viewerId ? (c.likers || []).some((l) => String(l) === String(viewerId)) : false,
+    likers: undefined,
+  };
+}
+
+// POST /api/posts/:id/comments  { content, parent? }
 exports.addComment = async (req, res) => {
   try {
     const content = String(req.body.content || "").trim();
@@ -632,8 +647,43 @@ exports.addComment = async (req, res) => {
       return res.status(403).json({ success: false, message: "You can't interact with this post" });
     }
 
-    const comment = await Comment.create({ post: post._id, author: req.user.id, content });
+    /* Resolve the parent, collapsing depth to ONE level (§13).
+       Replying to a reply attaches to the reply's parent instead of nesting
+       further, so the thread stays flat and renderable forever. */
+    let parent = null;
+    if (req.body.parent) {
+      const p = await Comment.findById(req.body.parent).select("_id post parent removedAt").lean();
+      if (!p || String(p.post) !== String(post._id)) {
+        return res.status(400).json({ success: false, message: "Parent comment not found" });
+      }
+      if (p.removedAt) {
+        return res.status(400).json({ success: false, message: "You can't reply to a removed comment" });
+      }
+      // Depth collapse: a reply's own parent becomes ours.
+      parent = p.parent || p._id;
+    }
+
+    const comment = await Comment.create({
+      post: post._id,
+      author: req.user.id,
+      content,
+      parent: parent || null,
+    });
+
+    // Keep the denormalised counter that powers "View replies (N)".
+    if (parent) {
+      await Comment.updateOne({ _id: parent }, { $inc: { replyCount: 1 } }).catch(() => {});
+    }
+
     await notify({ user: post.author, actor: req.user.id, type: "comment", post: post._id });
+    // The parent's author learns about the reply — that is the conversational
+    // half of comments, and without it a reply is invisible to its recipient.
+    if (parent) {
+      const parentDoc = await Comment.findById(parent).select("author").lean();
+      if (parentDoc && String(parentDoc.author) !== String(post.author)) {
+        await notify({ user: parentDoc.author, actor: req.user.id, type: "reply", post: post._id }).catch(() => {});
+      }
+    }
 
     // @mention notifications inside comments (real users, author excluded)
     const commentMentions = (await parseMentions(content, req.user.id)).filter(
@@ -646,7 +696,7 @@ exports.addComment = async (req, res) => {
     );
     const populated = await Comment.findById(comment._id).populate("author", AUTHOR_FIELDS).lean();
 
-    res.status(201).json({ success: true, comment: populated });
+    res.status(201).json({ success: true, comment: decorateComment(populated, req.user.id) });
   } catch (error) {
     console.error("Add comment error:", error.message);
     res.status(500).json({ success: false, message: "Failed to add comment" });
@@ -654,6 +704,56 @@ exports.addComment = async (req, res) => {
 
     // Achievements: conversation_starter (10 real comments)
     checkAchievements(req.user.id);
+};
+
+/**
+ * GET /api/posts/:id/comments/:commentId/replies
+ * Loaded on demand when the reader taps "View replies (N)" (§13).
+ */
+exports.getReplies = async (req, res) => {
+  try {
+    const viewerId = req.user?.id || null;
+    const replies = await Comment.find({
+      parent: req.params.commentId,
+      removedAt: null,
+    })
+      .sort({ createdAt: 1 })
+      .populate("author", AUTHOR_FIELDS)
+      .lean();
+    res.json({ success: true, replies: replies.map((c) => decorateComment(c, viewerId)) });
+  } catch (error) {
+    console.error("Get replies error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load replies" });
+  }
+};
+
+/**
+ * POST /api/posts/:id/comments/:commentId/like — toggle.
+ * Idempotent: liking twice does not double-count. Returns the new state so the
+ * client can reconcile its optimistic update (§45).
+ */
+exports.likeComment = async (req, res) => {
+  try {
+    const comment = await Comment.findById(req.params.commentId).select("_id author likesCount likers");
+    if (!comment || comment.removedAt) {
+      return res.status(404).json({ success: false, message: "Comment not found" });
+    }
+    const uid = req.user.id;
+    const idx = (comment.likers || []).findIndex((l) => String(l) === String(uid));
+    const liked = idx === -1;
+    if (liked) {
+      comment.likers.push(uid);
+      comment.likesCount = (comment.likesCount || 0) + 1;
+    } else {
+      comment.likers.splice(idx, 1);
+      comment.likesCount = Math.max(0, (comment.likesCount || 0) - 1);
+    }
+    await comment.save();
+    res.json({ success: true, liked, likesCount: comment.likesCount });
+  } catch (error) {
+    console.error("Like comment error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to like comment" });
+  }
 };
 
 // DELETE /api/posts/:id/comments/:commentId  (own comments only)
@@ -664,7 +764,19 @@ exports.deleteComment = async (req, res) => {
     if (String(comment.author) !== req.user.id) {
       return res.status(403).json({ success: false, message: "You can only delete your own comments" });
     }
-    await comment.deleteOne();
+    // Soft-delete: the record stays for audit/moderation, matching how comments
+    // are removed by moderators. Hard-deleting here would silently orphan the
+    // replies underneath it, which then render under a missing parent.
+    comment.removedAt = new Date();
+    comment.removedBy = req.user.id;
+    await comment.save();
+    if (comment.parent) {
+      await Comment.updateOne({ _id: comment.parent }, { $inc: { replyCount: -1 } }).catch(() => {});
+      await Comment.updateMany(
+        { parent: comment.parent, replyCount: { $lt: 0 } },
+        { $set: { replyCount: 0 } }
+      ).catch(() => {});
+    }
     res.json({ success: true });
   } catch (error) {
     console.error("Delete comment error:", error.message);

@@ -48,6 +48,7 @@ const FOLDER_WHITELIST = new Set([
   "registration-files",
   "posts",
   "questions", // Live engine question media (Part 4)
+  "stories",   // Part 8 — 9:16 portrait story media
 ]);
 
 /** Map an upload folder onto the responsive-variant preset used to serve it. */
@@ -57,6 +58,7 @@ const PURPOSE_BY_FOLDER = {
   posters: "poster",
   posts: "post",
   questions: "post",
+  stories: "post",
 };
 
 // Upload an event poster/banner and attach it to the event

@@ -1,7 +1,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const authCtrl = require('../controllers/auth.controller');
-const { requireAuth } = require('../middleware/auth.middleware');
+const { requireAuth, optionalUser } = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
@@ -33,5 +33,8 @@ router.post('/password/reset', authCtrl.resetPassword);
 // Profile routes (protected) — single canonical pair
 router.get('/me', requireAuth, authCtrl.getProfile);
 router.put('/me/profile', requireAuth, authCtrl.updateProfile);
+// Public: the signup/edit form checks availability while typing. Self is excluded
+// when a token is supplied, so saving your own unchanged username stays valid.
+router.get('/username-availability', optionalUser, authCtrl.checkUsername);
 
 module.exports = router;

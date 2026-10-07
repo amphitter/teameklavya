@@ -33,6 +33,8 @@ router.post("/:id/save", requireAuth, limiters.social, actionGuard("GUARD_INTERA
 router.get("/:id/comments", optionalUser, postController.getComments);
 router.post("/:id/comments", requireAuth, limiters.social, actionGuard("GUARD_COMMENT"), postController.addComment);
 router.delete("/:id/comments/:commentId", requireAuth, postController.deleteComment);
+router.get("/:id/comments/:commentId/replies", optionalUser, postController.getReplies);
+router.post("/:id/comments/:commentId/like", requireAuth, limiters.social, actionGuard("GUARD_INTERACT_TOGGLE"), postController.likeComment);
 router.delete("/:id", requireAuth, postController.deletePost);
 
 module.exports = router;

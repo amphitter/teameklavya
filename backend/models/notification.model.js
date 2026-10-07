@@ -25,6 +25,15 @@ const notificationSchema = new mongoose.Schema(
         "community_invite",
         "message",
         "achievement",
+        // ── Part 8 (§42) ────────────────────────────────────────────────
+        // "reply" — someone replied to YOUR comment. Distinct from "comment"
+        // (someone commented on your post): the notification copy and the
+        // target differ, so they must be separate types.
+        "reply",
+        // "story_reaction" — someone reacted to / replied to your story (§42).
+        "story_reaction",
+        // "community_activity" — activity in a community you follow (§42).
+        "community_activity",
       ],
       required: true,
     },

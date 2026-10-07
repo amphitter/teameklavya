@@ -18,6 +18,29 @@ export interface SessionUser {
 }
 
 /**
+ * The stored session user arrives from /auth/login, which returns the id as
+ * `id` — while /auth/me returns `_id`. Consumers throughout the app read
+ * `_id`, so before this normalisation the session id was `undefined` for the
+ * whole session.
+ *
+ * That broke every ownership comparison in the app. The visible symptom was
+ * messaging: `mine` was always false, so no message ever rendered as sent and
+ * the sent/received styling collapsed into one alignment.
+ *
+ * Normalising here — at the single boundary where the session is read — fixes
+ * it once for every consumer, rather than patching each of the ~36 sites that
+ * read `user._id` and leaving the next one to be written wrong again.
+ */
+function normalizeUser(raw: unknown): SessionUser | null {
+  if (!raw || typeof raw !== "object") return null;
+  const u = raw as Record<string, unknown>;
+  return {
+    ...(u as object),
+    _id: (u._id ?? u.id ?? u.userId ?? undefined) as string | undefined,
+  } as SessionUser;
+}
+
+/**
  * Reads the session (token + role + user) from localStorage.
  * Re-syncs when the tab regains focus or the route changes,
  * so login/logout in another tab is reflected.
@@ -34,7 +57,7 @@ export function useSessionUser() {
         const token = localStorage.getItem("token");
         const storedRole = localStorage.getItem("role");
         const raw = localStorage.getItem("user");
-        setUser(token && raw ? (JSON.parse(raw) as SessionUser) : null);
+        setUser(token && raw ? normalizeUser(JSON.parse(raw)) : null);
         setRole(token ? storedRole : null);
       } catch {
         setUser(null);

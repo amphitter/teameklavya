@@ -30,6 +30,14 @@ conversationSchema.pre("save", function (next) {
 conversationSchema.add({
   mutedBy: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], default: [] },
   hiddenBy: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], default: [] },
+  /* Archive (Part 8 §32-33), per participant — archiving is a personal view
+     change, so it must never affect the other participant's inbox.
+     Distinct from `hiddenBy`: hiding auto-reverses on the next message,
+     archiving does not. See the behaviour note in the message controller. */
+  archivedBy: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], default: [] },
+  /** When each participant last opened the thread — drives unread counts
+   *  without scanning messages (§34). */
+  lastReadAt: { type: Map, of: Date, default: {} },
 });
 
 conversationSchema.index({ participants: 1 }, { unique: true });

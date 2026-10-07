@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EventPostCard } from "@/components/feed/event-post-card";
 import { FollowAuthorButton } from "@/components/feed/follow-author-button";
-import { Comments } from "@/components/feed/comments";
+import { CommentSheet } from "@/components/feed/comment-sheet";
 import { compactCount, handleOf, timeAgo } from "@/lib/social";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import type { FeedPostData } from "@/components/feed/types";
@@ -423,18 +423,18 @@ export function FeedPost({
         </button>
       </div>
 
-      {/* Comments dialog */}
-      <Dialog open={commentsOpen} onOpenChange={setCommentsOpen}>
-        <DialogContent className="flex max-h-[80vh] max-w-lg flex-col sm:max-h-[85vh]">
-          <DialogHeader className="border-b border-border pb-3">
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <MessageCircle className="h-4 w-4 text-primary" /> Comments
-              <span className="text-sm font-normal text-muted-foreground">· {compactCount(commentCount)}</span>
-            </DialogTitle>
-          </DialogHeader>
-          <Comments postId={post._id} onCountChange={setCommentCount} />
-        </DialogContent>
-      </Dialog>
+      {/* §12 — comments open as a bottom sheet on mobile, never a separate
+          page. The old dialog had no emoji picker, no replies and no comment
+          likes; the sheet has all three. */}
+      {commentsOpen ? (
+        <CommentSheet
+          open={commentsOpen}
+          onClose={() => setCommentsOpen(false)}
+          postId={post._id}
+          onCountChange={setCommentCount}
+          initialCount={commentCount}
+        />
+      ) : null}
     </article>
       <ReportDialog open={reporting} onOpenChange={setReporting} targetType="post" targetId={post._id} />
     </>

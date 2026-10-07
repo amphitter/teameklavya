@@ -33,7 +33,7 @@ architecture; it makes the existing architecture production-safe.
 | 9 | Load, horizontal scale, realtime readiness | §20, §21, §22 | ✅ |
 | 10 | Error taxonomy | §30 | ✅ |
 | 11 | Frontend + upload + rate-limit review | §27, §28, §29 | ✅ |
-| 12 | Restore drill, backups, secret separation | §18, §19 | pending |
+| 12 | Restore drill, backups, secret separation | §18, §19 | ✅ |
 | 13 | Documentation set | §32 | ✅ |
 | 14 | Final report | §33 | pending |
 
@@ -515,6 +515,61 @@ is direct evidence for the NAT limitation recorded in §29: one source IP
 saturates a shared bucket well before the server is under any real strain.
 
 Regression: 1284 → **1328 assertions, 0 failed** (924 floor held); 6/6 e2e.
+
+### Phase 12 — RESULT: ✅ **DONE** (§18, §19 — `scripts/verify-restore.js`, `scripts/scan-secrets.js`, `tests/part7-recovery.selftest.js`, 36 new assertions)
+
+**§18 — the drill could be followed but not judged.** `RESTORE-DRILL.md` said
+how to dump and restore. It never answered the question that matters: *is the
+data that came back correct?* `mongorestore` exits 0 when it has finished
+writing; it does not know whether half a collection is missing or whether
+references still resolve. A restore that "worked" and a restore that worked
+are different things, and the difference surfaces later, when a user opens a
+registration pointing at an event that isn't there.
+
+`npm run verify-restore` now answers it, and is deliberately **read-only** —
+asserted by test, because a verifier that can repair is a verifier that can
+destroy when someone runs it in a hurry against the wrong host. It checks the
+13 required collections, sampled referential integrity, required fields,
+surviving indexes, and backup age. Proven by breaking things: a faithful
+restore passes, a 3-of-10 restore is caught at 30%, an orphaned comment is
+caught, dropped indexes are caught, and **running without `--source` fails
+rather than implying completeness** — because a restore that lost 40% of
+registrations is internally consistent and still a disaster.
+
+**§19 — the quiet leak.** Code gets reviewed; a `tar.gz` of a deployment
+directory does not, and it contains `.env` if `.env` was there. `npm run
+scan-secrets` catches env files, PEM keys, service-role tokens, connection
+strings with inline passwords, AWS and Stripe keys — and **never prints the
+secret**, only its kind, location and length. A scanner that echoes the
+credential into CI logs has leaked the very thing it protects; a canary in the
+test asserts the value never appears in output.
+
+**Getting the scanner honest took four false-positive/false-negative cycles**,
+and each one was the same lesson in a different costume:
+
+1. It flagged test fixtures (`password = "test-secret"`). A scanner that cries
+   wolf gets disabled — but the naive fix (entropy) backfired.
+2. Real credentials stopped being caught, because `admin` is a legitimate
+   username and **random base64 contains `bar` and `test` by chance**. Token
+   matching must not apply to long high-entropy values.
+3. `isFixtureUri` returned "fixture" when it found no host — silently clearing
+   every non-URI secret, since an API key has no `@` either.
+4. The deepest one: **`rule.valueOf` was inherited from `Object.prototype`**,
+   so `rule.valueOf ? ...` was *always* truthy and `Object.prototype.valueOf(v)`
+   returned the boxed object, turning every candidate into `[object Object]`
+   (15 chars) and quietly defeating the entropy check. Renamed to `extract`.
+
+All four were found by running the tool against planted secrets rather than
+reading it. The repo now scans clean while all six planted credential types
+are still detected.
+
+**One environment trap worth recording:** each in-memory mongod reserves
+~200 MB of tmpfs, and the six e2e suites ahead of this one leave stale
+directories behind, so the suite died with `OutOfDiskSpace` — which reads as a
+product failure and is not one. It now reclaims stale state **only after
+mongod has actually refused to start** (never speculatively), and retries once.
+
+Regression: 1328 → **1364 assertions, 0 failed** (924 floor held); 6/6 e2e.
 
 ### Phase 1 — RESULT: ✅ **DONE** (46 assertions in tests/phase11.selftest.js)
 

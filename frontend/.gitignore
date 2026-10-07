@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the TEMPLATE must be committable. `.env*` above is a blanket ignore,
+# which also swallows .env.example — leaving nothing in the repo to tell you
+# which variables Vercel needs. A template holds no secrets; only a real .env
+# does, and that stays ignored.
+!.env.example
 
 # vercel
 .vercel

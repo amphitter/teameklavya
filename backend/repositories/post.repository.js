@@ -29,6 +29,15 @@ const CommunityMember = require("../models/communityMember.model");
 const Reaction = require("../models/reaction.model");
 const Comment = require("../models/comment.model");
 const Save = require("../models/save.model");
+const Post = require("../models/post.model");
+
+/* Field projections shared with controllers/post.controller.js. Declared here
+   too rather than imported from the controller: importing controller constants
+   into a repository would invert the dependency direction, and the repository
+   is the lower layer. */
+const AUTHOR_FIELDS = "firstName lastName username verified email profile.avatar profile.institution";
+const EVENT_FIELDS = "title slug bannerUrl startDate endDate venue eventType category organizer price visibility isLive";
+const ORG_FIELDS = "name slug logoUrl";
 const { cache, keys, TTL } = require("../services/cache.service");
 
 /** Ranking pool — latest N published posts considered for the for-you feed. */
@@ -173,12 +182,56 @@ function sanitizeEvent(post) {
   return post;
 }
 
+/**
+ * Hydrate a list of post ids for a viewer (Part 9 §11).
+ *
+ * Used for collections whose ORDER comes from another document — liked posts
+ * are ordered by when the reaction happened, not by post.createdAt, so the
+ * ids arrive pre-sorted and must be re-sorted back into that order after the
+ * query. A plain `find({_id: {$in}})` returns them in whatever order MongoDB
+ * likes.
+ *
+ * Posts the viewer can no longer see (deleted, moderation-hidden,
+ * unfollowed) are dropped rather than rendered as blanks.
+ */
+async function hydratePostsForViewer(ids, viewerId) {
+  const wanted = (ids || []).filter(Boolean);
+  if (!wanted.length) return [];
+  const ctx = await getFeedContext(viewerId);
+  const rows = await Post.find({
+    _id: { $in: wanted },
+    status: "published",
+    $and: [visibilityFilter(ctx, viewerId)],
+  })
+    .populate("author", AUTHOR_FIELDS)
+    .populate("event", EVENT_FIELDS)
+    .populate("organization", ORG_FIELDS)
+    .lean();
+
+  const order = new Map(wanted.map((id, i) => [String(id), i]));
+  rows.sort((a, b) => (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0));
+  return attachCounts(rows, ctx, viewerId);
+}
+
 module.exports = {
+  /**
+   * Hydrate a list of post ids for a viewer (Part 9 §11).
+   *
+   * Used for collections whose ORDER comes from another document — liked
+   * posts are ordered by when the reaction happened, not by post.createdAt,
+   * so the ids arrive pre-sorted and must be re-sorted back into that order
+   * after the query. A plain `find({_id: {$in}})` returns them in whatever
+   * order MongoDB likes.
+   *
+   * Posts the viewer can no longer see (deleted, moderation-hidden,
+   * unfollowed) are dropped rather than rendered as blanks.
+   */
   PostRepository: {
     getFeedContext,
     invalidateFeedContext,
     visibilityFilter,
     attachCounts,
+    hydratePostsForViewer,
     sanitizeEvent,
   },
   FEED_POOL,

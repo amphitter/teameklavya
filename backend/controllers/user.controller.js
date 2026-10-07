@@ -415,9 +415,13 @@ exports.getUserPosts = async (req, res) => {
 
     // Author's published posts only; drafts are visible to the author alone
     const isSelf = Boolean(viewerId && String(user._id) === String(viewerId));
+    /* Part 9 §12 — archived posts leave the public profile. They are not
+       deleted: the author sees them under their own Archive, and can restore
+       them. Drafts stay visible to their author, as before. */
     const postFilter = {
       author: user._id,
       status: isSelf ? { $in: ["published", "draft"] } : "published",
+      archivedAt: null,
     };
 
     const [posts, total] = await Promise.all([

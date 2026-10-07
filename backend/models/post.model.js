@@ -74,6 +74,16 @@ const postSchema = new mongoose.Schema(
     },
     deletedAt: { type: Date, default: null },
 
+    /* ── Author archive (Part 9 §12) ────────────────────────────────────
+       Deliberately NOT reusing `status: "hidden"`. That value belongs to
+       moderation — an admin removing a post. Overloading it would make
+       "the author put this away" indistinguishable from "a moderator took
+       this down", and would let a user un-hide a post a moderator removed.
+
+       Saved / liked / archived are three different concepts and get three
+       different homes: Save documents, Reaction documents, and this field. */
+    archivedAt: { type: Date, default: null },
+
     // Normalized #topics parsed from content (lowercase, deduped)
     topics: { type: [String], default: [] },
     // @userIds parsed from content (for mention rendering + notifications)
@@ -92,5 +102,7 @@ postSchema.index({ event: 1, createdAt: -1 });
 postSchema.index({ status: 1, createdAt: -1 });
 postSchema.index({ topics: 1, status: 1, createdAt: -1 });
 postSchema.index({ community: 1, status: 1, createdAt: -1 });
+// Part 9 §12 — author archive listing, and the exclusion from public feeds.
+postSchema.index({ author: 1, archivedAt: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Post", postSchema);

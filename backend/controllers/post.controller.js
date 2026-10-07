@@ -168,7 +168,9 @@ exports.getFeed = async (req, res) => {
         tab === "events"
           ? { event: { $ne: null } }
           : { community: { $ne: null } };
-      const filter = { status: "published", $and: [scope, visible] };
+      // Part 9 §12 — an archived post leaves the feed. This is the author's own
+      // action and must not be conflated with moderation-hidden status.
+      const filter = { status: "published", archivedAt: null, $and: [scope, visible] };
       if (cursor) {
         const [at, id] = cursor.split("|");
         const d = new Date(at);
@@ -216,7 +218,9 @@ exports.getFeed = async (req, res) => {
         ],
       };
       const visible = PostRepository.visibilityFilter(ctx, viewerId);
-      const filter = { status: "published", $and: [scope, visible] };
+      // Part 9 §12 — an archived post leaves the feed. This is the author's own
+      // action and must not be conflated with moderation-hidden status.
+      const filter = { status: "published", archivedAt: null, $and: [scope, visible] };
 
       // Cursor mode (createdAt|_id) with offset fallback for old clients
       if (cursor) {
@@ -261,8 +265,13 @@ exports.getFeed = async (req, res) => {
     // audit's "semi-N+1": the same data was being fetched 3× per feed page.
     const ctx = await PostRepository.getFeedContext(viewerId);
 
+    // Part 9 §12 — an archived post leaves the feed. This is the author's own
+    // action and must not be conflated with moderation-hidden status. The
+    // spread matters: visibilityFilter can return a `visibility` key of its
+    // own, so archivedAt is set before it and must not be clobbered.
     const pool = await Post.find({
       status: "published",
+      archivedAt: null,
       ...PostRepository.visibilityFilter(ctx, viewerId),
     })
       .sort({ createdAt: -1, _id: -1 })
@@ -960,3 +969,120 @@ exports.getSavedPosts = async (req, res) => {
 /* Shared helpers (Phase 6 communities reuse these) */
 exports._enrichPosts = attachCounts;
 exports._sanitizeEvent = sanitizeEvent;
+
+/* ── Part 9 §10-12 — same-source collections ─────────────────────────────
+ *
+ * Saved, liked and archived are three different concepts with three
+ * different homes. Conflating them is the bug this section exists to avoid:
+ *   saved    → Save documents    (private to the viewer)
+ *   liked    → Reaction documents (queryable in one pass, see below)
+ *   archived → Post.archivedAt   (the author's own action)
+ *
+ * All three are cursor-paginated (§42): an unbounded `.limit(100)` on a
+ * growing collection is a slow page and a wasted payload.
+ */
+
+/** Shared cursor helper — createdAt|_id, matching the feed's scheme. */
+function applyCursor(filter, cursor) {
+  if (!cursor) return;
+  const [at, id] = String(cursor).split("|");
+  const d = new Date(at);
+  if (isNaN(d.getTime())) return;
+  filter.$and = filter.$and || [];
+  filter.$and.push({ $or: [{ createdAt: { $lt: d } }, { createdAt: d, _id: { $lt: id } }] });
+}
+
+function nextCursorFrom(rows, limit, hasMore) {
+  if (!hasMore) return null;
+  const last = rows[rows.length - 1];
+  return last ? `${last.createdAt.toISOString()}|${last._id}` : null;
+}
+
+/**
+ * GET /api/posts/liked — posts the viewer reacted to (§11).
+ *
+ * Reactions are queried FIRST and posts fetched by id. The alternative —
+ * filtering posts by "has my reaction" — has no index to use and would
+ * degrade to a collection scan as posts grow.
+ */
+exports.getLikedPosts = async (req, res) => {
+  try {
+    const limit = Math.min(30, Math.max(1, parseInt(req.query.limit) || 12));
+    const cursor = req.query.cursor ? String(req.query.cursor) : null;
+    const filter = { user: req.user.id, type: "like" };
+    if (cursor) {
+      const [at, id] = cursor.split("|");
+      const d = new Date(at);
+      if (!isNaN(d.getTime())) {
+        filter.$or = [{ createdAt: { $lt: d } }, { createdAt: d, _id: { $lt: id } }];
+      }
+    }
+    const reactions = await Reaction.find(filter).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).lean();
+    const hasMore = reactions.length > limit;
+    const page = hasMore ? reactions.slice(0, limit) : reactions;
+
+    const posts = await PostRepository.hydratePostsForViewer(
+      page.map((r) => r.post),
+      req.user.id
+    );
+
+    res.json({ success: true, posts, hasMore, nextCursor: nextCursorFrom(page, limit, hasMore) });
+  } catch (error) {
+    console.error("Get liked posts error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load liked posts" });
+  }
+};
+
+/** GET /api/posts/archived — the viewer's own archived posts (§12). */
+exports.getArchivedPosts = async (req, res) => {
+  try {
+    const limit = Math.min(30, Math.max(1, parseInt(req.query.limit) || 12));
+    const cursor = req.query.cursor ? String(req.query.cursor) : null;
+    const filter = { author: req.user.id, archivedAt: { $ne: null }, status: { $ne: "deleted" } };
+    applyCursor(filter, cursor);
+
+    const rows = await Post.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1)
+      .populate("author", AUTHOR_FIELDS)
+      .populate("event", EVENT_FIELDS)
+      .populate("organization", ORG_FIELDS)
+      .lean();
+
+    const hasMore = rows.length > limit;
+    const posts = hasMore ? rows.slice(0, limit) : rows;
+    res.json({ success: true, posts, hasMore, nextCursor: nextCursorFrom(posts, limit, hasMore) });
+  } catch (error) {
+    console.error("Get archived posts error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load archived posts" });
+  }
+};
+
+/**
+ * POST /api/posts/:id/archive — toggle the author's own archive (§12).
+ *
+ * Archived posts leave public feeds and the public profile, but remain
+ * owned by the author and restorable. Nothing is deleted.
+ */
+exports.toggleArchive = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post || post.status === "deleted") {
+      return res.status(404).json({ success: false, message: "Post not found" });
+    }
+    if (String(post.author) !== String(req.user.id)) {
+      return res.status(403).json({ success: false, message: "You can only archive your own posts" });
+    }
+    const archived = post.archivedAt === null || post.archivedAt === undefined;
+    if (archived) {
+      post.archivedAt = new Date();
+    } else {
+      post.archivedAt = null;
+    }
+    await post.save();
+    res.json({ success: true, archived, archivedAt: post.archivedAt });
+  } catch (error) {
+    console.error("Toggle archive error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to update archive" });
+  }
+};

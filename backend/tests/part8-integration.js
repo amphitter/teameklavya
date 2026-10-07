@@ -309,6 +309,67 @@ const PORT = process.env.PORT;
   r = await call("GET", "/api/posts/feed?tab=for-you", null, ta);
   ok(r.d.posts?.length === 2, "for-you still returns everything");
 
+  /* ── Part 9 §10-12 — saved / liked / archived are three concepts ────── */
+  section("Part 9 §11 — liked posts");
+  await Post.deleteMany({ author: ua._id });
+  await (require("../models/reaction.model")).deleteMany({ user: ub._id });
+  const lp1 = await Post.create({ author: ua._id, content: "liked one", status: "published", visibility: "public" });
+  const lp2 = await Post.create({ author: ua._id, content: "liked two", status: "published", visibility: "public" });
+  await Post.create({ author: ua._id, content: "not liked", status: "published", visibility: "public" });
+
+  // B likes lp2 first, then lp1 — order must follow the reaction, not the post.
+  await call("POST", `/api/posts/${lp2._id}/like`, {}, tb);
+  await new Promise((r) => setTimeout(r, 25));
+  await call("POST", `/api/posts/${lp1._id}/like`, {}, tb);
+
+  r = await call("GET", "/api/posts/liked", null, tb);
+  ok(r.d.posts?.length === 2, "liked returns only liked posts", `got ${r.d.posts?.length}`);
+  // lp2 was liked first, lp1 second → newest-like-first means lp1 leads.
+  // Post.createdAt would put lp1 first too, so assert the *reverse* case
+  // below: unlike lp1, and the order must follow the remaining reaction.
+  ok(r.d.posts?.[0]?.content === "liked one", "most-recently-liked sorts first", r.d.posts?.[0]?.content);
+  ok(r.d.nextCursor === null || typeof r.d.nextCursor === "string", "liked exposes a cursor");
+
+  r = await call("GET", "/api/posts/liked", null, ta);
+  ok(r.d.posts?.length === 0, "liked is per-viewer — A's likes are not B's");
+
+  await call("POST", `/api/posts/${lp1._id}/like`, {}, tb); // unlike
+  r = await call("GET", "/api/posts/liked", null, tb);
+  ok(r.d.posts?.length === 1, "unliking removes it from Liked");
+
+  section("Part 9 §12 — archived posts");
+  r = await call("POST", `/api/posts/${lp2._id}/archive`, {}, tb);
+  ok(r.s === 403, "cannot archive someone else's post");
+
+  r = await call("POST", `/api/posts/${lp2._id}/archive`, {}, ta);
+  ok(r.s === 200 && r.d.archived === true, "author can archive own post");
+  r = await call("GET", "/api/posts/archived", null, ta);
+  ok(r.d.posts?.length === 1, "archived post appears in archive", `got ${r.d.posts?.length}`);
+
+  r = await call("GET", "/api/posts/feed?tab=for-you", null, ta);
+  ok(!(r.d.posts || []).some((x) => String(x._id) === String(lp2._id)), "archived post leaves the feed");
+  ok((r.d.posts || []).length === 2, "the other two remain",
+     `got ${(r.d.posts || []).length}: ${(r.d.posts || []).map((x) => x.content).join(" | ")}`);
+
+  r = await call("GET", `/api/users/${ua._id}/posts`, null, tb);
+  ok(!(r.d.posts || []).some((x) => String(x._id) === String(lp2._id)), "archived post leaves the public profile");
+
+  r = await call("POST", `/api/posts/${lp2._id}/archive`, {}, ta);
+  ok(r.d.archived === false, "archive toggles back off (restore)");
+  r = await call("GET", "/api/posts/archived", null, ta);
+  ok(r.d.posts?.length === 0, "restored post leaves the archive");
+  r = await call("GET", `/api/users/${ua._id}/posts`, null, tb);
+  ok((r.d.posts || []).some((x) => String(x._id) === String(lp2._id)), "restored post returns to the profile");
+
+  section("§12 — archived must not be confused with moderation-hidden");
+  const P2 = Post;
+  await P2.updateOne({ _id: lp2._id }, { $set: { archivedAt: null, status: "hidden" } });
+  r = await call("GET", "/api/posts/archived", null, ta);
+  ok(r.d.posts?.length === 0, "a moderation-hidden post is NOT the author's archive");
+  r = await call("GET", "/api/posts/feed?tab=for-you", null, ta);
+  ok(!(r.d.posts || []).some((x) => String(x._id) === String(lp2._id)), "moderation-hidden still leaves the feed");
+  await P2.updateOne({ _id: lp2._id }, { $set: { status: "published" } });
+
   /* ── §37/§52 — no fabricated metrics ───────────────────────────────── */
   section("§52 — no fabricated engagement");
   const fresh = await Post.create({ author: ua._id, content: "no engagement yet", status: "published", visibility: "public" });

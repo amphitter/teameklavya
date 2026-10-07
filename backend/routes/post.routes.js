@@ -25,6 +25,11 @@ router.get("/feed", optionalUser, postController.getFeed);
 router.get("/topics", optionalUser, postController.getTrendingTopics);
 router.get("/topics/:topic", optionalUser, postController.getTopicPosts);
 router.get("/saved", requireAuth, postController.getSavedPosts);
+// Part 9 §11 — posts the viewer reacted to, ordered by when they reacted.
+router.get("/liked", requireAuth, postController.getLikedPosts);
+// Part 9 §12 — the author's own archive. Distinct from moderation-hidden.
+router.get("/archived", requireAuth, postController.getArchivedPosts);
+router.post("/:id/archive", requireAuth, postController.toggleArchive);
 router.post("/", requireAuth, idempotencyWindow, limiters.social, postController.createPost);
 router.get("/event/:eventId", optionalUser, postController.getEventPosts);
 router.get("/:id", optionalUser, postController.getPostById);

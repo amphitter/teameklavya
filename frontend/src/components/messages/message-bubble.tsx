@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
 import type { ChatMessage } from "@/hooks/use-social";
 import { cloudinaryUrl, getImageUrl } from "@/utils/image";
+import { SharedPostCard } from "@/components/post/shared-post-card";
 
 /** Long-press / hover reaction set (§31) — deliberately short. */
 export const MESSAGE_REACTIONS = ["❤️", "😂", "🔥", "👍", "🎉"];
@@ -139,6 +140,18 @@ export const MessageBubble = memo(function MessageBubble({
                 <span className="flex items-center gap-1.5 text-[13px]">
                   <Icon name="block" size={14} /> Message deleted
                 </span>
+              ) : message.sharedPost ? (
+                /* Part 13 §19–§21 — a shared post renders from the canonical
+                 * post, not from anything copied into the message. The card
+                 * resolves the id, so an edit shows the new text and a deleted
+                 * or newly-private post shows “Post unavailable” without
+                 * breaking the conversation or the rest of the thread. */
+                <>
+                  {message.content && message.content !== "Shared a post" ? (
+                    <p className="mb-1 whitespace-pre-wrap break-words">{message.content}</p>
+                  ) : null}
+                  <SharedPostCard postId={String(message.sharedPost)} mine={mine} />
+                </>
               ) : message.image ? (
                 /* Part 10 §16/§17 — a thumbnail, not the original.
                  *

@@ -16,6 +16,7 @@ const { clampQuery } = require("../utils/regex");
 const { parseLimit } = require("../repositories/cursor");
 const Community = require("../models/community.model");
 const User = require("../models/user.model");
+const Follow = require("../models/follow.model");
 const Post = require("../models/post.model");
 
 const EVENT_FIELDS = "title slug description category venue startDate endDate bannerUrl price eventType visibility";
@@ -102,6 +103,35 @@ exports.globalSearch = async (req, res) => {
         : Promise.resolve([]),
     ]);
 
+    /* Part 13 §26 — mutual connections for the People surface.
+     *
+     * One aggregation for the whole page, not one query per row: "people I
+     * follow" is a single lookup, then a single $group counts, for each result,
+     * how many of their followees are in that set. Twenty rows cost two queries
+     * instead of forty. Only for viewers who are signed in — anonymous callers
+     * have no set to intersect with, and the field is simply absent rather than
+     * a fake zero. */
+    const mutualsByUser = new Map();
+    if (viewerId && people.length) {
+      const myFollowing = await Follow.find({ follower: viewerId, status: "accepted" })
+        .select("followee")
+        .lean();
+      const mine = myFollowing.map((f) => f.followee);
+      if (mine.length) {
+        const rows = await Follow.aggregate([
+          {
+            $match: {
+              follower: { $in: people.map((u) => u._id) },
+              followee: { $in: mine },
+              status: "accepted",
+            },
+          },
+          { $group: { _id: "$follower", count: { $sum: 1 } } },
+        ]);
+        rows.forEach((r) => mutualsByUser.set(String(r._id), r.count));
+      }
+    }
+
     res.json({
       success: true,
       q,
@@ -114,6 +144,8 @@ exports.globalSearch = async (req, res) => {
         username: u.username,
         profile: u.profile,
         verified: u.verified,
+        // Absent for anonymous callers; 0 for a signed-in viewer with no overlap.
+        ...(viewerId ? { mutuals: mutualsByUser.get(String(u._id)) || 0 } : {}),
       })),
       posts: posts.map((p) => ({
         _id: p._id,

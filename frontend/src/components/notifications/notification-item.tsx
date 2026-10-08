@@ -169,7 +169,23 @@ export function NotificationRow({
     : "EventHub";
   const body = (
     <>
-      <UserAvatar user={n.actor} size={compact ? 30 : 36} />
+      {/* An actor-less notification is from EventHub itself (announcement,
+          reminders, event updates). It used to render the initials fallback for
+          a null user — an empty grey circle. It carries the product mark now, so
+          "this came from EventHub" is visible at a glance. */}
+      {n.actor ? (
+        <UserAvatar user={n.actor} size={compact ? 30 : 36} />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src="/brand/eventhub-icon.png"
+          alt=""
+          width={compact ? 30 : 36}
+          height={compact ? 30 : 36}
+          className="shrink-0 rounded-full bg-muted object-contain p-0.5"
+          style={{ height: compact ? 30 : 36, width: compact ? 30 : 36 }}
+        />
+      )}
       <div className="min-w-0 flex-1">
         <p className={cn("truncate text-sm", n.read ? "text-muted-foreground" : "text-foreground")}>
           <span className="font-bold text-foreground">{actorName}</span> {meta.text(n)}

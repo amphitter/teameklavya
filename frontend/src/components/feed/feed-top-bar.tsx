@@ -35,6 +35,12 @@ export function FeedTopBar() {
          route. `pt-safe` keeps the bar clear of a notch, matching the bottom
          nav's handling of the other edge. */
       className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md lg:hidden"
+      /* A stable hook for the tests, and for anyone auditing the shell later.
+         Without it, "the feed top bar" has to be identified as "the header that
+         contains an EventHub mark" — and that description now also fits the
+         desktop nav's logo, which is the same artwork, so the two are told apart
+         only by luck of DOM order. */
+      data-feed-top-bar=""
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       <div className="relative flex h-14 items-center justify-center px-3 sm:px-6">

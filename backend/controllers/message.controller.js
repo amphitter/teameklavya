@@ -4,6 +4,10 @@ const Conversation = require("../models/conversation.model");
 const Message = require("../models/message.model");
 const User = require("../models/user.model");
 const Notification = require("../models/notification.model");
+const Post = require("../models/post.model");
+// Part 13 §22 — sharing a post must not widen who may read it, so the check is
+// the same predicate the post routes use, applied to the RECIPIENT.
+const { canViewPost } = require("../services/post-visibility.service");
 // Part 10 §12 — DM events ride the existing Socket.IO server.
 const dmRealtime = require("../services/dm-realtime.service");
 const { EVENTS } = require("../config/socket-protocol");
@@ -28,7 +32,7 @@ const LIST_USER_FIELDS = "firstName lastName username profile.avatar";
  * `reactions` IS needed (it is summarised for display) but the rest of the
  * document is not, and `__v` never is. */
 const MESSAGE_FIELDS =
-  "_id conversation sender content image attachment replyTo reactions deletedAt readAt createdAt clientMessageId";
+  "_id conversation sender content image attachment replyTo reactions deletedAt readAt createdAt clientMessageId sharedPost";
 
 /** Page size ceilings. 30 rows of metadata ≈ a few KB; the old list sent 50
  *  rows of full profiles, and the old thread sent up to 100 full messages. */
@@ -685,17 +689,11 @@ exports.getMessages = async (req, res) => {
   }
 };
 
-// POST /api/messages/conversations/:id  { content, image? }
+// POST /api/messages/conversations/:id  { content, image?, sharedPostId? }
 exports.sendMessage = async (req, res) => {
   try {
-    const content = String(req.body.content || "").trim();
+    let content = String(req.body.content || "").trim();
     const image = String(req.body.image || "").trim();
-    if (!content && !image) {
-      return res.status(400).json({ success: false, message: "Message can't be empty" });
-    }
-    if (content && image) {
-      return res.status(400).json({ success: false, message: "Send text or a photo, not both" });
-    }
 
     const convo = await Conversation.findOne({ _id: req.params.id, participants: req.user.id });
     if (!convo) return res.status(404).json({ success: false, message: "Conversation not found" });
@@ -710,6 +708,60 @@ exports.sendMessage = async (req, res) => {
     const otherId = isTeam ? null : convo.participants.find((p) => String(p) !== String(req.user.id));
     if (otherId && (await isBlockedBetween(req.user.id, otherId))) {
       return res.status(403).json({ success: false, message: "You can't message this user" });
+    }
+
+    /* ── Shared post (Part 13 §19–§22) ────────────────────────────────────
+     * The client sends `sharedPostId`, never the post's text or image: the
+     * message stores a reference and the bubble renders the canonical post, so
+     * an edit or a delete is reflected immediately and nothing is duplicated.
+     *
+     * The visibility check is the important part. A post can be public,
+     * followers-only, participant-only, community-only or archived, and the
+     * sender may legitimately be able to read one that the recipient cannot.
+     * Without this check, sharing would be a way to READ AROUND every
+     * visibility rule — "share it to myself" would hand me any private post.
+     * So every other participant is tested with the same predicate the post
+     * routes use, and the share is refused (403) if any would be denied. */
+    let sharedPost = null;
+    if (req.body.sharedPostId) {
+      if (!mongoose.isValidObjectId(req.body.sharedPostId)) {
+        return res.status(400).json({ success: false, message: "That post could not be found" });
+      }
+      const post = await Post.findById(req.body.sharedPostId).select("author visibility status archivedAt event community").lean();
+      if (!post) {
+        return res.status(404).json({ success: false, message: "Post unavailable" });
+      }
+      if (post.status !== "published") {
+        return res.status(403).json({ success: false, message: "You can't share this post" });
+      }
+      /* BOTH ends are checked, and the sender's end is not an afterthought:
+       * forwarding is only legitimate if you can see the thing you are
+       * forwarding. Without this, anyone who knows or guesses a post id could
+       * reference a post they are not allowed to read — and in a group it would
+       * then be handed to everyone who can read it, with the sharer as the
+       * apparent source. */
+      if (!(await canViewPost(post, req.user.id))) {
+        return res.status(403).json({ success: false, message: "You can't share this post" });
+      }
+      const others = (convo.participants || []).map((p) => String(p?._id || p)).filter((id) => id !== String(req.user.id));
+      for (const otherId of others) {
+        // eslint-disable-next-line no-await-in-loop
+        if (!(await canViewPost(post, otherId))) {
+          return res.status(403).json({ success: false, message: "You can't share this post with this person" });
+        }
+      }
+      sharedPost = post._id;
+      // A share is allowed to carry a note; with no note it still needs a line
+      // for the inbox preview and for clients that render text only.
+      if (!content) content = "Shared a post";
+    }
+
+    // Validated after the share block: a share with no note is still a message.
+    if (!content && !image) {
+      return res.status(400).json({ success: false, message: "Message can't be empty" });
+    }
+    if (content && image) {
+      return res.status(400).json({ success: false, message: "Send text or a photo, not both" });
     }
 
     // Reply target must belong to this thread, or it is a way to inject a
@@ -756,6 +808,7 @@ exports.sendMessage = async (req, res) => {
         sender: req.user.id,
         content,
         image,
+        ...(sharedPost ? { sharedPost } : {}),
         ...(replyTo ? { replyTo } : {}),
         ...(attachment ? { attachment } : {}),
         ...(clientMessageId ? { clientMessageId } : {}),
@@ -784,7 +837,7 @@ exports.sendMessage = async (req, res) => {
     // arrives; it surfaces with an unread badge in the archive view instead of
     // silently reappearing in the inbox and reversing the user's decision.
     convo.hiddenBy = [];
-    convo.lastMessage = { text: (content || "Photo").slice(0, 200), sender: req.user.id, at: new Date() };
+    convo.lastMessage = { text: (content || (image ? "Photo" : "Post")).slice(0, 200), sender: req.user.id, at: new Date() };
     await convo.save();
 
     // Missed-message notification: only when the recipient hasn't muted the

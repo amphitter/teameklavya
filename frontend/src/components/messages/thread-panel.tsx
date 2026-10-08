@@ -21,6 +21,7 @@ import {
   BellOff,
   BellRing,
   Info,
+  SquarePen,
   Loader2,
   UserPlus,
   Users,
@@ -36,6 +37,7 @@ import { cn } from "@/lib/utils";
 import { handleOf } from "@/lib/social";
 import { inbox, threads, type ConversationRow } from "@/lib/messages/store";
 import { useSessionUser } from "@/components/shell/use-session-user";
+import { useComposer } from "@/components/post/composer-provider";
 import { refreshUnread, useThread } from "@/hooks/use-messages";
 import { PresenceDot, PresenceText } from "@/components/messages/presence-dot";
 import { TeamInfoSheet } from "@/components/messages/team-info-sheet";
@@ -69,6 +71,7 @@ export function ThreadPanel({
   const thread = useThread(conversationId);
   const { onInput, stop } = useTypingEmitter(conversationId);
   const { user } = useSessionUser();
+  const { open: openComposer } = useComposer();
   const myId = user?._id
 
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
@@ -308,6 +311,24 @@ export function ThreadPanel({
                 onClick={() => setMenuOpen(false)}
               />
               <div className="absolute right-0 top-11 z-50 w-52 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest py-1 shadow-lg">
+                {/* Part 13 §4 — Create Post is reachable from INSIDE a chat.
+                    Inside an open conversation the bottom nav is hidden on
+                    purpose (the composer needs the bottom edge of the screen),
+                    which left this the one shell surface with no way to start a
+                    post. The item opens the same global composer as everywhere
+                    else and closes the menu; it does NOT navigate, so the
+                    conversation and its draft-free state are exactly as they
+                    were when the overlay closes. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    openComposer();
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-on-surface hover:bg-surface-container"
+                >
+                  <SquarePen className="h-4 w-4" /> Create a post
+                </button>
                 <button
                   type="button"
                   onClick={toggleMute}

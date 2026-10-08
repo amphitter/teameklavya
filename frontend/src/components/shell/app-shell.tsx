@@ -48,6 +48,7 @@ import { clearMessagesCache } from "@/lib/messages/cache";
 import { resetSocket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
+import { ComposerProvider, useComposer } from "@/components/post/composer-provider";
 import { MessagesNavLink } from "@/components/shell/messages-link";
 import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/utils/api";
@@ -82,7 +83,20 @@ const MY_EVENTS_NAV = [
 ];
 
 
+/**
+ * The composer is hosted here, inside the shell, so every route that renders the
+ * shell can open it — feed, messages, profile, communities, events. A surface
+ * that did not want it simply is not inside the shell.
+ */
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <ComposerProvider>
+      <ShellChrome>{children}</ShellChrome>
+    </ComposerProvider>
+  );
+}
+
+function ShellChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   /* Part 10 — /messages needs the shell to step aside (see the <main> and
    * <nav> comments below). Two distinct flags, because the inbox and an open
@@ -92,6 +106,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isChatRoute = /^\/messages\/[^/]+$/.test(pathname ?? "");
   const router = useRouter();
   const { user, role } = useSessionUser();
+  const { open: openComposer } = useComposer();
   /* The bottom nav carries the messages badge on mobile, the account menu
      carries the theme switch — both used to live in the top bar, which is gone
      below lg. Read here (not inside `AccountMenu`, which is re-created on every
@@ -180,10 +195,39 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     );
 
   /* ── Create menu (shared by top bar + mobile nav) ─────── */
-  const CreateMenu = ({ children }: { children: React.ReactNode }) => (
+  /* §1–§3, §31 — the "+" menu, anchored deterministically.
+   *
+   * What was wrong: the menu left its side to Radix's default (`side="bottom"`)
+   * and `align="end"`. In the bottom nav that meant it first tried to open
+   * BELOW a button that sits on the bottom edge of the screen, then flipped —
+   * the "appears to move/disappear" the report describes is that flip, happening
+   * after the user has already seen the menu. `align="end"` also pinned the
+   * menu's right edge to a button that is centred in a five-column grid, so on a
+   * narrow phone it ran off to the side.
+   *
+   * Now the placement is explicit per host: above the button in the bottom nav
+   * (aligned to its centre), below it in the desktop top bar, with a collision
+   * padding so it can never touch the viewport edge on a 320px screen.
+   * One click opens, the same click closes, outside closes, Escape closes —
+   * all Radix behaviour, and none of it re-implemented by hand. */
+  const CreateMenu = ({
+    children,
+    placement = "bottom",
+    align = "end",
+  }: {
+    children: React.ReactNode;
+    placement?: "top" | "bottom";
+    align?: "start" | "center" | "end";
+  }) => (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
+      <DropdownMenuContent
+        side={placement}
+        align={align}
+        sideOffset={10}
+        collisionPadding={8}
+        className="w-52"
+      >
         <DropdownMenuItem onClick={handleCreateEvent} className="gap-2.5 py-2.5">
           <Sparkles className="h-4 w-4 text-primary" />
           <div>
@@ -191,10 +235,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="text-[11px] text-muted-foreground">Set up a new event</div>
           </div>
         </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => router.push("/?compose=1")}
-          className="gap-2.5 py-2.5"
-        >
+        {/* §4/§7 — opens the composer as an overlay in the current page. It used
+            to `router.push("/?compose=1")`, which navigated you to the feed and
+            discarded your context: from Messages you lost the conversation, from
+            a profile you lost the profile. */}
+        <DropdownMenuItem onClick={openComposer} className="gap-2.5 py-2.5">
           <Newspaper className="h-4 w-4 text-muted-foreground" />
           <div>
             <div className="text-sm font-semibold">Create Post</div>
@@ -517,7 +562,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Create — visually strongest */}
           <div className="relative flex items-end justify-center pb-1">
-            <CreateMenu>
+            <CreateMenu placement="top" align="center">
               <button
                 type="button"
                 aria-label="Create"

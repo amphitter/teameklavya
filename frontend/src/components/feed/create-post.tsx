@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CalendarDays, Globe, ImagePlus, Loader2, MapPin, Plus, Send, Users, Video, Vote, X } from "lucide-react";
+import { CalendarDays, Globe, ImagePlus, Loader2, MapPin, Plus, Send, Tag, Users, Video, Vote, X } from "lucide-react";
 import { api } from "@/utils/api";
 import { compressFor } from "@/utils/compress-image";
 import { UserAvatar } from "@/components/user-avatar";
@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { cn } from "@/lib/utils";
 import type { FeedEventData, FeedPostData } from "@/components/feed/types";
+import { TagPeoplePicker } from "@/components/post/tag-people-picker";
+import type { PersonResult } from "@/components/people/use-people-search";
 
 const MAX_IMAGES = 4;
 
@@ -25,12 +27,24 @@ export function CreatePost({
   onCreated,
   composerRef,
   showGuestCard = true,
+  variant = "inline",
+  onClose,
 }: {
   onCreated: (post: FeedPostData) => void;
   composerRef?: React.RefObject<HTMLDivElement | null>;
   /** Signed out: render the "Join the conversation" card. The feed turns it off
    *  when its own welcome card is already on screen, so the two do not stack. */
   showGuestCard?: boolean;
+  /**
+   * "inline" — the card that sits in the feed column.
+   * "modal"  — the SAME composer in a dialog: centred on a desktop, full height
+   *            on a phone. One implementation, two hosts, so a publish from
+   *            anywhere behaves identically to a publish from the feed
+   *            (Part 13 §5: no second post-creation implementation).
+   */
+  variant?: "inline" | "modal";
+  /** Modal only: called after a successful publish, and on dismiss. */
+  onClose?: () => void;
 }) {
   const { user, role } = useSessionUser();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -42,10 +56,22 @@ export function CreatePost({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [focused, setFocused] = useState(false);
+  /* People tagged in this post (Part 13 §9). Held as real user records, not
+     free text, and mirrored into the content as @username so the backend's
+     existing mention parser is what actually records them. */
+  const [tagged, setTagged] = useState<PersonResult[]>([]);
+  const [tagOpen, setTagOpen] = useState(false);
   // Post visibility (backend-enforced): public · followers · event participants
   const [visibility, setVisibility] = useState<"public" | "followers" | "event_participants">("public");
 
   const canSubmit = (content.trim().length > 0 || images.length > 0 || event) && !submitting && !uploading;
+
+  /* Opening the composer from a "+" is a deliberate act — the caret belongs in
+     the textarea, not one tap away from it. The inline feed composer keeps its
+     existing focus-on-click behaviour. */
+  useEffect(() => {
+    if (variant === "modal") textareaRef.current?.focus();
+  }, [variant]);
 
   const openComposer = () => {
     composerRef?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -86,6 +112,52 @@ export function CreatePost({
     }
   };
 
+  /**
+   * Tag / untag a person (Part 13 §9–§11).
+   *
+   * Tagging writes `@username` into the post at the caret, which is the input
+   * the server already understands: `Post.mentions` is populated by parsing the
+   * content, so the stored mention is a real user id and the notification is
+   * created in the same transaction as the post — never for a failed or
+   * abandoned draft.
+   *
+   * Untagging removes the handle again. Without that, removing a person from
+   * the list would still notify them, which is the opposite of what the user
+   * just asked for.
+   */
+  const toggleTag = (person: PersonResult) => {
+    const handle = (person.username || "").trim();
+    if (!handle) {
+      toast.error("That person has no username yet");
+      return;
+    }
+    const exists = tagged.some((t) => t._id === person._id);
+
+    if (exists) {
+      setTagged((prev) => prev.filter((t) => t._id !== person._id));
+      setContent((c) => c.replace(new RegExp(`@${handle}(?![a-z0-9_])`, "i"), "").replace(/\s{2,}/g, " ").trim());
+      return;
+    }
+
+    const token = `@${handle} `;
+    const el = textareaRef.current;
+    if (el) {
+      const start = el.selectionStart ?? content.length;
+      const end = el.selectionEnd ?? content.length;
+      const next = content.slice(0, start) + token + content.slice(end);
+      setContent(next);
+      // Put the caret after the handle so the user keeps typing where they were.
+      requestAnimationFrame(() => {
+        el.focus();
+        const pos = start + token.length;
+        el.setSelectionRange(pos, pos);
+      });
+    } else {
+      setContent((c) => (c ? `${c} ${token}` : token));
+    }
+    setTagged((prev) => [...prev, person]);
+  };
+
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
@@ -101,9 +173,13 @@ export function CreatePost({
         setContent("");
         setImages([]);
         setEvent(null);
+        setTagged([]);
         setFocused(false);
         setVisibility("public");
         toast.success("Posted!");
+        /* §8 — publish, then close. Not before: the button stays busy until the
+           server has answered, so a double tap cannot post twice. */
+        if (variant === "modal") onClose?.();
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Failed to post");
@@ -137,8 +213,17 @@ export function CreatePost({
     );
   }
 
-  return (
-    <div ref={composerRef} className="rounded-xl border border-border bg-card p-4 sm:p-5">
+  /* The composer surface itself. Identical in both variants — the only change is
+     the chrome around it, which is what keeps "post from Messages" and "post
+     from the feed" the same feature rather than two. */
+  const surface = (
+    <div
+      ref={composerRef}
+      className={cn(
+        variant === "inline" && "rounded-xl border border-border bg-card p-4 sm:p-5",
+        variant === "modal" && "p-0"
+      )}
+    >
       <div className="flex gap-3">
         <UserAvatar user={user} size={40} />
         <textarea
@@ -203,6 +288,24 @@ export function CreatePost({
         </p>
       )}
 
+      {/* Who is tagged — visible without opening the picker, removable in place */}
+      {tagged.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5 pl-[52px] sm:pl-[52px]">
+          {tagged.map((p) => (
+            <button
+              key={p._id}
+              type="button"
+              onClick={() => toggleTag(p)}
+              aria-label={`Remove tag for ${p.username || p.firstName}`}
+              className="flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary"
+            >
+              @{p.username || p.firstName}
+              <X className="h-3 w-3" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {/* Actions */}
       <div className="mt-3 flex items-center gap-1 border-t border-border pt-3 pl-[52px] sm:pl-3">
         {/* Visibility — enforced by the backend */}
@@ -232,6 +335,17 @@ export function CreatePost({
             </button>
           ))}
         </div>
+
+        <button
+          type="button"
+          onClick={() => setTagOpen(true)}
+          aria-label="Tag people"
+          className="flex items-center gap-1.5 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
+          title="Tag people"
+        >
+          <Tag className="h-[18px] w-[18px]" />
+          {tagged.length > 0 ? <span className="text-[11px] font-bold">{tagged.length}</span> : null}
+        </button>
 
         <label className="cursor-pointer rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-primary" title="Add photos">
           <ImagePlus className="h-[18px] w-[18px]" />
@@ -273,6 +387,13 @@ export function CreatePost({
         </Button>
       </div>
 
+      <TagPeoplePicker
+        open={tagOpen}
+        onClose={() => setTagOpen(false)}
+        selected={tagged}
+        onToggle={toggleTag}
+      />
+
       <EventPicker
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
@@ -283,6 +404,36 @@ export function CreatePost({
       />
     </div>
   );
+
+  /* §6/§31 — the same surface, hosted as chrome. Centred dialog on a desktop; a
+     full-height sheet on a phone, where a floating card would fight the keyboard
+     and the bottom nav. `dvh` rather than `vh` so a collapsing URL bar cannot
+     push the Post button off screen. */
+  if (variant === "modal") {
+    return (
+      <Dialog open onOpenChange={(o) => !o && onClose?.()}>
+        <DialogContent
+          className={cn(
+            "flex flex-col gap-3 p-4",
+            /* `max-h-none` matters: the shared DialogContent caps itself at
+               90vh, and a phone composer that stops 10% short of the bottom
+               looks like a sheet that failed to open and leaves a strip of the
+               page showing through behind the keyboard. Truly full height on a
+               phone, a compact centred card from `sm` up. */
+            "h-[100dvh] max-h-none w-screen max-w-none rounded-none",
+            "sm:h-auto sm:max-h-[85vh] sm:w-[calc(100vw-2rem)] sm:max-w-lg sm:rounded-xl sm:p-5"
+          )}
+        >
+          <DialogHeader className="text-left">
+            <DialogTitle>Create Post</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto">{surface}</div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  return surface;
 }
 
 /* ── Event picker (organizers) ─────────────────────────────── */

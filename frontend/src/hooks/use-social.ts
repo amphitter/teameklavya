@@ -332,6 +332,8 @@ export interface ChatMessage {
   image?: string;
   attachment?: { url?: string; name?: string; size?: number; mime?: string };
   replyTo?: string | null;
+  /** Part 13 §19 — id of a shared post; the bubble renders the canonical post. */
+  sharedPost?: string | null;
   reactions?: { emoji: string; count: number; mine: boolean }[];
   deletedAt?: string | null;
   readAt?: string | null;

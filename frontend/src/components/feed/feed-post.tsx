@@ -35,6 +35,7 @@ import {
 import { EventPostCard } from "@/components/feed/event-post-card";
 import { FollowAuthorButton } from "@/components/feed/follow-author-button";
 import { CommentSheet } from "@/components/feed/comment-sheet";
+import { PostShareSheet } from "@/components/post/post-share-sheet";
 import { compactCount, handleOf, timeAgo } from "@/lib/social";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import type { FeedPostData } from "@/components/feed/types";
@@ -56,6 +57,7 @@ export function FeedPost({
   const [liked, setLiked] = useState(post.likedByMe);
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [saved, setSaved] = useState(post.savedByMe);
+  const [shareOpen, setShareOpen] = useState(false);
   const [commentCount, setCommentCount] = useState(post.commentCount);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -192,15 +194,13 @@ export function FeedPost({
     }
   };
 
-  const share = async () => {
-    const url = `${window.location.origin}/post/${post._id}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.success("Link copied to clipboard");
-    } catch {
-      toast.info(url);
-    }
-  };
+  /* §13 — sharing opens the share sheet; it no longer copies a URL.
+   *
+   * "Copy link" was the whole share action, which is not sharing: it assumes the
+   * person you want to send it to is reachable outside the app. The sheet's main
+   * action sends the post to real EventHub users through messaging; the link is
+   * still offered inside it, as one option among others. */
+  const share = () => setShareOpen(true);
 
   /**
    * §12 — archive, not delete.
@@ -492,7 +492,7 @@ export function FeedPost({
         <button
           type="button"
           onClick={share}
-          aria-label="Copy link"
+          aria-label="Share"
           className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <Share2 className="h-[18px] w-[18px]" />
@@ -526,6 +526,13 @@ export function FeedPost({
           onCountChange={setCommentCount}
           initialCount={commentCount}
         />
+      ) : null}
+
+      {/* §15 — the share sheet. Rendered from the same post object the feed
+          already has; it sends only the post id, so nothing about the post is
+          duplicated into the conversation. */}
+      {shareOpen ? (
+        <PostShareSheet post={post} open={shareOpen} onClose={() => setShareOpen(false)} />
       ) : null}
     </article>
       <ReportDialog open={reporting} onOpenChange={setReporting} targetType="post" targetId={post._id} />

@@ -111,6 +111,35 @@ ok(q.__testUnwrapAxios(null) === null, "null");
 ok(q.__testUnwrapAxios(undefined) === undefined, "undefined");
 ok(q.__testUnwrapAxios("ok") === "ok", "a string");
 
+section("invalidate makes live queries refetch — and nothing else does");
+/* The composer publishes a post from any surface and then invalidates the feed.
+ * That only works if invalidation actually reaches the mounted list. It also
+ * only works if a normal data write does NOT, because the refetch writes data,
+ * and a listener that fired on that write would loop forever. */
+{
+  const key = q.keyToString(["feed", "for-you"]);
+  let calls = 0;
+  const off = q.queryCache.onInvalidate(key, () => calls++);
+
+  q.queryCache.setData(key, { pages: [], ts: 1 });
+  ok(calls === 0, "a data write does NOT schedule a refetch (no request loop)");
+  q.queryCache.setError(key, new Error("nope"));
+  ok(calls === 0, "an error write does not either");
+
+  q.queryClient.invalidateQueries(["feed"]);
+  ok(calls === 1, "invalidating the domain reaches the subscribed query", `calls=${calls}`);
+  ok(q.queryCache.get(key)?.data === undefined, "the stale data is dropped, so nothing stale is rendered");
+
+  /* The refetch that follows lands through setData — which must not re-enter
+     the invalidation path, or the query would refetch forever. */
+  q.queryCache.setData(key, { pages: [], ts: 2 });
+  ok(calls === 1, "and exactly once — the refetch that lands does not re-trigger it");
+
+  off();
+  q.queryClient.invalidateQueries(["feed"]);
+  ok(calls === 1, "after unsubscribing nothing fires — the listener does not leak");
+}
+
 section("cancelled requests are recognised and never retried");
 ok(q.isCancelled({ code: "ERR_CANCELED" }), "axios ERR_CANCELED");
 ok(q.isCancelled({ name: "CanceledError" }), "CanceledError");

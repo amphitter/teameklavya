@@ -41,8 +41,15 @@ export function Logo({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src="/brand/logo-tagline.png"
-      alt="EventHub — Discover. Participate. Grow."
+      /* The same mark the mobile bar uses. The tagline version was replaced
+         everywhere (Part 13 follow-up: "the logo we are using in mobile phone
+         should be used in desktop nav login pages and extra places") — at the
+         24–44px every one of these call sites renders, "People • Events •
+         Opportunities" is a grey smudge, and the icon-only mark loses the name.
+         One asset, one component: changing it here changes the desktop
+         sidebar, the auth pages, the admin header and the rest together. */
+      src="/brand/eventhub-logo-plain.png"
+      alt="EventHub"
       className={cn("w-auto object-contain", onDark && "dark:brightness-[1.45] dark:saturate-[1.15]", className)}
       style={{ height: size }}
       draggable={false}

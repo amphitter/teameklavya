@@ -54,6 +54,18 @@ const messageSchema = new mongoose.Schema(
       size: { type: Number, default: 0 },
       mime: { type: String, default: "" },
     },
+
+    /* ── Shared post reference (Part 13 §19–§21) ────────────────────────
+     * A message that shares a post stores a REFERENCE, never a copy: the id of
+     * the post it points at. The bubble then renders the canonical post, so a
+     * post that is edited shows its current text, one that is deleted shows
+     * "Post unavailable", and one the reader is not allowed to see stays
+     * invisible — none of which is possible if the message had copied the text
+     * and image at share time.
+     *
+     * Nullable and absent for every ordinary message, so this adds a field
+     * without changing any existing row or query. */
+    sharedPost: { type: mongoose.Schema.Types.ObjectId, ref: "Post", default: null },
   },
   { timestamps: true }
 );

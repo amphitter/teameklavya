@@ -62,9 +62,18 @@ const signIn = async (page) => {
   }, CREDS);
 };
 
-/* The bar is identified by its own landmark plus the mark it must contain. */
-const BAR = () =>
-  [...document.querySelectorAll("header")].find((h) => h.querySelector('img[alt="EventHub"]'));
+/* The bar is identified by its own landmark plus the mark it must contain.
+ *
+ * "Visible" is part of the definition, and not a detail: the shell's desktop
+ * header is still mounted at phone width (hidden by an ancestor), it carries the
+ * SAME brand mark, and it now appears earlier in the DOM. Selecting the first
+ * match would measure a 0-height element and report the bar as broken when it is
+ * perfectly fine — a harness lie, not a bug. */
+const VISIBLE_BAR = () => {
+  const bar = document.querySelector("header[data-feed-top-bar]");
+  return bar && bar.getBoundingClientRect().height > 0 ? bar : null;
+};
+const BAR = VISIBLE_BAR;
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
@@ -86,7 +95,7 @@ const BAR = () =>
     const tag = `w${w}`;
 
     const bar = await page.evaluate(() => {
-      const header = [...document.querySelectorAll("header")].find((h) => h.querySelector('img[alt="EventHub"]'));
+      const header = document.querySelector("header[data-feed-top-bar]");
       if (!header) return null;
       const img = header.querySelector('img[alt="EventHub"]');
       const bell = header.querySelector('button[aria-label*="otification" i], a[aria-label*="otification" i]');
@@ -147,7 +156,12 @@ const BAR = () =>
     }
 
     /* the bell is the real control: tapping it opens the notification dropdown */
-    const bellBtn = page.locator('header img[alt="EventHub"]').locator("xpath=ancestor::header").locator('button[aria-label*="otification" i]').first();
+    /* Scoped to the VISIBLE bar (see VISIBLE_BAR): the hidden desktop header
+       also carries an EventHub mark, and clicking inside it can never work. */
+    /* Tag the visible bar so the locator can only ever resolve inside it — the
+       hidden desktop header is not marked by an attribute, it is hidden by an
+       ancestor, so no CSS selector expresses "the one that is showing". */
+    const bellBtn = page.locator('header[data-feed-top-bar] button[aria-label*="otification" i]').first();
     if ((await bellBtn.count()) > 0) {
       await bellBtn.click();
       await page.waitForTimeout(900);
@@ -163,7 +177,7 @@ const BAR = () =>
 
     /* the bar sticks while the feed scrolls */
     const sticky = await page.evaluate(async () => {
-      const header = [...document.querySelectorAll("header")].find((h) => h.querySelector('img[alt="EventHub"]'));
+      const header = document.querySelector("header[data-feed-top-bar]");
       const before = header.getBoundingClientRect().top;
       window.scrollTo(0, 1200);
       await new Promise((r) => setTimeout(r, 700));
@@ -189,13 +203,16 @@ const BAR = () =>
   for (const path of ["/explore", "/events", "/communities", "/notifications", "/messages", "/user/profile"]) {
     await page.goto(`${APP}${path}`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1500);
-    const present = await page.evaluate(() => Boolean([...document.querySelectorAll("header")].find((h) => h.querySelector('img[alt="EventHub"]'))));
+    /* The hook, not "a header with the EventHub mark": the desktop nav carries
+       the same mark now (that is the branding change), so the mark alone no
+       longer identifies this bar. */
+    const present = await page.evaluate(() => Boolean(document.querySelector("header[data-feed-top-bar]")));
     ok(!present, `the bar is not on ${path} (feed only)`);
   }
   /* …and the feed still has exactly one */
   await page.goto(`${APP}/`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2000);
-  const count = await page.evaluate(() => [...document.querySelectorAll("header")].filter((h) => h.querySelector('img[alt="EventHub"]')).length);
+  const count = await page.evaluate(() => document.querySelectorAll("header[data-feed-top-bar]").length);
   ok(count === 1, "the feed has exactly one top bar", `${count}`);
   /* Count VISIBLE bells. The shell's desktop header is still mounted at phone
      width (its ancestor is display:none), so a DOM count reports two and reads
@@ -226,15 +243,28 @@ const BAR = () =>
   await dpage.goto(`${APP}/`, { waitUntil: "domcontentloaded" });
   await dpage.waitForTimeout(2400);
   const desktop = await dpage.evaluate(() => {
-    const headers = [...document.querySelectorAll("header")].map((h) => ({
-      cls: h.className.slice(0, 50),
-      visible: getComputedStyle(h).display !== "none",
-      hasFeedMark: Boolean(h.querySelector('img[alt="EventHub"]')),
-    }));
-    return { headers, bell: Boolean(document.querySelector('button[aria-label*="otification" i]')) };
+    const bar = document.querySelector("header[data-feed-top-bar]");
+    const r = bar ? bar.getBoundingClientRect() : null;
+    /* The desktop nav carries the SAME mark on purpose (branding), so this
+       asserts what is actually required: the phone bar is not rendered here,
+       while the shell's own header is and shows the brand. */
+    const shellHeader = [...document.querySelectorAll("header")].find(
+      (h) => h !== bar && h.querySelector('img[alt="EventHub"]') && h.getBoundingClientRect().height > 0
+    );
+    return {
+      barExists: Boolean(bar),
+      barHeight: r ? Math.round(r.height) : 0,
+      barDisplay: bar ? getComputedStyle(bar).display : null,
+      shellHeaderHasMark: Boolean(shellHeader),
+      bell: Boolean(document.querySelector('button[aria-label*="otification" i]')),
+    };
   });
-  const visibleFeedBars = desktop.headers.filter((h) => h.visible && h.hasFeedMark);
-  ok(visibleFeedBars.length === 0, "the feed top bar is hidden on a desktop", JSON.stringify(desktop.headers));
+  ok(
+    !desktop.barExists || desktop.barHeight === 0 || desktop.barDisplay === "none",
+    "the feed top bar is not rendered on a desktop",
+    JSON.stringify(desktop)
+  );
+  ok(desktop.shellHeaderHasMark, "desktop shows the brand in the shell's own header");
   ok(desktop.bell, "desktop still has the shell's own notification bell");
 
   await browser.close();

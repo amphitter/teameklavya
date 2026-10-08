@@ -6,18 +6,23 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, Loader2, MessageSquare, Search, Users } from "lucide-react";
+import { CalendarDays, Loader2, MessageSquare, Search, UserRoundSearch, Users } from "lucide-react";
 import { api } from "@/utils/api";
 import { EmptyState, ErrorState, Skeleton } from "@/components/states";
 import { UserAvatar } from "@/components/user-avatar";
+import { PersonRow } from "@/components/people/person-row";
+import { FollowAuthorButton } from "@/components/feed/follow-author-button";
 import { cn } from "@/lib/utils";
 
 type Tab = "events" | "communities" | "people" | "posts";
 
+/* [Events][People][Communities][Posts] — People sits second because on a phone
+   the strip scrolls, and the third pill was off-screen: finding a person is a
+   first-class discovery task (Part 13 §23), not a footnote after Communities. */
 const TABS: { id: Tab; label: string; icon: any }[] = [
   { id: "events", label: "Events", icon: CalendarDays },
+  { id: "people", label: "People", icon: UserRoundSearch },
   { id: "communities", label: "Communities", icon: Users },
-  { id: "people", label: "People", icon: Users },
   { id: "posts", label: "Posts", icon: MessageSquare },
 ];
 
@@ -44,8 +49,10 @@ interface PersonR {
   firstName: string;
   lastName: string;
   username?: string;
-  profile?: any;
+  profile?: { avatar?: string; avatarVersion?: number; institution?: string; bio?: string };
   verified?: boolean;
+  /** Part 13 §26 — mutual connections, computed server-side for signed-in users. */
+  mutuals?: number;
 }
 interface PostR {
   _id: string;
@@ -68,7 +75,24 @@ function SearchView() {
   const q = (params.get("q") || "").trim();
 
   const [input, setInput] = useState(q);
-  const [tab, setTab] = useState<Tab>("events");
+
+  /* Part 13 §23/§28 — THE people-search bug.
+   *
+   * The tab used to live in component state only, seeded to "events". The URL
+   * wrote `q` but ignored `tab`, so any link that pointed at a tab — the feed's
+   * own "People you may know" discovery card links to `/search?tab=people` —
+   * arrived on the EVENTS tab with the query dropped in a different place:
+   * tapping "People you may know" showed "Type at least 2 characters" and
+   * typing then searched events. On a phone that card is the main route to
+   * finding people (the tab strip has to be scrolled horizontally to reach
+   * People), which is why it read as "people search is broken on mobile".
+   *
+   * It was never CSS. The tab is now read from the URL and written back to it,
+   * so the URL is the single source of truth and a deep link means what it says.
+   */
+  const urlTab = params.get("tab") as Tab | null;
+  const tab: Tab = urlTab && TABS.some((t) => t.id === urlTab) ? urlTab : "events";
+
   const [events, setEvents] = useState<EventR[]>([]);
   const [communities, setCommunities] = useState<CommunityR[]>([]);
   const [people, setPeople] = useState<PersonR[]>([]);
@@ -85,10 +109,29 @@ function SearchView() {
     if (input === q) return;
     const t = setTimeout(() => {
       const next = input.trim();
-      router.replace(next ? `/search?q=${encodeURIComponent(next)}` : "/search", { scroll: false });
+      /* Build the new URL from the CURRENT params instead of writing a bare
+         `/search?q=…`. The old line dropped every other parameter, so typing one
+         character on the People tab silently threw the tab away and dropped the
+         user back on Events — the same class of bug as the deep link that never
+         selected a tab, one effect further down. Query and tab are one URL. */
+      const sp = new URLSearchParams(params.toString());
+      if (next) sp.set("q", next);
+      else sp.delete("q");
+      const qs = sp.toString();
+      router.replace(qs ? `/search?${qs}` : "/search", { scroll: false });
     }, 350);
     return () => clearTimeout(t);
-  }, [input, q, router]);
+  }, [input, q, router, params]);
+
+  /** Selecting a tab is a navigation: it updates the URL, which is what the
+   *  panel above reads. One source of truth, and the link can be shared. */
+  const selectTab = (next: Tab) => {
+    const sp = new URLSearchParams(params.toString());
+    if (next === "events") sp.delete("tab");
+    else sp.set("tab", next);
+    const qs = sp.toString();
+    router.replace(qs ? `/search?${qs}` : "/search", { scroll: false });
+  };
 
   const run = useCallback(() => {
     if (q.length < 2) {
@@ -159,7 +202,7 @@ function SearchView() {
         {TABS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => selectTab(t.id)}
             className={cn(
               "flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors",
               tab === t.id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"
@@ -171,7 +214,13 @@ function SearchView() {
       </div>
 
       <div className="mt-5 space-y-3">
-        {q.length < 2 ? (
+        {q.length < 2 && tab === "people" ? (
+          /* Tapping a "People you may know" card used to land here on an empty
+             events list. The People surface now opens with real suggestions
+             (same endpoint the feed's own suggestions use) so the landing is
+             never a dead end — and it is a list of real accounts, not filler. */
+          <SuggestedPeople />
+        ) : q.length < 2 ? (
           <EmptyState icon={Search} title="Type at least 2 characters" description="Search across events, communities, people and posts." />
         ) : error ? (
           <ErrorState title="Search failed" description="Give it another try." onRetry={run} />
@@ -226,23 +275,20 @@ function SearchView() {
 
             {tab === "people" &&
               people.map((p) => (
-                <Link
+                <div
                   key={p._id}
-                  href={`/profile/${p._id}`}
-                  className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/40"
+                  className="flex items-center gap-1 rounded-2xl border border-border bg-card pl-3 pr-2 transition-colors hover:border-primary/40"
                 >
-                  <UserAvatar user={p} size={44} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-bold text-foreground">
-                      {p.firstName} {p.lastName}
-                      {p.verified ? <span className="ml-1.5 text-primary">✓</span> : null}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      @{p.username || ""}
-                      {p.profile?.institution ? ` · ${p.profile.institution}` : ""}
-                    </span>
-                  </span>
-                </Link>
+                  {/* The row is the link: on a phone, aiming at a name is easier
+                      than aiming at a pill. The follow control sits outside the
+                      link so tapping it does not navigate away. */}
+                  <PersonRow
+                    person={p}
+                    href={`/profile/${p.username || p._id}`}
+                    className="flex-1 px-0"
+                  />
+                  <FollowAuthorButton userId={p._id} initialFollowing={false} withStatus />
+                </div>
               ))}
 
             {tab === "posts" &&
@@ -272,5 +318,73 @@ function SearchView() {
         </p>
       )}
     </div>
+  );
+}
+
+
+/* ── People surface: who to look at before you type ─────────────────────
+ * Uses the existing suggestion endpoint (the one the feed's right rail already
+ * calls) rather than a second ranking. Rows are the same compact rows as the
+ * search results, with the follow button reachable without opening a profile. */
+function SuggestedPeople() {
+  const [people, setPeople] = useState<PersonR[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get("/users/suggested", { params: { limit: 12 } })
+      .then((r) => {
+        if (!cancelled) setPeople(r.data?.users || []);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-16" />
+        ))}
+      </>
+    );
+  }
+  if (failed) {
+    return <EmptyState icon={Users} title="Couldn't load people" description="Check your connection and try again." />;
+  }
+  if (!people.length) {
+    return (
+      <EmptyState
+        icon={Users}
+        title="No people found"
+        description="Search for someone by name or username."
+      />
+    );
+  }
+
+  return (
+    <>
+      <p className="px-1 pt-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+        People you may know
+      </p>
+      {people.map((p) => (
+        <div
+          key={p._id}
+          className="flex items-center gap-1 rounded-2xl border border-border bg-card pl-3 pr-2 transition-colors hover:border-primary/40"
+        >
+          <PersonRow person={p} href={`/profile/${p.username || p._id}`} className="flex-1 px-0" />
+          <FollowAuthorButton userId={p._id} initialFollowing={false} withStatus />
+        </div>
+      ))}
+    </>
   );
 }

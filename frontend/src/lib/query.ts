@@ -120,6 +120,35 @@ type Listener = () => void;
 class QueryCache {
   private entries = new Map<string, Entry<any>>();
   private listeners = new Map<string, Set<Listener>>();
+  /* A SECOND channel, deliberately not the same set as `listeners`.
+   *
+   * `listeners` fire for every cache change, including the ones a fetch makes
+   * when it lands. If "must refetch" were wired to that channel, a refetch
+   * would invalidate, which would refetch, which would invalidate — an infinite
+   * request loop. Only `invalidate()` fires these. */
+  private invalidateListeners = new Map<string, Set<Listener>>();
+
+  /**
+   * Subscribe to invalidation of an exact key.
+   *
+   * This is what makes `invalidateQueries` mean what every caller (and React
+   * Query) already assumes it means: the affected queries are marked stale AND
+   * the ones with a live component behind them refetch. Before this, an
+   * invalidation cleared the cached data and told nobody — a mounted list kept
+   * rendering what it had, or emptied itself, until some unrelated event
+   * happened to refetch it. Publishing a post from another surface is exactly
+   * that case: the feed has to catch up without a page reload.
+   */
+  onInvalidate(key: string, fn: Listener): () => void {
+    if (!this.invalidateListeners.has(key)) this.invalidateListeners.set(key, new Set());
+    this.invalidateListeners.get(key)!.add(fn);
+    return () => {
+      const set = this.invalidateListeners.get(key);
+      if (!set) return;
+      set.delete(fn);
+      if (!set.size) this.invalidateListeners.delete(key);
+    };
+  }
 
   subscribe(key: string, fn: Listener): () => void {
     if (!this.listeners.has(key)) this.listeners.set(key, new Set());
@@ -164,14 +193,16 @@ class QueryCache {
     this.emit(key);
   }
 
-  /** Drop data but keep subscribers — next read refetches. */
+  /** Mark stale, drop the data, and tell live subscribers to refetch. */
   invalidate(key: string) {
     const entry = this.entries.get(key);
-    if (!entry) return;
-    entry.updatedAt = 0; // forces staleness
-    entry.data = undefined;
-    entry.error = undefined;
-    this.emit(key);
+    if (entry) {
+      entry.updatedAt = 0; // forces staleness
+      entry.data = undefined;
+      entry.error = undefined;
+      this.emit(key);
+    }
+    this.invalidateListeners.get(key)?.forEach((fn) => fn());
   }
 
   /** Hard remove (used by cache GC and reset). */
@@ -354,7 +385,15 @@ export function useQuery<T>(
   const axiosOptsRef = useRef(axiosOpts);
   axiosOptsRef.current = axiosOpts;
 
-  /* Subscribe so external invalidations re-render this component. */
+  /* Latest fetch inputs, so the invalidation listener below can refetch without
+     being re-subscribed (and without adding them to a dependency list). */
+  const runFetchRef = useRef<() => Promise<void>>(async () => {});
+  const liveRef = useRef(false);
+  liveRef.current = Boolean(enabled && url);
+
+  /* Subscribe so external invalidations re-render this component — and now also
+     REFETCH it. A component that is on screen and has just been told its data is
+     stale must not sit there showing the stale data. */
   useEffect(() => {
     const entry = queryCache.ensure<T>(cacheKey);
     entry.subscribers += 1;
@@ -363,8 +402,14 @@ export function useQuery<T>(
       entry.gcTimer = undefined;
     }
     const unsub = queryCache.subscribe(cacheKey, rerender);
+    const unsubInvalidate = queryCache.onInvalidate(cacheKey, () => {
+      rerender();
+      const e = queryCache.get<T>(cacheKey);
+      if (liveRef.current && !e?.inflight) void runFetchRef.current();
+    });
 
     return () => {
+      unsubInvalidate();
       const e = queryCache.get<T>(cacheKey);
       if (!e) return;
       e.subscribers = Math.max(0, e.subscribers - 1);
@@ -390,6 +435,8 @@ export function useQuery<T>(
       setIsFetching(false);
     }
   }, [cacheKey, url, enabled]);
+
+  runFetchRef.current = runFetch;
 
   /* Load when missing or stale. */
   useEffect(() => {
@@ -617,6 +664,12 @@ export function useInfiniteQuery<T>(
     return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, reloadToken]);
+
+  /* An invalidation re-runs pagination from the first page, in place. The list
+     keeps its scroll position and its place on screen; only the data is new.
+     `reloadToken` already existed for exactly this fetch, so invalidation reuses
+     it rather than introducing a second way to reload. */
+  useEffect(() => queryCache.onInvalidate(cacheKey, () => setReloadToken((n) => n + 1)), [cacheKey]);
 
   const items = pages.flatMap((p) => p.items ?? []);
   const lastPage = pages[pages.length - 1];

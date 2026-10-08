@@ -144,12 +144,36 @@ const BAR = VISIBLE_BAR;
       ok(Boolean(bar.bell), `${tag} · the alert icon is in the bar`);
       if (bar.bell) {
         ok(bar.bell.inHeader, `${tag} · …inside the bar itself`);
+        /* PART 14 §2 puts the ACCOUNT avatar in the far right corner and the
+           bell immediately to its left — "notifications + profile", in that
+           order. The bell therefore must be in the right-hand cluster and
+           right of centre, and the cluster must actually reach the edge; the
+           old "-28px from the edge" rule described the layout before the
+           account menu joined the bar. */
         ok(
-          bar.bell.right >= bar.viewport - 28,
-          `${tag} · …in the right corner`,
+          bar.bell.right > bar.viewport / 2,
+          `${tag} · the alert icon is in the right half`,
+          `bell right edge ${bar.bell.right} of ${bar.viewport}`
+        );
+        ok(
+          bar.bell.right <= bar.viewport,
+          `${tag} · the alert icon is not pushed off the screen`,
           `bell right edge ${bar.bell.right} of ${bar.viewport}`
         );
         ok(bar.bell.w >= 36 && bar.bell.h >= 36, `${tag} · the alert icon is a real touch target`, `${bar.bell.w}×${bar.bell.h}`);
+      }
+      /* The right-hand cluster: bell then account, reaching the edge. */
+      const cluster = await page.evaluate(() => {
+        const header = document.querySelector("header[data-feed-top-bar]");
+        const acct = header?.querySelector("button[aria-label='Account menu']");
+        if (!acct) return null;
+        const r = acct.getBoundingClientRect();
+        return { right: Math.round(r.right), w: Math.round(r.width), h: Math.round(r.height), vw: window.innerWidth };
+      });
+      ok(Boolean(cluster), `${tag} · the account menu is in the bar (§2)`);
+      if (cluster) {
+        ok(cluster.right >= cluster.vw - 12, `${tag} · …in the far right corner`, `right ${cluster.right} of ${cluster.vw}`);
+        ok(cluster.w >= 36 && cluster.h >= 36, `${tag} · …with a real touch target`, `${cluster.w}×${cluster.h}`);
       }
       ok(!bar.overlap, `${tag} · the bell never overlaps the logo`, `logo ends ${bar.img.right}, bell starts ${bar.bell?.left}`);
       ok(bar.header.h >= 44 && bar.header.h <= 76, `${tag} · the bar is a sensible height`, `${bar.header.h}px`);

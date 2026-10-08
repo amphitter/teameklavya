@@ -246,21 +246,52 @@ const section = (t) => console.log(`\n══ ${t} ══`);
   const keyWarning = consoleErrors.filter((t) => /same key|unique "key"/i.test(t));
   ok(keyWarning.length === 0, "no duplicate-key warnings when the second page appends cards", keyWarning.join(" | "));
 
-  /* ═══════════════ 3 · Following stays pure ═══════════════ */
-  section("3. Following is still just the people you follow");
-  await page.locator("button[aria-pressed]", { hasText: "Following" }).first().click();
-  await page.waitForTimeout(1800);
-  const following = await page.evaluate(() => ({
-    cards: document.querySelectorAll("[data-discovery]").length,
-    posts: document.querySelectorAll("article").length,
-  }));
-  ok(following.cards === 0, "no discovery cards in Following (design decision D2)", JSON.stringify(following));
+  /* ═══════════════ 3 · Following stays pure ═══════════════
+   *
+   * Run on a DESKTOP page. Part 14 §9 removes the filter strip from the phone
+   * feed, so tapping "Following" at phone width is no longer possible — but the
+   * rule this section encodes (Following is chronological, no discovery cards)
+   * is about the feed, not about the phone, so it still has to be verified
+   * wherever the tab lives. A separate page also keeps this probe's requests
+   * out of the call budget that section 4 measures, because that budget is
+   * counted by a listener bound to the phone page only.
+   */
+  section("3. Following is still just the people you follow (desktop)");
+  {
+    const deskCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const dpage = await deskCtx.newPage();
+    /* Same sign-in the phone page uses, spelled out again because this file has
+       no shared helper. */
+    await dpage.goto(`${APP}/login`, { waitUntil: "domcontentloaded" });
+    await dpage.evaluate(async (c) => {
+      const r = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(c),
+      });
+      const d = await r.json();
+      if (d.token) {
+        localStorage.setItem("token", d.token);
+        localStorage.setItem("user", JSON.stringify(d.user));
+      }
+    }, CREDS);
+    await dpage.goto(`${APP}/`, { waitUntil: "domcontentloaded" });
+    await dpage.waitForTimeout(2600);
+    await dpage.locator("button[aria-pressed]", { hasText: "Following" }).first().click();
+    await dpage.waitForTimeout(1800);
+    const following = await dpage.evaluate(() => ({
+      cards: document.querySelectorAll("[data-discovery]").length,
+      posts: document.querySelectorAll("article").length,
+    }));
+    ok(following.cards === 0, "no discovery cards in Following (design decision D2)", JSON.stringify(following));
 
-  /* Back to For You and make sure the cards come back — the tab is not sticky-broken. */
-  await page.locator("button[aria-pressed]", { hasText: "For You" }).first().click();
-  await page.waitForTimeout(1800);
-  const backToForYou = await page.evaluate(() => document.querySelectorAll("[data-discovery]").length);
-  ok(backToForYou >= 1, "…and they return on For You", `${backToForYou} cards`);
+    /* Back to For You and make sure the cards come back — the tab is not sticky-broken. */
+    await dpage.locator("button[aria-pressed]", { hasText: "For You" }).first().click();
+    await dpage.waitForTimeout(1800);
+    const backToForYou = await dpage.evaluate(() => document.querySelectorAll("[data-discovery]").length);
+    ok(backToForYou >= 1, "…and they return on For You", `${backToForYou} cards`);
+    await deskCtx.close();
+  }
 
   /* ═══════════════ 4 · nothing on the critical path ═══════════════ */
   section("4. Load speed: the cards never delay the feed, and cost three requests");

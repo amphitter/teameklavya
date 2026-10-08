@@ -1,29 +1,48 @@
 "use client";
 
 /**
- * Full search page (Part 3, Phase 11) — ?q= deep-linkable, tabbed results.
+ * Full search page — ?q= deep-linkable, trending-first.
+ *
+ * Part 14 §5–§8. Three things changed here and nothing else:
+ *
+ *   1. The screen no longer opens empty. `q < 2 chars` used to print "Type at
+ *      least 2 characters" over a blank page — the single worst landing spot in
+ *      the app, because Search is a bottom-nav tab a user taps with no query in
+ *      mind. It now opens on TRENDING: a visual grid of real posts and real
+ *      events (server-ranked, §41 — no invented content).
+ *   2. The filter row is All / Events / People. Communities and Posts are gone
+ *      as chips because the brief names the filters explicitly; they are not
+ *      lost, they appear inside All, which is the union of everything the
+ *      existing search endpoint returns.
+ *   3. Results are a list of real rows; a POST opens the viewer sheet rather
+ *      than navigating, so the query and scroll position survive.
+ *
+ * Nothing about /explore was touched: Explore is events discovery, Search is
+ * people/events/content search, and §29 forbids merging them.
  */
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, Loader2, MessageSquare, Search, UserRoundSearch, Users } from "lucide-react";
+import { CalendarDays, Search, UserRoundSearch, Users } from "lucide-react";
 import { api } from "@/utils/api";
 import { EmptyState, ErrorState, Skeleton } from "@/components/states";
+import { TrendingSection } from "@/components/search/trending-grid";
+import { PostViewerSheet } from "@/components/search/post-viewer-sheet";
 import { UserAvatar } from "@/components/user-avatar";
 import { PersonRow } from "@/components/people/person-row";
 import { FollowAuthorButton } from "@/components/feed/follow-author-button";
 import { cn } from "@/lib/utils";
 
-type Tab = "events" | "communities" | "people" | "posts";
+/* §8 — All / Events / People, in that order, three compact pills that fit a
+   320px screen without scrolling. `all` is the server's own default group set
+   (events + communities + people + posts), so All genuinely is everything the
+   search endpoint can return rather than a third curated list. */
+type Tab = "all" | "events" | "people";
 
-/* [Events][People][Communities][Posts] — People sits second because on a phone
-   the strip scrolls, and the third pill was off-screen: finding a person is a
-   first-class discovery task (Part 13 §23), not a footnote after Communities. */
 const TABS: { id: Tab; label: string; icon: any }[] = [
+  { id: "all", label: "All", icon: Search },
   { id: "events", label: "Events", icon: CalendarDays },
   { id: "people", label: "People", icon: UserRoundSearch },
-  { id: "communities", label: "Communities", icon: Users },
-  { id: "posts", label: "Posts", icon: MessageSquare },
 ];
 
 interface EventR {
@@ -90,8 +109,10 @@ function SearchView() {
    * It was never CSS. The tab is now read from the URL and written back to it,
    * so the URL is the single source of truth and a deep link means what it says.
    */
-  const urlTab = params.get("tab") as Tab | null;
-  const tab: Tab = urlTab && TABS.some((t) => t.id === urlTab) ? urlTab : "events";
+  /* Communities/Posts are no longer tabs. An old link such as ?tab=posts still
+     resolves — to All, which contains posts — instead of to an empty panel. */
+  const urlTab = params.get("tab");
+  const tab: Tab = urlTab && TABS.some((t) => t.id === urlTab) ? (urlTab as Tab) : "all";
 
   const [events, setEvents] = useState<EventR[]>([]);
   const [communities, setCommunities] = useState<CommunityR[]>([]);
@@ -127,7 +148,7 @@ function SearchView() {
    *  panel above reads. One source of truth, and the link can be shared. */
   const selectTab = (next: Tab) => {
     const sp = new URLSearchParams(params.toString());
-    if (next === "events") sp.delete("tab");
+    if (next === "all") sp.delete("tab");
     else sp.set("tab", next);
     const qs = sp.toString();
     router.replace(qs ? `/search?${qs}` : "/search", { scroll: false });
@@ -165,12 +186,16 @@ function SearchView() {
   useEffect(() => run(), [run]);
 
   const counts: Record<Tab, number> = {
+    all: events.length + communities.length + people.length + posts.length,
     events: events.length,
-    communities: communities.length,
     people: people.length,
-    posts: posts.length,
   };
   const emptyForTab = q.length >= 2 && !loading && !error && counts[tab] === 0;
+  /* Results open in the same viewer sheet the Trending grid uses, so tapping a
+     post does not throw the query away. The row carries only an id; the sheet
+     hydrates the real post, which is why like/save state is correct here and
+     not a guess from the search projection. */
+  const [openPostId, setOpenPostId] = useState<string | null>(null);
 
   return (
     <div className="mx-auto w-full max-w-3xl px-3 py-5 sm:px-6 sm:py-7">
@@ -191,7 +216,7 @@ function SearchView() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Search events, communities, people, posts…"
+            placeholder="Search people, events, posts…"
             aria-label="Search"
             className="h-11 w-full rounded-full border border-input bg-muted/60 pl-10 pr-4 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:bg-background focus:ring-4 focus:ring-primary/10"
           />
@@ -214,113 +239,171 @@ function SearchView() {
       </div>
 
       <div className="mt-5 space-y-3">
-        {q.length < 2 && tab === "people" ? (
-          /* Tapping a "People you may know" card used to land here on an empty
-             events list. The People surface now opens with real suggestions
-             (same endpoint the feed's own suggestions use) so the landing is
-             never a dead end — and it is a list of real accounts, not filler. */
-          <SuggestedPeople />
-        ) : q.length < 2 ? (
-          <EmptyState icon={Search} title="Type at least 2 characters" description="Search across events, communities, people and posts." />
+        {q.length < 2 ? (
+          tab === "people" ? (
+            /* §5 says Search must never open on a blank page. The default tab
+               is All (→ Trending), but if someone deliberately taps the People
+               chip before typing, the useful answer is real accounts to look
+               at, not an instruction to type. */
+            <SuggestedPeople />
+          ) : (
+            <TrendingSection />
+          )
         ) : error ? (
           <ErrorState title="Search failed" description="Give it another try." onRetry={run} />
         ) : loading ? (
           Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16" />)
         ) : emptyForTab ? (
-          <EmptyState icon={Search} title={`No ${tab} found`} description={`Nothing matches “${q}”. Try another tab or different words.`} />
+          <EmptyState
+            icon={Search}
+            title={tab === "all" ? `No results for “${q}”` : `No ${tab} found`}
+            description={
+              tab === "all"
+                ? "Try different words, or browse what's trending for inspiration."
+                : `Nothing matches “${q}”. Try another tab or different words.`
+            }
+          />
+        ) : tab === "all" ? (
+          /* All = every group the endpoint can return, each capped by the
+             server, so the union never becomes an unbounded wall. */
+          <>
+            <ResultGroup label="Events" count={events.length}>
+              {events.map((e) => (
+                <EventRow key={e._id} event={e} />
+              ))}
+            </ResultGroup>
+            <ResultGroup label="People" count={people.length}>
+              {people.map((p) => (
+                <PersonResultRow key={p._id} person={p} />
+              ))}
+            </ResultGroup>
+            <ResultGroup label="Communities" count={communities.length}>
+              {communities.map((c) => (
+                <CommunityRow key={c._id} community={c} />
+              ))}
+            </ResultGroup>
+            <ResultGroup label="Posts" count={posts.length}>
+              {posts.map((p) => (
+                <PostResultRow key={p._id} post={p} onOpen={() => setOpenPostId(p._id)} />
+              ))}
+            </ResultGroup>
+          </>
         ) : (
           <>
-            {tab === "events" &&
-              events.map((e) => (
-                <Link
-                  key={e._id}
-                  href={`/events/${e.slug}`}
-                  className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/40"
-                >
-                  <span className="rounded-xl bg-brand-light p-2 text-primary">
-                    <CalendarDays className="h-5 w-5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-bold text-foreground">{e.title}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {[e.venue, e.category, e.startDate ? new Date(e.startDate).toLocaleDateString("en-IN") : null]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                    {e.description ? (
-                      <span className="mt-1 block truncate text-xs text-muted-foreground">{e.description}</span>
-                    ) : null}
-                  </span>
-                </Link>
-              ))}
-
-            {tab === "communities" &&
-              communities.map((c) => (
-                <Link
-                  key={c._id}
-                  href={`/communities/${c.slug}`}
-                  className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/40"
-                >
-                  <span className="rounded-xl bg-purple-light p-2 text-purple">
-                    <Users className="h-5 w-5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-bold text-foreground">{c.name}</span>
-                    {c.description ? (
-                      <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">{c.description}</span>
-                    ) : null}
-                  </span>
-                </Link>
-              ))}
-
-            {tab === "people" &&
-              people.map((p) => (
-                <div
-                  key={p._id}
-                  className="flex items-center gap-1 rounded-2xl border border-border bg-card pl-3 pr-2 transition-colors hover:border-primary/40"
-                >
-                  {/* The row is the link: on a phone, aiming at a name is easier
-                      than aiming at a pill. The follow control sits outside the
-                      link so tapping it does not navigate away. */}
-                  <PersonRow
-                    person={p}
-                    href={`/profile/${p.username || p._id}`}
-                    className="flex-1 px-0"
-                  />
-                  <FollowAuthorButton userId={p._id} initialFollowing={false} withStatus />
-                </div>
-              ))}
-
-            {tab === "posts" &&
-              posts.map((p) => (
-                <Link
-                  key={p._id}
-                  href={`/post/${p._id}`}
-                  className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/40"
-                >
-                  <UserAvatar user={p.author} size={38} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm text-foreground">{p.content}</span>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      {p.author ? `${p.author.firstName} ${p.author.lastName}` : "Unknown"}
-                      {p.createdAt ? ` · ${new Date(p.createdAt).toLocaleDateString("en-IN")}` : ""}
-                    </span>
-                  </span>
-                </Link>
-              ))}
+            {tab === "events" && events.map((e) => <EventRow key={e._id} event={e} />)}
+            {tab === "people" && people.map((p) => <PersonResultRow key={p._id} person={p} />)}
           </>
         )}
       </div>
 
-      {loading && q.length >= 2 && (
-        <p className="mt-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching…
-        </p>
-      )}
+      <PostViewerSheet postId={openPostId} onClose={() => setOpenPostId(null)} />
+
     </div>
   );
 }
 
+
+/* ── Result rows ─────────────────────────────────────────────────────────
+ * The same rows Search already rendered, lifted into named components so the
+ * All tab can compose them under headings without copy-pasting the markup four
+ * times. Their appearance is unchanged. */
+
+/** A heading + count, rendered only when the group actually has results. */
+function ResultGroup({
+  label,
+  count,
+  children,
+}: {
+  label: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  if (!count) return null;
+  return (
+    <section className="space-y-3 pt-1">
+      <h2 className="px-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+        {label} <span className="font-semibold text-muted-foreground/70">{count}</span>
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function EventRow({ event: e }: { event: EventR }) {
+  return (
+    <Link
+      href={`/events/${e.slug}`}
+      className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/40"
+    >
+      <span className="rounded-xl bg-brand-light p-2 text-primary">
+        <CalendarDays className="h-5 w-5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-bold text-foreground">{e.title}</span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {[e.venue, e.category, e.startDate ? new Date(e.startDate).toLocaleDateString("en-IN") : null]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+        {e.description ? (
+          <span className="mt-1 block truncate text-xs text-muted-foreground">{e.description}</span>
+        ) : null}
+      </span>
+    </Link>
+  );
+}
+
+function CommunityRow({ community: c }: { community: CommunityR }) {
+  return (
+    <Link
+      href={`/communities/${c.slug}`}
+      className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/40"
+    >
+      <span className="rounded-xl bg-purple-light p-2 text-purple">
+        <Users className="h-5 w-5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-bold text-foreground">{c.name}</span>
+        {c.description ? (
+          <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">{c.description}</span>
+        ) : null}
+      </span>
+    </Link>
+  );
+}
+
+function PersonResultRow({ person: p }: { person: PersonR }) {
+  return (
+    /* The row is the link and the follow control sits outside it: on a phone,
+       aiming at a name is easier than aiming at a pill, and tapping Follow must
+       not navigate away. */
+    <div className="flex items-center gap-1 rounded-2xl border border-border bg-card pl-3 pr-2 transition-colors hover:border-primary/40">
+      <PersonRow person={p} href={`/profile/${p.username || p._id}`} className="flex-1 px-0" />
+      <FollowAuthorButton userId={p._id} initialFollowing={false} withStatus />
+    </div>
+  );
+}
+
+function PostResultRow({ post: p, onOpen }: { post: PostR; onOpen: () => void }) {
+  /* A post opens the viewer sheet rather than navigating to /post/:id — the
+     §6 requirement that closing a post returns to the exact scroll position. */
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex w-full items-start gap-3 rounded-2xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40"
+    >
+      <UserAvatar user={p.author} size={38} />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm text-foreground">{p.content}</span>
+        <span className="mt-1 block text-xs text-muted-foreground">
+          {p.author ? `${p.author.firstName} ${p.author.lastName}` : "Unknown"}
+          {p.createdAt ? ` · ${new Date(p.createdAt).toLocaleDateString("en-IN")}` : ""}
+        </span>
+      </span>
+    </button>
+  );
+}
 
 /* ── People surface: who to look at before you type ─────────────────────
  * Uses the existing suggestion endpoint (the one the feed's right rail already

@@ -147,7 +147,40 @@ const pngOf = (w, h, rgb) => {
     await page.goto(`${APP}/`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(2600);
 
-    /* — §15/§23 entry: your own ring watches, the ⊕ beside it creates — */
+    /* — §15/§23 entry: your own ring watches, the ⊕ beside it creates —
+     *
+     * "Your story" only exists while the viewer HAS a live story: without one
+     * the rail correctly shows the bare ⊕ instead. The seeded corpus gives the
+     * second user a story, not this one, so a harness that assumed an existing
+     * own story was silently depending on a previous run of itself having
+     * published one. That made it pass once and then rot. Make the fixture
+     * explicit instead: if there is no live story for this viewer, publish one
+     * through the same endpoint the creator uses. */
+    const hasOwn = await page.evaluate(async () => {
+      const r = await fetch("/api/stories", { headers: { authorization: `Bearer ${localStorage.getItem("token")}` } });
+      const d = await r.json();
+      return (d.groups || []).some((g) => g.isMe && (g.stories || []).length);
+    });
+    if (!hasOwn) {
+      const made = await page.evaluate(async () => {
+        const r = await fetch("/api/stories", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+          body: JSON.stringify({
+            media: { url: "/uploads/stories/seed-story.png", type: "image", width: 400, height: 640 },
+            caption: "harness fixture",
+          }),
+        });
+        const d = await r.json().catch(() => ({}));
+        return { status: r.status, id: d?.story?._id || null };
+      });
+      info("own-story fixture", `created=${Boolean(made.id)} status=${made.status}`);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(2600);
+    }
     const ring = page.locator('button[aria-label^="Your story"], button[aria-label^="View your story"]').first();
     ok((await ring.count()) > 0, "§15 the story rail shows Your story");
     const creatorEntry = page.locator('button[aria-label="Add to your story"]').first();
@@ -680,41 +713,66 @@ const pngOf = (w, h, rgb) => {
     ok(rail && rail.h <= 150, "§28 the rail is a compact strip, not a hero card", `h=${rail?.h}px`);
     ok(rail && !/\d+\s*(views|likes|analytics)/i.test(rail.text), "§27 the rail shows no analytics-style numbers");
 
-    /* — §29/§30/§31 filters: 44px, tappable, state visible, no reload — */
-    const tabs = await page.evaluate(() => {
+    /* — PART 14 §9: the strip is DESKTOP ONLY —
+     *
+     * These four checks were written for a phone viewport: four filters, 44px
+     * tall, selected state visible, no reload. Part 14 removes the strip from
+     * the phone feed entirely (it was pushing the first post below the fold),
+     * so the mobile half of the acceptance is now that it is ABSENT, and the
+     * original checks run where the strip now lives — from `lg` up.
+     */
+    const mobileStrip = await page.evaluate(() => {
       const strip = document.querySelector('[role="group"][aria-label="Feed filters"]');
-      const els = [...(strip?.querySelectorAll("button, [role=tab]") || [])];
-      return els.map((b) => ({
-        label: b.innerText.trim(),
-        h: Math.round(b.getBoundingClientRect().height),
-        pressed: b.getAttribute("aria-pressed") || b.getAttribute("aria-selected"),
-        x: Math.round(b.getBoundingClientRect().x),
-      }));
+      if (!strip) return "absent";
+      return strip.getBoundingClientRect().height > 0 ? "visible" : "hidden";
     });
-    ok(tabs.length === 4, "§30 the feed exposes four filters", JSON.stringify(tabs.map((t) => t.label)));
-    ok(tabs.every((t) => t.h >= 44), "§30 every filter is ≥44px tall (§29's real cause)", JSON.stringify(tabs.map((t) => t.h)));
-    ok(tabs.some((t) => t.pressed === "true"), "§31 the selected filter is visible");
-    ok(tabs.every((t) => t.x >= 0), "§30 no filter starts off-screen", JSON.stringify(tabs.map((t) => t.x)));
-
-    /* tapping a filter switches content without a full navigation */
-    let navigations = 0;
-    page.on("framenavigated", (f) => {
-      if (f === page.mainFrame()) navigations++;
-    });
-    await page.locator('[aria-label="Feed filters"] button:has-text("Following")').first().click();
-    await page.waitForTimeout(2200);
-    const following = await page.evaluate(() => {
-      const strip = document.querySelector('[role="group"][aria-label="Feed filters"]');
-      const b = [...(strip?.querySelectorAll("button, [role=tab]") || [])].find((x) =>
-        x.innerText.trim() === "Following"
-      );
-      return b?.getAttribute("aria-pressed") || b?.getAttribute("aria-selected");
-    });
-    ok(following === "true", "§31 switching filters updates the selected state");
-    ok(navigations <= 1, "§31 …without a full page reload", `navigations=${navigations}`);
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    ok(overflow <= 1, "§30 no horizontal overflow on a 375px phone", `${overflow}px`);
+    ok(mobileStrip !== "visible", "§9 (Part 14) no filter strip on the phone feed", mobileStrip);
+    const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    ok(mobileOverflow <= 1, "§30 no horizontal overflow on a phone", `${mobileOverflow}px`);
     await page.screenshot({ path: `${OUT}/01-mobile-home.png` });
+
+    /* The same acceptance, on the desktop layout where the filters remain. */
+    {
+      const deskCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      const desk = await deskCtx.newPage();
+      await signIn(desk);
+      await desk.goto(`${APP}/`, { waitUntil: "domcontentloaded" });
+      await desk.waitForTimeout(3000);
+      const tabs = await desk.evaluate(() => {
+        const strip = document.querySelector('[role="group"][aria-label="Feed filters"]');
+        const els = [...(strip?.querySelectorAll("button, [role=tab]") || [])];
+        return els.map((b) => ({
+          label: b.innerText.trim(),
+          h: Math.round(b.getBoundingClientRect().height),
+          pressed: b.getAttribute("aria-pressed") || b.getAttribute("aria-selected"),
+          x: Math.round(b.getBoundingClientRect().x),
+          visible: b.getBoundingClientRect().height > 0,
+        }));
+      });
+      ok(tabs.length === 4, "§30 the feed still exposes four filters on desktop", JSON.stringify(tabs.map((t) => t.label)));
+      ok(tabs.every((t) => t.visible), "§30 …and they are actually rendered there");
+      ok(tabs.every((t) => t.h >= 44), "§30 every filter is ≥44px tall (§29's real cause)", JSON.stringify(tabs.map((t) => t.h)));
+      ok(tabs.some((t) => t.pressed === "true"), "§31 the selected filter is visible");
+      ok(tabs.every((t) => t.x >= 0), "§30 no filter starts off-screen", JSON.stringify(tabs.map((t) => t.x)));
+
+      /* tapping a filter switches content without a full navigation */
+      let navigations = 0;
+      desk.on("framenavigated", (f) => {
+        if (f === desk.mainFrame()) navigations++;
+      });
+      await desk.locator('[aria-label="Feed filters"] button:has-text("Following")').first().click();
+      await desk.waitForTimeout(2200);
+      const following = await desk.evaluate(() => {
+        const strip = document.querySelector('[role="group"][aria-label="Feed filters"]');
+        const b = [...(strip?.querySelectorAll("button, [role=tab]") || [])].find((x) =>
+          x.innerText.trim() === "Following"
+        );
+        return b?.getAttribute("aria-pressed") || b?.getAttribute("aria-selected");
+      });
+      ok(following === "true", "§31 switching filters updates the selected state");
+      ok(navigations <= 1, "§31 …without a full page reload", `navigations=${navigations}`);
+      await deskCtx.close();
+    }
 
     /* — the "+" still behaves (Part 13 regression, in the same run) — */
     const createBtn = page.locator('nav[aria-label="Primary"] button[aria-label="Create"]').first();

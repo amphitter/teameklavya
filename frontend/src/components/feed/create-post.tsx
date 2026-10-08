@@ -3,13 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CalendarDays, Globe, ImagePlus, Loader2, MapPin, Plus, Send, Tag, Users, Video, Vote, X } from "lucide-react";
+import { CalendarDays, Globe, ImagePlus, Loader2, MapPin, MoreHorizontal, Plus, Send, Tag, Users, Video, Vote, X } from "lucide-react";
 import { api } from "@/utils/api";
 import { compressFor } from "@/utils/compress-image";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { cn } from "@/lib/utils";
 import type { FeedEventData, FeedPostData } from "@/components/feed/types";
@@ -306,10 +312,38 @@ export function CreatePost({
         </div>
       ) : null}
 
-      {/* Actions */}
-      <div className="mt-3 flex items-center gap-1 border-t border-border pt-3 pl-[52px] sm:pl-3">
+      {/* ── Actions ────────────────────────────────────────────────────────
+         §11–§16 — THE TOOLBAR BUG, at its source.
+
+         Measured before the fix, at a 390px viewport: the card's content box is
+         326px, the row carried `pl-[52px]` (52px of indent borrowed from the
+         avatar column above it) and then held a 3-button visibility control, a
+         tag button, a photo button, an attach-event button, two disabled
+         placeholders and the Post button — about 300px of controls plus gaps.
+         The row could not shrink, so the LAST child, Post, was pushed past the
+         card's edge and clipped; at 320px the visibility control itself was cut
+         to a sliver. Nothing wrapped, nothing scrolled, it simply overflowed.
+
+         What changed, all at the source rather than hidden with `overflow-x`:
+           · the 52px indent is GONE on phones — the row starts where the card's
+             content starts, which is also what §19 asks for (one width system);
+           · `min-w-0` + `flex-wrap` so the row is allowed to be narrower than
+             its contents instead of pushing them out of the card;
+           · the Post button is `shrink-0` and sits in the normal flow;
+           · secondary actions (attach event · video · poll) collapse into the
+             "More" menu BELOW `sm` only. §16 asks for exactly this: "if the
+             existing toolbar has more actions than can reasonably fit, use the
+             existing supported More behavior rather than clipping buttons".
+             Nothing is removed — every action is still one tap away, and from
+             `sm` up they render inline exactly as they always did, so the
+             desktop composer is unchanged (§26). */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-1 gap-y-1.5 border-t border-border pt-3 sm:gap-1.5">
         {/* Visibility — enforced by the backend */}
-        <div className="mr-1 flex overflow-hidden rounded-full border border-border" role="group" aria-label="Post visibility">
+        <div
+          className="flex shrink-0 overflow-hidden rounded-full border border-border sm:mr-1"
+          role="group"
+          aria-label="Post visibility"
+        >
           {(
             [
               { id: "public" as const, icon: Globe, label: "Public", title: "Everyone can see this post" },
@@ -326,7 +360,13 @@ export function CreatePost({
               aria-pressed={visibility === v.id}
               title={v.title}
               className={cn(
-                "flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold transition-colors",
+                /* 30px wide on a phone (icon only), 36px tall so it is still a
+                   real target, and it grows to the labelled pill from sm up.
+                   Held at 30 rather than 36 because 320px is the binding
+                   constraint: the whole row has to fit one line inside a 264px
+                   content box, and 6px per pill is exactly what makes Post
+                   wrap onto a second line. */
+                "flex min-h-[36px] w-7 items-center justify-center gap-1 text-[11px] font-semibold transition-colors sm:w-auto sm:px-2.5 sm:py-1.5",
                 visibility === v.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
               )}
             >
@@ -340,14 +380,17 @@ export function CreatePost({
           type="button"
           onClick={() => setTagOpen(true)}
           aria-label="Tag people"
-          className="flex items-center gap-1.5 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-primary sm:h-auto sm:w-auto sm:p-2"
           title="Tag people"
         >
           <Tag className="h-[18px] w-[18px]" />
           {tagged.length > 0 ? <span className="text-[11px] font-bold">{tagged.length}</span> : null}
         </button>
 
-        <label className="cursor-pointer rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-primary" title="Add photos">
+        <label
+          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-primary sm:h-auto sm:w-auto sm:p-2"
+          title="Add photos"
+        >
           <ImagePlus className="h-[18px] w-[18px]" />
           <input
             type="file"
@@ -362,11 +405,12 @@ export function CreatePost({
           />
         </label>
 
+        {/* Secondary actions — INLINE FROM `sm` UP, exactly as before. */}
         {role === "admin" && (
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
+            className="hidden rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-primary sm:flex sm:items-center"
             title="Attach an event"
           >
             <CalendarDays className="h-[18px] w-[18px]" />
@@ -374,16 +418,40 @@ export function CreatePost({
         )}
 
         {/* Architected, not yet implemented */}
-        <span className="flex cursor-not-allowed items-center gap-1.5 rounded-lg p-2 text-muted-foreground/50" title="Coming soon">
+        <span
+          className="hidden cursor-not-allowed items-center gap-1.5 rounded-lg p-2 text-muted-foreground/50 sm:flex"
+          title="Coming soon"
+        >
           <Video className="h-[18px] w-[18px]" />
         </span>
-        <span className="flex cursor-not-allowed items-center gap-1.5 rounded-lg p-2 text-muted-foreground/50" title="Coming soon">
+        <span
+          className="hidden cursor-not-allowed items-center gap-1.5 rounded-lg p-2 text-muted-foreground/50 sm:flex"
+          title="Coming soon"
+        >
           <Vote className="h-[18px] w-[18px]" />
         </span>
 
-        <Button size="sm" onClick={submit} disabled={!canSubmit} className="ml-auto gap-1.5">
-          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-          Post
+        {/* Phones: the same three actions behind "More" (§16) — the row fits
+            instead of clipping, and nothing is silently dropped. The menu is
+            disabled-looking items included, so a user still learns what is
+            coming rather than losing the affordance entirely. */}
+        <SmMoreMenu
+          canAttachEvent={role === "admin"}
+          onAttachEvent={() => setPickerOpen(true)}
+        />
+
+        <Button size="sm" onClick={submit} disabled={!canSubmit} className="ml-auto shrink-0 gap-1.5">
+          {/* The paper plane is hidden below `sm` — not as a style choice, but
+              because it is 19px of the row's 262px budget at 320px, and losing
+              it is what lets every control keep a real touch height instead of
+              the row wrapping to a second line. The label stays, and from `sm`
+              up the icon is back. */}
+          {submitting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Send className="hidden h-3.5 w-3.5 sm:block" />
+          )}
+          {submitting ? "Posting…" : "Post"}
         </Button>
       </div>
 
@@ -496,5 +564,51 @@ function EventPicker({ open, onClose, onPick }: { open: boolean; onClose: () => 
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * `sm:` and below only — the toolbar's overflow.
+ *
+ * §16 is explicit that if the row cannot hold every action without clipping,
+ * the answer is a "More" affordance rather than a smaller touch target or a
+ * hidden button. This is that affordance: one 36px control that opens the
+ * actions which do not fit inline on a phone. From `sm` up it renders nothing,
+ * because there the same actions are inline — so this cannot change desktop.
+ */
+function SmMoreMenu({
+  canAttachEvent,
+  onAttachEvent,
+}: {
+  canAttachEvent: boolean;
+  onAttachEvent: () => void;
+}) {
+  return (
+    <div className="sm:hidden">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="More post options"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
+          >
+            <MoreHorizontal className="h-[18px] w-[18px]" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-52">
+          {canAttachEvent ? (
+            <DropdownMenuItem onClick={onAttachEvent} className="gap-2 py-2.5">
+              <CalendarDays className="h-4 w-4" /> Attach an event
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem disabled className="gap-2 py-2.5">
+            <Video className="h-4 w-4" /> Video <span className="ml-auto text-[10px] font-bold">Soon</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled className="gap-2 py-2.5">
+            <Vote className="h-4 w-4" /> Poll <span className="ml-auto text-[10px] font-bold">Soon</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }

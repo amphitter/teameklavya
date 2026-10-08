@@ -22,6 +22,21 @@ const postController = require("../controllers/post.controller");
 const { requireAuth, optionalUser } = require("../middleware/auth.middleware");
 
 router.get("/feed", optionalUser, postController.getFeed);
+
+/* Part 14 §3/§5 — the Search screen's opening state. Real engagement ranking,
+   the feed's own projection, image-first. Declared with the collection routes,
+   above `/:id`, so "trending" can never be read as a post id. */
+router.get("/trending", optionalUser, postController.getTrendingPosts);
+
+/* §23/§24 — the write path for "already seen" / "not interested". Batched, and
+   therefore cheap enough to call while scrolling. */
+router.post("/impressions", requireAuth, postController.recordImpressions);
+router.post(
+  "/:id/dismiss",
+  requireAuth,
+  limiters.social,
+  postController.toggleDismiss
+);
 router.get("/topics", optionalUser, postController.getTrendingTopics);
 router.get("/topics/:topic", optionalUser, postController.getTopicPosts);
 router.get("/saved", requireAuth, postController.getSavedPosts);

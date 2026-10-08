@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import {
   Archive,
   ArchiveRestore,
+  EyeOff,
   Bookmark,
   Building2,
   Flag,
@@ -38,6 +39,7 @@ import { CommentSheet } from "@/components/feed/comment-sheet";
 import { PostShareSheet } from "@/components/post/post-share-sheet";
 import { compactCount, handleOf, timeAgo } from "@/lib/social";
 import { useSessionUser } from "@/components/shell/use-session-user";
+import { useSeenImpression } from "@/components/feed/use-seen-impression";
 import type { FeedPostData } from "@/components/feed/types";
 import { cn } from "@/lib/utils";
 
@@ -45,9 +47,17 @@ export function FeedPost({
   post,
   onDeleted,
   onArchived,
+  /** §24 — "Not interested". The feed passes its own handler so the post can
+   *  leave the list immediately; the default records the dismissal only. */
+  onDismissed,
+  /** Set to false where an impression makes no sense (a permalink you opened
+   *  yourself, the shared-post card inside a conversation). */
+  trackImpression = true,
 }: {
   post: FeedPostData;
   onDeleted?: (id: string) => void;
+  onDismissed?: (id: string) => void;
+  trackImpression?: boolean;
   /* The author set the post aside (or put it back). The list that renders this
      post decides what to do next: a feed drops it, the Archive tab drops it on
      restore, the profile's Posts tab drops it either way. */
@@ -64,6 +74,20 @@ export function FeedPost({
   const [archived, setArchived] = useState(Boolean(post.archivedAt));
   const [archiving, setArchiving] = useState(false);
   const [heartBursts, setHeartBursts] = useState<{ id: number; x: number; y: number }[]>([]);
+  const [dismissed, setDismissed] = useState(false);
+  /* §23–§25 — the card itself is the observation target: half of it on screen
+     for over a second, while the tab is visible, from someone other than the
+     author, and only for signed-in readers. All of that lives in the hook; the
+     component just hands it a ref and says whether this post is eligible. */
+  const articleRef = useRef<HTMLElement | null>(null);
+  useSeenImpression(
+    articleRef,
+    post._id,
+    trackImpression &&
+      Boolean(user) &&
+      /* Other people's posts only: your own post is not an impression (§24). */
+      (!post.author?._id || String(post.author._id) !== String((user as any)?._id))
+  );
   /* Bumped only when the post becomes liked — drives `animate-like-pop` and,
      just as importantly, drives it for a DOUBLE-TAP too (the burst plays over
      the media; the small icon in the action row confirms it). */
@@ -211,6 +235,31 @@ export function FeedPost({
    * public profile while leaving it intact and owned. It is reachable from the
    * same menu as Delete, which is the only place a post's fate belongs.
    */
+  /**
+   * §24 — "Not interested".
+   *
+   * This is a *dismissal*, distinct from hiding the post for this render: the
+   * server keeps a row for (viewer, post, "dismissed") and the feed excludes
+   * dismissed posts from the for-you pool and from the following tab. Un-like,
+   * this state is not implied by any other action — a user who has never
+   * touched anything can still say "not this" — and it also feeds the seen
+   * logic, because a dismissed post never comes back to be seen again.
+   */
+  const dismiss = async () => {
+    setDismissed(true);
+    try {
+      const res = await api.post(`/posts/${post._id}/dismiss`, { dismissed: true });
+      if (res.data?.success === false) throw new Error("not dismissed");
+      onDismissed?.(post._id);
+      toast.success("You'll see fewer posts like this");
+    } catch {
+      /* Roll the UI back: claiming a preference was saved when it was not is
+         worse than an extra tap. */
+      setDismissed(false);
+      toast.error("Couldn't update your feed");
+    }
+  };
+
   const toggleArchive = async () => {
     setArchiving(true);
     try {
@@ -259,6 +308,7 @@ export function FeedPost({
   return (
     <>
     <article
+      ref={articleRef}
       /* The id makes one post addressable. Every harness that tried to talk
          about "the post with the photo" by position matched a different post as
          soon as the feed grew, and a like that lands on the wrong post is
@@ -346,6 +396,11 @@ export function FeedPost({
               {canDelete && (
                 <DropdownMenuItem onClick={deletePost} disabled={deleting} className="gap-2 text-destructive focus:text-destructive">
                   <Trash2 className="h-4 w-4" /> Delete post
+                </DropdownMenuItem>
+              )}
+              {!isOwn && user && (
+                <DropdownMenuItem onClick={dismiss} disabled={dismissed} className="gap-2">
+                  <EyeOff className="h-4 w-4" /> Not interested
                 </DropdownMenuItem>
               )}
               {!isOwn && user && (

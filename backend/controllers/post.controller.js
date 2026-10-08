@@ -19,6 +19,7 @@ const Event = require("../models/event.model");
 const Organization = require("../models/organization.model");
 const User = require("../models/user.model");
 const { PostRepository } = require("../repositories");
+const FeedImpressions = require("../services/feed-impressions.service");
 const mongoose = require("mongoose");
 const { ERROR_CODES } = require("../utils/app-error");
 
@@ -125,6 +126,9 @@ async function visibilityFilter(viewerId) {
  *  scrolling past the pool is truncated — fine at this product scale.
  */
 const FEED_POOL = 400;
+/* Larger than the biggest source weight (72h = 2.592e8 ms) so a seen post can
+   never outrank an unseen one, and finite so it is still reachable last. */
+const SEEN_PENALTY = 30 * 24 * 3_600_000; // 30 days in ms
 const FEED_WEIGHTS = { self: 72, followedUser: 60, followedOrg: 48, eventParticipant: 36, eventInterested: 24, communityMember: 18 };
 
 // GET /api/posts/feed?page=1&limit=10&tab=for-you|following&cursor=
@@ -195,7 +199,16 @@ exports.getFeed = async (req, res) => {
       if (!authors.length && !orgs.length) {
         return res.json({ success: true, posts: [], page, hasMore: false, nextCursor: null, tab });
       }
+      /* §23 — liked and explicitly dismissed posts stay out of Following too:
+         a post the viewer is done with is done with, whichever feed surfaces
+         it. `seen` is NOT applied here — this tab is "what the people I follow
+         posted", and a chronological list that silently skips items would be a
+         lie about what they posted. */
+      const imp = await FeedImpressions.loadImpressions(viewerId);
+      const never = [...new Set([...imp.liked, ...imp.dismissed])].slice(0, FeedImpressions.EXCLUSION_WINDOW);
+
       const scope = {
+        ...(never.length ? { _id: { $nin: never } } : {}),
         $or: [
           ...(authors.length ? [{ author: { $in: authors } }] : []),
           ...(orgs.length ? [{ organization: { $in: orgs } }] : []),
@@ -253,9 +266,23 @@ exports.getFeed = async (req, res) => {
     // action and must not be conflated with moderation-hidden status. The
     // spread matters: visibilityFilter can return a `visibility` key of its
     // own, so archivedAt is set before it and must not be clobbered.
+    /* Part 14 §23 — what this viewer has already consumed, in one bounded read.
+       `liked` and `dismissed` are hard exclusions (a reaction is engagement, an
+       explicit "not interested" is a decision, and neither should come back);
+       `seen` is a demotion applied to the score below, so a post the viewer
+       already read can still reappear once nothing unseen is left — which is
+       what keeps §25 satisfied (a page is never short because everything in it
+       was filtered out). */
+    const impressions = await FeedImpressions.loadImpressions(viewerId);
+    const neverShow = [...new Set([...impressions.liked, ...impressions.dismissed])].slice(
+      0,
+      FeedImpressions.EXCLUSION_WINDOW
+    );
+
     const pool = await Post.find({
       status: "published",
       archivedAt: null,
+      ...(neverShow.length ? { _id: { $nin: neverShow } } : {}),
       ...PostRepository.visibilityFilter(ctx, viewerId),
     })
       .sort({ createdAt: -1, _id: -1 })
@@ -284,7 +311,14 @@ exports.getFeed = async (req, res) => {
       else if (eventId && registeredEventSet.has(eventId)) weight = FEED_WEIGHTS.eventParticipant;
       else if (eventId && interestedEventSet.has(eventId)) weight = FEED_WEIGHTS.eventInterested;
       else if (communityId && communitySet.has(communityId)) weight = FEED_WEIGHTS.communityMember;
-      return { post, key: weight * 3_600_000 + new Date(post.createdAt).getTime() };
+      /* §23 — a post the viewer has already seen ranks below every unseen post,
+         whatever its source weight: SEEN_PENALTY is larger than the largest
+         head-start in FEED_WEIGHTS (72h), so "new to me" always wins. It is a
+         penalty rather than a filter so the feed can still fall back on it. */
+      const seenBefore = impressions.seen.has(String(post._id));
+      const key =
+        weight * 3_600_000 + new Date(post.createdAt).getTime() - (seenBefore ? SEEN_PENALTY : 0);
+      return { post, key, seenBefore };
     });
     scored.sort((a, b) => b.key - a.key || String(b.post._id).localeCompare(String(a.post._id)));
 
@@ -1068,5 +1102,149 @@ exports.toggleArchive = async (req, res) => {
   } catch (error) {
     console.error("Toggle archive error:", error.message);
     res.status(500).json({ success: false, message: "Failed to update archive" });
+  }
+};
+
+/* ── Part 14 §23–§24 · impressions ─────────────────────────────────────────
+ *
+ * These two endpoints are the whole write path for "already seen" and
+ * "not interested" — and they exist because §23 explicitly forbids keeping
+ * that fact in frontend state: it has to survive a refresh, a new session and
+ * a different device.
+ */
+
+/**
+ * POST /api/posts/impressions  { postIds: [], kind?: "seen" }
+ *
+ * Batched: the client collects what actually crossed its visibility threshold
+ * and sends the list (at most MAX_BATCH). One bulkWrite, never one request per
+ * scroll event (§24). Always 200 — an impression that fails to record must
+ * never surface an error to a reader who is just scrolling.
+ */
+exports.recordImpressions = async (req, res) => {
+  try {
+    const raw = Array.isArray(req.body?.postIds) ? req.body.postIds : [];
+    const kind = req.body?.kind === "dismissed" ? "dismissed" : "seen";
+    const out = await FeedImpressions.recordImpressions(req.user.id, raw.map(String), kind);
+    res.json({ success: true, ...out });
+  } catch (error) {
+    console.error("Record impressions error:", error.message);
+    res.json({ success: false, recorded: 0 });
+  }
+};
+
+/**
+ * POST /api/posts/:id/dismiss  { dismissed?: boolean }   (default true)
+ *
+ * The explicit "not interested" toggle. Distinct from archive (the AUTHOR sets
+ * their own post aside) and from save (a private bookmark): this is the VIEWER
+ * telling the feed to stop showing them someone else's post.
+ */
+exports.toggleDismiss = async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid identifier" });
+    }
+    const on = req.body?.dismissed === undefined ? true : Boolean(req.body.dismissed);
+    const result = await FeedImpressions.setDismissed(req.user.id, req.params.id, on);
+    if (!result) return res.status(400).json({ success: false, message: "Invalid identifier" });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error("Dismiss post error:", error.message);
+    next(error);
+  }
+};
+
+/**
+ * GET /api/posts/trending?limit=24
+ *
+ * The Search screen's opening state (§3/§5). It is NOT a new ranking system: a
+ * post's trend score is its real engagement — likes + comments — over the last
+ * 30 days, exactly the shape `getTrendingEvents` uses for events, so the two
+ * halves of the collage are ranked by the same idea.
+ *
+ * Images are NOT required, but they lead: the screen is a visual grid, and a
+ * grid of text-only cards reads as a list. Posts WITH media come first inside
+ * the same score order, and each result carries `hasMedia` so the grid can size
+ * it. The projection is the feed's own (`AUTHOR_FIELDS`, `attachCounts`), so a
+ * tapped post renders in the existing `FeedPost` with no second post component.
+ */
+exports.getTrendingPosts = async (req, res) => {
+  try {
+    const limit = Math.min(30, Math.max(1, parseInt(req.query.limit) || 24));
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+
+    /* Candidates: recent, published, public posts. Bounded, so the aggregations
+       below never scan the whole collection. */
+    const candidates = await Post.find({
+      status: "published",
+      archivedAt: null,
+      visibility: "public",
+      createdAt: { $gte: since },
+    })
+      .select("_id content images createdAt author event")
+      .sort({ createdAt: -1 })
+      .limit(300)
+      .lean();
+    if (!candidates.length) return res.json({ success: true, posts: [] });
+
+    const ids = candidates.map((p) => p._id);
+    const [likeAgg, commentAgg] = await Promise.all([
+      Reaction.aggregate([
+        { $match: { post: { $in: ids }, type: "like" } },
+        { $group: { _id: "$post", count: { $sum: 1 } } },
+      ]),
+      Comment.aggregate([{ $match: { post: { $in: ids } } }, { $group: { _id: "$post", count: { $sum: 1 } } }]),
+    ]);
+    const likeMap = new Map(likeAgg.map((r) => [String(r._id), r.count]));
+    const commentMap = new Map(commentAgg.map((r) => [String(r._id), r.count]));
+
+    const viewerId = req.user?.id || null;
+    const ranked = candidates
+      .map((p) => {
+        const id = String(p._id);
+        const likes = likeMap.get(id) || 0;
+        const comments = commentMap.get(id) || 0;
+        const hasMedia = Array.isArray(p.images) && p.images.length > 0;
+        return { p, likes, comments, hasMedia, score: likes * 2 + comments, at: +new Date(p.createdAt) };
+      })
+      .sort(
+        (a, b) =>
+          Number(b.hasMedia) - Number(a.hasMedia) || // image-first: the grid is visual
+          b.score - a.score ||
+          b.at - a.at
+      )
+      .slice(0, limit);
+
+    /* Hydrate through the feed's own path so every card has author counts and
+       likedByMe/savedByMe — the same fields `FeedPost` already expects. */
+    const hydrated = (await PostRepository.hydratePostsForViewer(
+      ranked.map((r) => r.p._id),
+      viewerId
+    )).map(sanitizeEvent); // a private event's details must not ride in on a public post
+    const byId = new Map(hydrated.map((p) => [String(p._id), p]));
+    const posts = ranked
+      .map((r) => {
+        const full = byId.get(String(r.p._id));
+        return full
+          ? {
+              ...full,
+              trendScore: r.score,
+              hasMedia: r.hasMedia,
+              /* The grid needs a flat image list even for event posts. */
+              gridImage:
+                (Array.isArray(full.images) && full.images[0]) ||
+                full.event?.bannerUrl ||
+                full.community?.avatarUrl ||
+                null,
+            }
+          : null;
+      })
+      .filter(Boolean);
+
+    res.json({ success: true, posts });
+  } catch (error) {
+    console.error("Trending posts error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to load trending posts" });
   }
 };

@@ -18,7 +18,6 @@ import { LiveEventHero } from "@/components/feed/live-event-hero";
 import type { LiveEventData } from "@/components/feed/live-event-hero";
 import { LivePulseStrip } from "@/components/feed/live-pulse-strip";
 import { RightRail } from "@/components/feed/right-rail";
-import { FeedTopBar } from "@/components/feed/feed-top-bar";
 import { DiscoveryCard } from "@/components/feed/discovery-card";
 import { useFeedDiscovery } from "@/components/feed/use-feed-discovery";
 import { useSessionUser } from "@/components/shell/use-session-user";
@@ -285,6 +284,11 @@ export function FeedView() {
   };
 
   const onDeleted = (id: string) => setRemoved((r) => [...r, id]);
+  /* §24 — a dismissed post leaves the list at once, exactly like a deleted one.
+     The server has already recorded the dismissal, so it also stays gone after a
+     refresh; this line is only about not making the user look at it for the
+     round-trip. Same for pages already fetched further down the cursor. */
+  const onDismissed = (id: string) => setRemoved((r) => [...r, id]);
 
   /* Archiving removes a post from every public list — including the one it was
      archived from. The server stops returning it on the next fetch, but the
@@ -314,9 +318,12 @@ export function FeedView() {
 
   return (
     <>
-      {/* Feed-only chrome: centred logo + the notification bell in the right
-          corner. Nothing else in the app gets a bar above it. */}
-      <FeedTopBar />
+      {/* The feed's phone-only top bar is mounted one level up, in the route
+          itself (`app/(app)/page.tsx`), so it is a direct child of the shell's
+          content column and sticks to the viewport edge instead of inheriting
+          this container's padding. Mounting it in both places put two bars and
+          two bells on the screen, which is exactly the kind of duplicate chrome
+          §60 warns about. */}
 
       <div className="mx-auto flex w-full max-w-6xl justify-center gap-6 px-3 py-4 sm:px-6 sm:py-5 xl:gap-8">
         {/* Main column */}
@@ -343,15 +350,24 @@ export function FeedView() {
             </div>
           )}
 
-          {/* Greeting with live badge (real event + real quiz score). The bell
-              that used to sit beside it has moved up into the feed's top bar,
-              where the alert icon belongs — one bell on the screen, not two. */}
-          <HomeGreeting firstName={user?.firstName} liveBadge={liveBadge} />
+          {/* Greeting with live badge (real event + real quiz score).
+              §9 — REMOVED FROM PHONES. On a 390px screen the greeting, the
+              search field and the filter chips filled the entire first
+              screenful before a single post appeared, and the brief is explicit
+              that the feed should start with content. It stays on desktop,
+              where there is room for it and no separate bar duplicating it. */}
+          <div className="hidden lg:block">
+            <HomeGreeting firstName={user?.firstName} liveBadge={liveBadge} />
+          </div>
 
-          {/* Quick search (phone layout; desktop search lives in the top bar) */}
+          {/* §9 — the phone search field is gone. Search is a destination now
+              (bottom nav → /search, which opens on real trending content), so a
+              second input here was both a duplicate entry point and the largest
+              block of chrome above the first post. Desktop keeps its own search
+              in the top bar; this form is hidden from lg up either way. */}
           <form
             onSubmit={submitHomeSearch}
-            className="mt-3 flex h-12 items-center rounded-xl bg-card px-3.5 shadow-[0_2px_12px_rgba(24,39,75,0.04)] transition-shadow focus-within:shadow-[0_4px_16px_rgba(37,99,255,0.15)] sm:hidden"
+            className="mt-3 hidden h-12 items-center rounded-xl bg-card px-3.5 shadow-[0_2px_12px_rgba(24,39,75,0.04)] transition-shadow focus-within:shadow-[0_4px_16px_rgba(37,99,255,0.15)]"
           >
             <span className="material-symbols-outlined mr-2.5 text-[20px] text-muted-foreground">search</span>
             <input
@@ -415,10 +431,15 @@ export function FeedView() {
                 On a phone the four tabs sit in a 2x2 grid — equal cells, no ragged
               half-row — and from sm up they are the single flex line they always
               were. Nothing is clipped at any width. */}
+            {/* §9 — the filter strip is DESKTOP ONLY. On a phone the feed is one
+                stream: no For You / Following / Events / Communities, no chip
+                dashboard above the composer. Hidden rather than unmounted, so
+                the desktop markup and its state are exactly what they were
+                before this change (§26). */}
             <div
               role="group"
               aria-label="Feed filters"
-              className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-2"
+              className="hidden gap-2 lg:flex lg:flex-wrap lg:items-center"
             >
               {(
                 [
@@ -507,6 +528,7 @@ export function FeedView() {
                       post={item.post}
                       onDeleted={onDeleted}
                       onArchived={onArchived}
+                      onDismissed={onDismissed}
                     />
                   ) : (
                     <DiscoveryCard

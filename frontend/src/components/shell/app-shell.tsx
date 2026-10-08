@@ -44,6 +44,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { prefetchInbox, useUnread } from "@/hooks/use-messages";
 import { initialsOf, useSessionUser } from "@/components/shell/use-session-user";
 import { useLogout } from "@/components/shell/use-logout";
+import { AccountMenu, AccountAvatar } from "@/components/shell/account-menu";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { ComposerProvider, useComposer } from "@/components/post/composer-provider";
@@ -162,23 +163,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
   const isActive = (item: NavItem) =>
     item.exact ? pathname === "/" : Boolean(item.href && pathname.startsWith(item.href));
 
-  /* The shell draws the account avatar through the SAME shared component as
-   * every other surface. It used to carry its own raw `<img>` here, which meant
-   * the header was the one place that asked for the untransformed original at a
-   * single size — a fourth crop of the same photo, and none of the variant
-   * handling. One component, one crop, every surface (§7). */
-  const AccountAvatar = ({ size = 32 }: { size?: number }) =>
-    user ? (
-      <UserAvatar user={user} size={size} alt="" />
-    ) : (
-      <span
-        className={cn("flex items-center justify-center rounded-full bg-muted text-muted-foreground")}
-        style={{ width: size, height: size }}
-      >
-        <UserRound className="h-4 w-4" />
-      </span>
-    );
-
   /* ── Create menu (shared by top bar + mobile nav) ─────── */
   /* §1–§3, §31 — the "+" menu, anchored deterministically.
    *
@@ -251,82 +235,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
             <div className="text-sm font-semibold">Create Community</div>
             <div className="text-[11px] text-muted-foreground">Start a space for your people</div>
           </div>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-
-  /* ── Account menu ─────────────────────────────────────── */
-  const AccountMenu = ({ children }: { children: React.ReactNode }) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
-        {user && (
-          <DropdownMenuLabel>
-            <div className="text-sm font-bold">{user.firstName} {user.lastName}</div>
-            <div className="text-xs font-normal text-muted-foreground">{user.email}</div>
-          </DropdownMenuLabel>
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
-          <Link href="/user/profile">
-            <UserRound className="h-4 w-4" /> Profile
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
-          <Link href="/user/registrations">
-            <Ticket className="h-4 w-4" /> My events & tickets
-          </Link>
-        </DropdownMenuItem>
-        {/* The feed's top bar carries the bell, but that bar is feed-only — and
-            the bottom nav is navigation, not notifications. Without this entry a
-            phone could only reach /notifications from the feed. */}
-        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
-          <Link href="/notifications">
-            <Bell className="h-4 w-4" /> Notifications
-          </Link>
-        </DropdownMenuItem>
-        {/* The three owner-only lists, reachable without opening your profile.
-            They are different things — saved is a bookmark you made, liked is a
-            reaction you gave, archive is your own post set aside — so they get
-            three entries rather than one vague "My stuff". */}
-        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
-          <Link href="/saved">
-            <Bookmark className="h-4 w-4" /> Saved posts
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
-          <Link href="/liked">
-            <Heart className="h-4 w-4" /> Liked posts
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
-          <Link href="/archived">
-            <Archive className="h-4 w-4" /> Archive
-          </Link>
-        </DropdownMenuItem>
-        {/* Search and the theme switch were top-bar controls. The top bar is
-            desktop-only now, so both live here — otherwise turning the theme
-            back to light would need a desktop. */}
-        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
-          <Link href="/search">
-            <Search className="h-4 w-4" /> Search
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={toggleTheme} className="gap-2.5 py-2.5">
-          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          {theme === "dark" ? "Light mode" : "Dark mode"}
-        </DropdownMenuItem>
-        {role === "admin" && (
-          <DropdownMenuItem asChild className="gap-2.5 py-2.5">
-            <Link href="/admin/dashboard">
-              <LayoutDashboard className="h-4 w-4" /> Organizer dashboard
-            </Link>
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleLogout} className="gap-2.5 py-2.5 text-destructive focus:text-destructive">
-          <LogOut className="h-4 w-4" /> Log out
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -462,7 +370,8 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
          *   Messages      → bottom nav item, with its unread badge
          *   Notifications → the home header's bell (phone), this bar (desktop)
          *   Create        → the bottom nav's create button
-         *   Search        → the feed's own search field, and the account menu
+         *   Search        → bottom nav item (the feed's own field was removed
+         *                   in Part 14 §9), with trending on /search
          *   Theme         → the account menu
          *   Profile       → the bottom nav's Profile
          * Nothing is orphaned by removing it, which is the only reason this
@@ -545,7 +454,15 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
             leaving the bottom row to navigation only. */}
         <div className="grid grid-cols-5">
           <MobileNavItem icon={Home} label="Home" href="/" active={pathname === "/"} />
-          <MobileNavItem icon={Compass} label="Explore" href="/events" active={pathname.startsWith("/events")} />
+          {/* §4/§28 — the second slot is SEARCH (trending + search), not
+              Explore. Explore is EVENT discovery and now lives in the phone's
+              top bar, so the two concepts never share a button. */}
+          <MobileNavItem
+            icon={Search}
+            label="Search"
+            href="/search"
+            active={pathname.startsWith("/search")}
+          />
 
           {/* Create — visually strongest */}
           <div className="relative flex items-end justify-center pb-1">

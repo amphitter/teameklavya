@@ -129,20 +129,36 @@ const TABS = () => {
     await page.waitForTimeout(2500);
     const tag = `w${w}`;
 
-    /* 1 — every tab, whole, on screen. */
+    /* 1 — PART 14 §9 SUPERSEDES THIS: on a phone there is no filter strip at
+       all. It was fixed once (four pills, whole, 44px tall) and then removed
+       from the phone layout by the follow-up brief, because the same pixels
+       were pushing the first post below the fold. So the check is now the
+       inverse, and it stays honest by verifying the strip is STILL THERE on
+       desktop — elsewhere in this file. */
     const tabs = await page.evaluate(TABS);
-    ok(tabs.length === 4, `${tag} · all four tabs render`, `${tabs.length}`);
-    for (const t of tabs) {
-      ok(
-        !t.clippedByViewport && !t.stuntedByAncestor,
-        `${tag} · "${t.label}" is fully visible`,
-        `x ${t.left}→${t.right} of ${w} · stunted=${t.stuntedByAncestor}`
-      );
-      ok(t.textFits, `${tag} · "${t.label}" shows its whole label`, `scrollW>clientW by ${t.textFits ? 0 : "?"}`);
-      ok(t.height >= 40, `${tag} · "${t.label}" is a real touch target`, `${t.height}px`);
+    ok(tabs.length === 0, `${tag} · the For You / Following / Events / Communities strip is gone from the phone feed`, `${tabs.length} pills`);
+    const stripHidden = await page.evaluate(() => {
+      const strip = document.querySelector("div[aria-label='Feed filters']");
+      if (!strip) return "absent";
+      const r = strip.getBoundingClientRect();
+      return r.height > 0 ? "visible" : "hidden";
+    });
+    ok(stripHidden !== "visible", `${tag} · no filter chips occupy the phone screen`, stripHidden);
+    info(`${tag} · tab strip`, `removed on phones (§9) — ${stripHidden}`);
+
+    /* 1b — §4: Explore is still one tap away, from the top bar. */
+    const exploreHere = await page.evaluate(() => {
+      const bar = document.querySelector("header[data-feed-top-bar]");
+      const link = bar?.querySelector("a[href='/explore']");
+      if (!link) return null;
+      const r = link.getBoundingClientRect();
+      const br = bar.getBoundingClientRect();
+      return { href: link.getAttribute("href"), w: Math.round(r.width), h: Math.round(r.height), left: Math.round(r.left), barH: Math.round(br.height) };
+    });
+    ok(Boolean(exploreHere), `${tag} · Explore is reachable from the top bar`);
+    if (exploreHere) {
+      ok(exploreHere.h >= 40, `${tag} · the Explore control is a real touch target`, `${exploreHere.w}x${exploreHere.h}`);
     }
-    const rows = new Set(tabs.map((t) => t.top)).size;
-    info(`${tag} · tab strip`, `${rows} row(s) — ${rows === 1 ? "single line" : "wraps at this width"}`);
 
     /* 2 — the bottom row is navigation. */
     const nav = await page.evaluate(() => {
@@ -163,12 +179,16 @@ const TABS = () => {
         `${tag} · "Alerts" is gone from the bottom nav`,
         nav.items.map((i) => i.label).join(" / ")
       );
+      /* PART 14 §3/§4 supersede this: the second slot is SEARCH (trending +
+         search), and Explore — event discovery — moved to the phone's top bar
+         on the feed. Both are still one tap away; which control they live on
+         changed. */
       ok(
         nav.items.some((i) => /home/i.test(i.label)) &&
-          nav.items.some((i) => /explore/i.test(i.label)) &&
+          nav.items.some((i) => /search/i.test(i.label)) &&
           nav.items.some((i) => /messages/i.test(i.label)) &&
           nav.items.some((i) => /profile|sign in/i.test(i.label)),
-        `${tag} · Home, Explore, Messages and Profile are still one tap away`,
+        `${tag} · Home, Search, Messages and Profile are still one tap away`,
         nav.items.map((i) => i.label).join(" / ")
       );
       const narrow = nav.items.filter((i) => i.w <= 0);

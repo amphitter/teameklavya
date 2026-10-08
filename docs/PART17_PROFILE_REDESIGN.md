@@ -65,12 +65,24 @@ neither string, then restores the user's previous values.
   whole photo, positioned so the overlap is ~half its height at every width — the harness
   asserts the overlap is between 25% and 65% of the avatar, so "the photo is the thing that
   crosses, not the whole block" is measured, not asserted by eye.
-* **Grid** (§6): `grid-cols-[auto_minmax(0,1fr)]` on phones and
-  `sm:grid-cols-[auto_minmax(0,1fr)_auto]` from 640px — avatar | identity | actions. The
-  identity column is `minmax(0,1fr)` so a long name shrinks the column instead of widening
-  the grid; `col-start`/`col-end`/`row-start` pairs are written explicitly (mixing
-  `col-span-2` with a breakpoint override leaves `grid-column-end: span 2` in place, which is
-  what produced a real span-into-the-actions bug during development).
+* **Grid** (§6): two tracks on phones, two at every width —
+  `grid-cols-[auto_minmax(0,1fr)]` — i.e. **avatar | the rest**, with the actions riding
+  above the identity in the overlap band from `sm` and in their own row on phones. Every
+  direct grid child has a track: avatar, actions, identity. The identity column is
+  `minmax(0,1fr)` so a long name shrinks the column instead of widening the grid;
+  `col-start`/`col-end`/`row-start` pairs are written explicitly (mixing `col-span-2` with a
+  breakpoint override leaves `grid-column-end: span 2` in place, which is what produced a
+  real span-into-the-actions bug during development).
+
+  **Alignment — the measurement that fixed the desktop header.** The first cut put the
+  identity in the column *beside the avatar* (`sm:col-start-2`), which in an 848px card
+  leaves 484px of usable width; the stats then wrapped onto two lines, showing `Events
+  Hosted` on its own row under `Events Attended`. Rather than paper over it with smaller
+  type, the layout now follows the reference: the identity occupies a **full-width row under
+  the avatar**, so the name, handle, metadata, stats and tabs all begin at the card's own
+  padding — one left edge, shared with the avatar — while the actions sit beside the avatar
+  in the overlap band. The stats are a five-column grid at every width, so the five numbers
+  are one row everywhere, 320px included.
 
 ### §7–§13 — Identity stack
 
@@ -82,19 +94,26 @@ metadata wraps (`break-words`, never `truncate`) so nothing is clipped at 320px.
 ### §10 — Actions
 
 Own profile: **Edit profile · ⋯**; another user: **Following · Message · ⋯**. The actions are
-rendered into whichever region applies — the third grid column from `sm` up (right-aligned,
-line-up with the name via matching top padding) and their own row under the handle on phones
+rendered into whichever region applies — beside the avatar, right-aligned to the card's own
+padding edge on the avatar's row from `sm` (the reference's arrangement) and their own row
+under the handle on phones
 (§22's order) — and the unused region is `display: none`, so exactly one copy is ever on
 screen. They may wrap internally; they can never reach the name, handle, metadata, bio, or
-tags.
+tags, and the harness checks those rectangles never intersect.
 
 ### §14–§15 — Stats
 
 Five real numbers in one row: `Posts · Followers · Following · Events Attended/Hosted`, with
 the reference's short spellings (`Attended`, `Hosted`) on phones and full labels from `sm`.
-No tiles, no gauges, no icons — number above label, separated by hairlines from `sm`. Every
-value comes from `GET /users/:id/profile → stats`; the harness compares the five on-screen
-numbers against that payload so the reference's illustrative figures can never leak in.
+No tiles, no gauges, no icons — number above label, hairlines between. Every value comes from
+`GET /users/:id/profile → stats`; the harness compares the five on-screen numbers against that
+payload so the reference's illustrative figures can never leak in.
+
+One real bug came out of measuring here: the row was `flex` with 24px of padding per cell,
+which needs ~620px and so wrapped inside the 484px identity column *at every desktop width* —
+visible in the 1920 screenshot as `Events Hosted` on its own line. It is now a five-column
+grid, and on phones the columns are flush (the padding would clip "Following" at 320px),
+which the harness checks cell by cell.
 
 ### §16–§17 — Tabs
 
@@ -171,12 +190,12 @@ Live app: QA backend on `:5999`, `next start` on `:3000`, seeded fresh (`qa-mobi
 | `docs/mobile-qa/check-part16-messaging.js` | **106 passed, 0 failed** (assertion corrected: the Message button is looked up as `:visible`, since the profile now renders the actions in two regions and only one is on screen) |
 | `docs/mobile-qa/ui-fixes.js` | **179 checks, 0 failures** (12 of them new: off-screen tabs must be reachable inside the strip's own scroller, labels unclipped, page overflow zero) |
 | `docs/mobile-qa/check-part16.js` | 163 passed, 0 failed |
+| `docs/mobile-qa/part14.js` | 320 passed, 0 failed |
 | `docs/mobile-qa/check-part16-avatar.js` | 23 passed, 0 failed |
-| `docs/mobile-qa/check-identity.js` | 23 avatar renders, 0 leaks |
+| `docs/mobile-qa/check-identity.js` | 26 avatar renders, 0 leaks |
 | `docs/mobile-qa/check-messages.js` | 130 passed, 0 failed |
 | `docs/mobile-qa/check-part15.js` | 218 passed, 0 failed |
 | `docs/mobile-qa/part9.js` | 98/98 |
-| `docs/mobile-qa/part14.js` | 320 passed, 0 failed |
 | frontend units | 26 / 15 / 38 / 17, 0 failed |
 | backend `part16-old-feed` · `part10-messages` · `part10-realtime` · `part14-feed-impressions` | 28 / 59 / 38 / 30, 0 failed |
 | `tsc --noEmit` + `next build` | clean |

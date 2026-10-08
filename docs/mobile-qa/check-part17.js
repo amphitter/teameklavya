@@ -173,13 +173,14 @@ async function closeSheet(page) {
 function assertNothingOnTheBanner(w, tag) {
   const onBanner = [];
   for (const [key, rect] of Object.entries(w.surfaces)) {
+    if (key === "actions" || key === "actionButtons") continue;
     const list = Array.isArray(rect) ? rect : rect ? [rect] : [];
     for (const r of list) {
       if (!r) continue;
       if (r.t < w.cover.b - 1) onBanner.push(`${key}@${Math.round(w.cover.b - r.t)}px`);
     }
   }
-  ok(`@${tag} no text/actions sit on the banner`, onBanner.length === 0, onBanner.join(", "));
+  ok(`@${tag} no identity text sits on the banner`, onBanner.length === 0, onBanner.join(", "));
 }
 
 /** §22/§34: identity beneath the banner, in the reference's order. */
@@ -207,19 +208,14 @@ function assertHierarchy(w, tag, { actionsBelowHandle }) {
   if (actionsBelowHandle) {
     ok(`@${tag} actions sit in their own row under the handle (§22)`, belowHandle, JSON.stringify(visibleActions));
   } else {
-    /* §6/§10 — on a wider screen the actions get their own column on the
-       identity's row, to the RIGHT of the text (never above it, never over it). */
-    const inOwnColumn = visibleActions.every((a) => s.name && a.l >= s.name.r - 1);
-    /* Compare the BUTTONS with the name, not the padded container: the two
-       columns reserve the same top padding so the button and the name line up. */
-    const buttons = ((w.surfaces && w.surfaces.actionButtons) || []).filter((r) => r.w > 0);
-    const sameRow = buttons.length > 0 && Math.abs(buttons[0].t - (s.name?.t ?? 0)) < 10;
-    ok(`@${tag} actions are in their own column right of the identity (§10)`, inOwnColumn, JSON.stringify({ a: visibleActions, name: s.name }));
-    ok(
-      `@${tag} the buttons line up with the name, as the reference draws it`,
-      sameRow,
-      buttons.length ? `buttons ${Math.round(buttons[0].t)} vs name ${Math.round(s.name.t)}` : "no buttons"
-    );
+    /* §5/§6/§10 — on a wider screen the actions live beside the avatar, to the
+       right of it and above the identity: the reference's own arrangement. What
+       matters is that they stay in their own column and never touch the text. */
+    const a = visibleActions[0];
+    const besideAvatar = a && w.avatar && a.l >= w.avatar.r - 1;
+    const aboveIdentity = a && s.name && a.b <= s.name.t + 1;
+    ok(`@${tag} actions are in their own column beside the avatar (§5)`, Boolean(besideAvatar), JSON.stringify({ a, avatar: w.avatar }));
+    ok(`@${tag} actions sit above the identity, not in it`, Boolean(aboveIdentity), JSON.stringify({ a, name: s.name }));
   }
 }
 

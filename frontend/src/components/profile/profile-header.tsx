@@ -232,17 +232,19 @@ export function ProfileHeader({
             ) : null}
           </div>
 
-          {/* Desktop action region (§5, §6, §10): its own third column,
-              right-aligned on the same row as the name — the reference's
-              arrangement — and padded down by the avatar's overlap so it lines
-              up with the identity rather than floating beside the photo. Below
-              `sm` it is not rendered here at all: the same node appears in the
-              identity column instead (§22). One breakpoint, so the buttons are
-              never on screen twice. */}
+          {/* Desktop action region (§5, §6, §10): its own column on the avatar's
+              row, right-aligned — the reference puts Edit profile/Share/⋯ beside
+              the photo, in the band the avatar overlaps. The brief's ban (§34) is
+              about the IDENTITY TEXT being drawn on the banner; buttons beside
+              the avatar are the reference's own arrangement, and the harness
+              asserts they never reach the name, handle, metadata, bio or tags.
+              Below `sm` this region is not rendered at all: the same node appears
+              in the identity column instead (§22), so the buttons are never on
+              screen twice. */}
           {actions ? (
             <div
               data-testid="profile-actions"
-              className="hidden min-w-0 flex-wrap items-center justify-end gap-2 sm:col-start-3 sm:row-start-1 sm:flex sm:max-w-[20rem] sm:pt-12"
+              className="hidden min-w-0 flex-wrap items-center justify-end gap-2 sm:col-start-2 sm:col-end-3 sm:row-start-1 sm:flex"
             >
               {actions}
             </div>
@@ -250,15 +252,17 @@ export function ProfileHeader({
         {/* (the grid stays open: the identity block belongs to it) */}
 
         {/* ── Identity (§7, §8, §9) ───────────────────────────────────────────
-            Two placements, one rule — never on the banner:
+            Row 2, full width, at the CARD'S OWN PADDING — which is what makes the
+            name, the @handle, the metadata and the stats below all share one left
+            edge with each other and with the avatar. That is the reference's
+            alignment, and it is the only line in the header that is not a magic
+            number: the card's padding is the card's padding.
 
-              phones   col 1, row 2   → the avatar owns row 1 alone, so the name
-                                        begins under the photo
-              sm and up col 2, row 1  → beside the avatar, as the reference draws
-                                        it, with `sm:pt-12` reserving the avatar's
-                                        overlap so the name still starts at the
-                                        banner's lower edge, not above it */}
-        <div className="col-start-1 col-end-3 row-start-2 min-w-0 sm:col-start-2 sm:col-end-3 sm:row-start-1 sm:pt-12">
+            Row 1 (above) is the overlap band: the avatar, and the action region
+            beside it. Both start BELOW the banner's content because the avatar is
+            lifted by half its height — so the first thing a reader reads is
+            already clear of the photo. */}
+        <div className="col-start-1 col-end-3 row-start-2 min-w-0">
           <h1 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[22px] font-bold leading-tight tracking-tight text-foreground sm:text-[28px]">
             <span className="min-w-0 break-words">
               {user.firstName} {user.lastName}
@@ -360,21 +364,28 @@ export function ProfileHeader({
               the name and the metadata at every width, with no magic offsets:
               the avatar's track is `auto`, so only a real grid sibling can
               follow it. */}
+        {/* Stats are a five-column GRID at every width. They used to be flex with
+            24px of padding per cell, which needs ~620px and wrapped onto two rows
+            in the 484px identity column — five numbers across is the reference's
+            shape, so the columns are fractional and the separators are hairlines.
+            On a 320px phone each cell gets ~50px and the padding would take 12 of
+            them, clipping "Following"; phones are therefore flush and only `sm`
+            and up add the reference's breathing room. */}
         {stats && (
-          <div data-testid="profile-stats" className="mt-5 grid grid-cols-5 gap-y-3 border-t border-border pt-4 sm:flex sm:flex-wrap sm:items-start sm:gap-0 sm:divide-x sm:divide-border">
-            <div className="min-w-0 sm:pr-6">
+          <div data-testid="profile-stats" className="mt-5 grid grid-cols-5 border-t border-border pt-4 sm:gap-x-5">
+            <div className="min-w-0">
               <Stat value={stats.posts} label="Posts" />
             </div>
-            <div className="min-w-0 sm:px-6">
+            <div className="min-w-0 border-l border-border/70 sm:pl-5">
               <Stat value={stats.followers} label="Followers" onClick={onOpenFollowers} />
             </div>
-            <div className="min-w-0 sm:px-6">
+            <div className="min-w-0 border-l border-border/70 sm:pl-5">
               <Stat value={stats.following} label="Following" onClick={onOpenFollowing} />
             </div>
-            <div className="min-w-0 sm:px-6">
+            <div className="min-w-0 border-l border-border/70 sm:pl-5">
               <Stat value={stats.eventsAttended} label="Events Attended" shortLabel="Attended" pluralize={false} />
             </div>
-            <div className="min-w-0 sm:px-6">
+            <div className="min-w-0 border-l border-border/70 sm:pl-5">
               <Stat value={stats.eventsCreated || 0} label="Events Hosted" shortLabel="Hosted" pluralize={false} />
             </div>
           </div>

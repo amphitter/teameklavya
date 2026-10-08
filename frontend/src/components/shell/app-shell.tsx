@@ -241,7 +241,18 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen bg-background">
+    /* `min-h-screen` is `min-height: 100vh` — and on a phone `100vh` is the
+       viewport WITH the browser's toolbars hidden, i.e. TALLER than what the
+       user can actually see. Every route whose content is exactly one visible
+       viewport tall (the conversation page is `h-[100dvh]`) was therefore
+       inside a box with a 100vh minimum: the document grew taller than the
+       screen, the page itself became scrollable, and the chat composer could
+       be pushed below the fold — the "chat doesn't fit the viewport" symptom.
+       `min-h-[100dvh]` tracks the dynamic viewport instead, so the minimum
+       matches the visible area. `min-h-screen` stays as the first declaration
+       as the fallback for engines without `dvh`; on desktop the two are
+       identical, so nothing changes there. */
+    <div className="min-h-screen min-h-[100dvh] bg-background">
       {/* ══ Desktop sidebar ═════════════════════════════════ */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-border bg-card lg:flex">
         <div className="flex h-14 items-center border-b border-border px-5">

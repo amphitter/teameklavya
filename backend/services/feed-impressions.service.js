@@ -115,10 +115,88 @@ async function setDismissed(viewerId, postId, on) {
   return { dismissed: true };
 }
 
+/**
+ * OLD FEED candidates (Part 16 §20, §22, §33).
+ *
+ * The fresh feed keeps its own policy — this is the *explicit* historical
+ * query: the posts this viewer has already SEEN or LIKED, most recently
+ * touched first, MINUS anything they explicitly dismissed (§21). Dismissal is
+ * read first and applied as a hard exclusion, so a dismissed post can never
+ * come back through the side door.
+ *
+ * "Seen" and "liked" are two different stores, and this has to read both:
+ *
+ *   PostImpression {user, kind, at}          → what the viewer read
+ *   Reaction       {user, type, createdAt}   → what the viewer liked
+ *
+ * Nothing ever writes a `kind: "liked"` impression row — a like is a Reaction —
+ * so reading impressions alone would silently drop every post the viewer liked
+ * without opening. Both queries are indexed ranges truncated to the same
+ * window the feed itself uses (EXCLUSION_WINDOW), and they are merged in
+ * memory over that bounded window rather than sorted unbounded.
+ *
+ * The ids are returned, not the posts: the controller hydrates them through
+ * the repository, which applies every visibility rule (§19).
+ */
+async function findSeenCandidates({ viewerId, cursor = null, limit = 10 }) {
+  if (!viewerId) return { ids: [], hasMore: false, nextCursor: null };
+
+  const [dismissedRows, seenRows, likedRows] = await Promise.all([
+    PostImpression.find({ user: viewerId, kind: "dismissed" }).select("post").lean(),
+    PostImpression.find({ user: viewerId, kind: { $ne: "dismissed" } })
+      .sort({ at: -1 })
+      .limit(EXCLUSION_WINDOW)
+      .select("post at")
+      .lean(),
+    Reaction.find({ user: viewerId, type: "like" })
+      .sort({ createdAt: -1 })
+      .limit(EXCLUSION_WINDOW)
+      .select("post createdAt")
+      .lean(),
+  ]);
+
+  const skip = new Set(dismissedRows.map((r) => String(r.post)));
+
+  /* One entry per post, keeping the NEWEST signal for it: a post that was read
+     and then liked belongs at the position of the like, not the read. */
+  const merged = new Map();
+  const put = (post, when) => {
+    const id = String(post);
+    const at = new Date(when).getTime();
+    const current = merged.get(id);
+    if (!current || at > current.at) merged.set(id, { id, at });
+  };
+  for (const r of likedRows) put(r.post, r.createdAt);
+  for (const r of seenRows) put(r.post, r.at);
+
+  let items = [...merged.values()].filter((it) => !skip.has(it.id));
+  items.sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1));
+
+  /* Cursor = "<ISO at>|<postId>" — the same shape the fresh feed's cursor has,
+     so the two paginate alike from the client's point of view. */
+  if (cursor) {
+    const [at, id] = String(cursor).split("|");
+    const when = new Date(at).getTime();
+    if (!Number.isNaN(when) && id) {
+      items = items.filter((it) => it.at < when || (it.at === when && it.id < id));
+    }
+  }
+
+  const hasMore = items.length > limit;
+  const page = hasMore ? items.slice(0, limit) : items;
+  const last = page[page.length - 1];
+  return {
+    ids: page.map((it) => it.id),
+    hasMore,
+    nextCursor: hasMore && last ? `${new Date(last.at).toISOString()}|${last.id}` : null,
+  };
+}
+
 module.exports = {
   EXCLUSION_WINDOW,
   MAX_BATCH,
   loadImpressions,
   recordImpressions,
   setDismissed,
+  findSeenCandidates,
 };

@@ -62,7 +62,10 @@ export default function ConversationPage() {
       /* A phone chat has NO shell chrome at all: the top bar is desktop-only
        * and this route hides the bottom nav, so the thread owns the whole
        * viewport. From lg the header returns and is subtracted again. */
-      className="mx-auto flex h-[100vh] h-[100dvh] w-full max-w-[1200px] flex-col overflow-hidden 2xl:max-w-[1440px] lg:h-[calc(100dvh-3.5rem)]"
+      /* `overscroll-none` stops iOS rubber-banding the whole document sideways
+         or vertically behind the chat: the only thing that should ever move is
+         the message history, which carries its own `overscroll-contain`. */
+      className="mx-auto flex h-[100vh] h-[100dvh] w-full max-w-[1200px] flex-col overflow-hidden overscroll-none 2xl:max-w-[1440px] lg:h-[calc(100dvh-3.5rem)]"
     >
       <div className="flex min-h-0 flex-1 overflow-hidden bg-surface-container-lowest lg:my-3 lg:rounded-2xl lg:border lg:border-outline-variant lg:elevation-card">
         {/* Desktop only: the inbox stays visible beside the open thread. */}

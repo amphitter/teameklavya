@@ -148,6 +148,34 @@ exports.getFeed = async (req, res) => {
     const cursor = req.query.cursor ? String(req.query.cursor) : null;
     const viewerId = req.user?.id || null;
 
+    /* ── OLD FEED — mode=old (Part 16 §15–§33) ──────────────────────────
+     * The fresh feed is unchanged: it still excludes seen and liked posts and
+     * still soft-demotes impressions (§23–§25). This mode is the explicit
+     * historical query the UI asks for only once the fresh stream is spent,
+     * so "old" content can never be interleaved with new content.
+     *
+     * It is deliberately NOT implemented by relaxing the exclusions above —
+     * that would put already-seen posts back into the fresh ranking (§33).
+     */
+    const mode = String(req.query.mode || "fresh");
+    if (mode === "old") {
+      if (!viewerId) {
+        return res.json({ success: true, mode: "old", posts: [], page, hasMore: false, nextCursor: null });
+      }
+      const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
+      const { ids, hasMore, nextCursor } = await FeedImpressions.findSeenCandidates({ viewerId, cursor, limit });
+      /* One hydration for the page; the repository applies visibility, so a
+         post that has since been deleted, archived or made private simply
+         does not come back (§19) and the rest keep the impression order. */
+      const hydrated = ids.length ? await PostRepository.hydratePostsForViewer(ids, viewerId) : [];
+      const byId = new Map(hydrated.map((p) => [String(p._id), p]));
+      const posts = ids
+        .map((id) => byId.get(String(id)))
+        .filter(Boolean)
+        .map((p) => sanitizeEvent(p));
+      return res.json({ success: true, mode: "old", posts, page, hasMore, nextCursor, tab });
+    }
+
     /* ── events / communities: real post references, chronological ── */
     if (tab === "events" || tab === "communities") {
       const ctx = await PostRepository.getFeedContext(viewerId);
@@ -340,6 +368,15 @@ exports.getFeed = async (req, res) => {
     const slice = scored.slice(offset, offset + limit);
 
     const enriched = (await attachCounts(slice.map((it) => it.post), viewerId)).map(sanitizeEvent);
+    /* Part 16 §15–§26 — the fresh stream already falls back on already-seen
+       content, it just ranks it below everything unseen (Part 14 §23). So the
+       UI can draw the OLD FEED boundary exactly where that demotion starts
+       instead of listing the same cards a second time. `seenByMe` is that
+       fact, straight from the ranking pass — no extra query, no guessing. */
+    enriched.forEach((post, i) => {
+      const flag = slice[i]?.seenBefore;
+      if (flag !== undefined) post.seenByMe = Boolean(flag);
+    });
     const last = slice[slice.length - 1];
 
     res.json({

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { CalendarSearch, Sparkles, UserPlus, Users } from "lucide-react";
+import { CalendarSearch, CheckCheck, Sparkles, UserPlus, Users } from "lucide-react";
 import { api } from "@/utils/api";
 import { Button } from "@/components/ui/button";
 import { CreatePost } from "@/components/feed/create-post";
@@ -29,6 +29,9 @@ type Tab = "for-you" | "following" | "events" | "communities";
 /** §6 — "Feed should remember the selected filter during navigation." */
 const TAB_KEY = "eventhub.feed.tab";
 const PAGE_SIZE = 10;
+/* §22/§29 — the historical section pages in small batches too; it is a
+   fallback, not a second full feed. */
+const OLD_PAGE_SIZE = 10;
 
 /** The user's live-quiz on an ongoing event (drives leaderboard widgets). */
 interface LiveQuizRef {
@@ -50,6 +53,35 @@ interface LiveBoard {
  * Order: greeting + live badge → search (phone) → the user's LIVE events →
  * live leaderboard snapshot → stories → tabs → composer → feed.
  */
+/**
+ * The FRESH → OLD boundary (Part 16 §16, §23, §26).
+ *
+ * Lightweight by design: one strip, one line of copy, one heading. No card, no
+ * illustration, no animation — it exists to make the change of nature of the
+ * content below it unmistakable.
+ */
+function OldFeedBoundary() {
+  return (
+    <div className="pt-3" role="separator" aria-label="End of new posts">
+      <div className="flex items-center gap-3">
+        <span className="h-px flex-1 bg-border" />
+        <span className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
+          <CheckCheck className="h-3.5 w-3.5" /> You&apos;re all caught up
+        </span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      <p className="mt-2 text-center text-xs text-muted-foreground">
+        New posts will appear at the top. Everything below is from your history.
+      </p>
+      <h2 className="mt-4 flex items-center gap-3 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        Old feed
+        <span className="h-px flex-1 bg-border" />
+      </h2>
+    </div>
+  );
+}
+
 export function FeedView() {
   const { user, ready } = useSessionUser();
   const { openStory } = useComposer();
@@ -278,6 +310,64 @@ export function FeedView() {
     return out;
   }, [posts, tab, discovery]);
 
+  /* ── OLD FEED (Part 16 §15–§33) ─────────────────────────────────────────
+   * Two rules decide this block, and both are structural rather than cosmetic:
+   *
+   *  1. it exists ONLY once the fresh stream is spent (`enabled` below), so old
+   *     content can never be interleaved with new content (§18), and
+   *  2. it is a SEPARATE query mode (`mode=old`) — the fresh query keeps its
+   *     exclusions untouched (§33), so this cannot degrade the ranking by
+   *     simply letting seen posts back in.
+   *
+   * The server decides what "old" means (seen or liked, minus dismissed, minus
+   * anything the viewer may no longer see) and paginates it with a cursor.
+   */
+  /* Where the fresh stream stops being new, and whether "old" needs to be
+     fetched at all. `boundaryIndex` is the first card the server demoted; if
+     every card is still new, the boundary only exists once the stream is
+     exhausted (and then it is drawn after the last card). */
+  const boundaryIndex = useMemo(() => {
+    if (tab !== "for-you") return -1;
+    return stream.findIndex((item) => item.kind === "post" && (item.post as FeedPostData & { seenByMe?: boolean }).seenByMe);
+  }, [stream, tab]);
+  const freshExhausted = !feed.isLoading && !feed.error && !feed.hasMore;
+  const oldEnabled = tab === "for-you" && freshExhausted && boundaryIndex >= 0;
+  const oldFeed = useInfiniteQuery<FeedPostData>(
+    ["feed", "old"],
+    (cursor) => {
+      const p = new URLSearchParams({ mode: "old", limit: String(OLD_PAGE_SIZE) });
+      if (cursor) p.set("cursor", cursor);
+      return `/posts/feed?${p.toString()}`;
+    },
+    {
+      enabled: oldEnabled,
+      mapPage: (raw) => ({
+        items: (raw?.posts ?? []) as FeedPostData[],
+        nextCursor: raw?.nextCursor ?? null,
+        hasMore: Boolean(raw?.hasMore),
+      }),
+    }
+  );
+  const oldPosts = useMemo(() => {
+    const gone = new Set(removed);
+    return oldFeed.items.filter((p) => !gone.has(p._id));
+  }, [oldFeed.items, removed]);
+
+  /* The boundary is drawn INSIDE the stream, at the first demoted card: the
+     demoted cards below it *are* the old feed, so nothing is listed twice.
+     `mode=old` only adds history older than the current pool (§22), and it is
+     filtered against everything already on screen for the same reason.
+     It waits for `freshExhausted` because its own words are "you're all caught
+     up" — showing that while pages are still loading would be a lie. */
+  const boundaryAt = useMemo(
+    () => (tab === "for-you" && freshExhausted ? boundaryIndex : -1),
+    [tab, freshExhausted, boundaryIndex]
+  );
+  const extraOldPosts = useMemo(() => {
+    const shown = new Set(stream.filter((i) => i.kind === "post").map((i) => (i as { post: FeedPostData }).post._id));
+    return oldPosts.filter((p) => !shown.has(p._id));
+  }, [oldPosts, stream]);
+
   const onCreated = (post: FeedPostData) => {
     setCreated((c) => [post, ...c]);
     window.scrollTo({ top: topOfFeed.current, behavior: "smooth" });
@@ -495,7 +585,7 @@ export function FeedView() {
                   Retry
                 </Button>
               </div>
-            ) : posts.length === 0 ? (
+            ) : posts.length === 0 && !oldEnabled ? (
               tab === "following" ? (
                 <EmptyBlock
                   icon={UserPlus}
@@ -521,25 +611,26 @@ export function FeedView() {
               )
             ) : (
               <>
-                {stream.map((item) =>
-                  item.kind === "post" ? (
-                    <FeedPost
-                      key={item.key}
-                      post={item.post}
-                      onDeleted={onDeleted}
-                      onArchived={onArchived}
-                      onDismissed={onDismissed}
-                    />
-                  ) : (
-                    <DiscoveryCard
-                      key={item.key}
-                      kind={item.kind}
-                      events={discovery.events}
-                      people={discovery.people}
-                      communities={discovery.communities}
-                    />
-                  )
-                )}
+                {stream.map((item, i) => (
+                  <Fragment key={item.key}>
+                    {boundaryAt === i ? <OldFeedBoundary /> : null}
+                    {item.kind === "post" ? (
+                      <FeedPost
+                        post={item.post}
+                        onDeleted={onDeleted}
+                        onArchived={onArchived}
+                        onDismissed={onDismissed}
+                      />
+                    ) : (
+                      <DiscoveryCard
+                        kind={item.kind}
+                        events={discovery.events}
+                        people={discovery.people}
+                        communities={discovery.communities}
+                      />
+                    )}
+                  </Fragment>
+                ))}
                 {feed.hasMore && (
                   <div className="pt-1 text-center">
                     <Button variant="outline" onClick={() => feed.fetchNextPage()} disabled={feed.isFetchingMore}>
@@ -547,10 +638,38 @@ export function FeedView() {
                     </Button>
                   </div>
                 )}
-                {!feed.hasMore && (
+                {!feed.hasMore && !oldEnabled && (
                   <p className="flex items-center justify-center gap-1.5 pt-2 pb-4 text-xs text-muted-foreground">
                     <Users className="h-3.5 w-3.5" /> You&apos;re all caught up
                   </p>
+                )}
+
+                {/* ── The fetched history, when there is any (Part 16 §22) ──
+                    Only reachable once the fresh stream is exhausted; the
+                    cards the demotion already put on screen are filtered out
+                    above, so this can never repeat the feed. */}
+                {oldEnabled && extraOldPosts.length > 0 && (
+                  <section aria-label="More from your history" className="pt-3">
+                    {/* No second heading and no second strip: this is the same
+                        section continuing older than the pool the ranking held,
+                        and repeating the sign would read as a new section. */}
+                    {extraOldPosts.map((post) => (
+                      <div key={`old-more-${post._id}`} className="pt-4">
+                        <FeedPost post={post} onDeleted={onDeleted} onArchived={onArchived} onDismissed={onDismissed} />
+                      </div>
+                    ))}
+                    {oldFeed.hasMore ? (
+                      <div className="pt-1 text-center">
+                        <Button variant="outline" onClick={() => oldFeed.fetchNextPage()} disabled={oldFeed.isFetchingMore}>
+                          {oldFeed.isFetchingMore ? "Loading…" : "Load more from Old feed"}
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="pt-3 pb-4 text-center text-xs text-muted-foreground">
+                        That&apos;s everything you&apos;ve seen so far.
+                      </p>
+                    )}
+                  </section>
                 )}
               </>
             )}

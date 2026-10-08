@@ -281,3 +281,43 @@ success, fails the suite instead of shipping.
 * `backend/controllers/post.controller.js` — `mode=old`, `seenByMe`
 * `backend/tests/part16-old-feed.js` — the server contract (self-booting, in-memory Mongo)
 * `docs/mobile-qa/check-part16.js` · `check-part16-profile.js` · `check-part16-avatar.js` · `check-part16-oldfeed-api.js` · `check-identity.js`
+
+---
+
+## §B update — history is the fallback when the fresh stream is empty
+
+**Rule change.** `mode=old` was only asked for when the fresh stream contained a demoted
+(already-seen) card to draw the boundary at (`boundaryIndex >= 0`). A pool with **nothing
+fresh at all** therefore never fetched history and fell through to the onboarding panel —
+"Your event story starts here" — with the viewer's own history one query away and no way to
+reach it. It hit hardest for the most active user: liked posts and dismissed posts are
+HARD-excluded from the fresh query (only *seen* posts are demoted), so someone who liked
+everything is exactly who gets an empty fresh stream.
+
+The gate is now:
+
+```
+oldEnabled = for-you  &&  fresh exhausted  &&  (a boundary to draw  ||  nothing fresh at all)
+```
+
+Yes — liked posts appear, and that is the intended reading of the rule: a liked post is never
+in FRESH (unchanged), and OLD FEED is precisely where it may surface. Both queries keep their
+own policy; this changes **when** `mode=old` is requested, never what `mode=fresh` returns.
+
+**Where the strip goes.** The "✓ You're all caught up / OLD FEED" boundary normally lives
+*inside* the stream at the first demoted card. In a history-only feed there is no such card,
+so the same strip is drawn above the history section (same copy, same weight — §89).
+
+**Five states, one decision.** The render used to be a chain of negated conditions. It is now
+`resolveFeedSections()` in `frontend/src/lib/feed-sections.ts` — a pure function covering:
+fresh loading · fresh error · fresh posts · nothing fresh + history in flight (skeletons, so a
+viewer with a full history is never told their feed is empty while it loads) · nothing fresh +
+history · nothing fresh and nothing in history (a genuinely new account keeps the onboarding
+panel). Verified by compiling the module and running 14 cases against it, including the bug
+case and the cached-history case.
+
+**Deliberately not changed:** history stays cursor-paginated at 10 per page with an explicit
+"Load more from Old feed"; the history pool stays bounded by `EXCLUSION_WINDOW` (400), the same
+window the feed itself uses, so an empty fresh stream does not turn the Old Feed into an
+unbounded archive walk (§88); and a history fetch that fails degrades to the ordinary empty
+state rather than an error panel — a fallback that cannot load must not take the screen down.

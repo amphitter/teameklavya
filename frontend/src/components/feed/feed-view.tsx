@@ -24,6 +24,7 @@ import { useSessionUser } from "@/components/shell/use-session-user";
 import type { FeedPostData } from "@/components/feed/types";
 import { cn } from "@/lib/utils";
 import { useInfiniteQuery, useQuery } from "@/lib/query";
+import { resolveFeedSections, needsBoundaryAboveHistory } from "@/lib/feed-sections";
 
 type Tab = "for-you" | "following" | "events" | "communities";
 /** §6 — "Feed should remember the selected filter during navigation." */
@@ -331,7 +332,19 @@ export function FeedView() {
     return stream.findIndex((item) => item.kind === "post" && (item.post as FeedPostData & { seenByMe?: boolean }).seenByMe);
   }, [stream, tab]);
   const freshExhausted = !feed.isLoading && !feed.error && !feed.hasMore;
-  const oldEnabled = tab === "for-you" && freshExhausted && boundaryIndex >= 0;
+  /* ── WHEN HISTORY LOADS (Part 16 §B, updated) ───────────────────────────
+   * History used to need a demoted card to draw its boundary at
+   * (`boundaryIndex >= 0`). That silently locked it out of the case it is most
+   * needed in: a pool with nothing new left. Everything seen or liked, nothing
+   * fresh to rank — `boundaryIndex` stayed -1, the query never ran, and the
+   * viewer got the onboarding panel with their own history unreachable.
+   *
+   * Now the gate is "the fresh stream is spent AND (there is a boundary to draw
+   * OR there is nothing fresh at all)". Both roads lead to the same place:
+   * seen and liked posts stay out of the fresh query (they always did — this
+   * changes WHEN `mode=old` is asked for, never what `mode=fresh` returns). */
+  const freshEmpty = posts.length === 0;
+  const oldEnabled = tab === "for-you" && freshExhausted && (boundaryIndex >= 0 || freshEmpty);
   const oldFeed = useInfiniteQuery<FeedPostData>(
     ["feed", "old"],
     (cursor) => {
@@ -367,6 +380,24 @@ export function FeedView() {
     const shown = new Set(stream.filter((i) => i.kind === "post").map((i) => (i as { post: FeedPostData }).post._id));
     return oldPosts.filter((p) => !shown.has(p._id));
   }, [oldPosts, stream]);
+
+  /* Which of the feed's five states we are in — one decision, in lib/feed-sections,
+     so the render below is a switch rather than a chain of negations. */
+  const section = resolveFeedSections({
+    freshLoading: feed.isLoading,
+    freshError: Boolean(feed.error),
+    freshCount: posts.length,
+    historyEnabled: oldEnabled,
+    historyLoading: oldFeed.isLoading,
+    historyCount: extraOldPosts.length,
+  });
+  /* In the history-only view there is no demoted card to hang the boundary on,
+     so it is drawn above the section instead. */
+  const boundaryAboveHistory = needsBoundaryAboveHistory({
+    section,
+    boundaryIndex,
+    historyCount: extraOldPosts.length,
+  });
 
   const onCreated = (post: FeedPostData) => {
     setCreated((c) => [post, ...c]);
@@ -572,12 +603,15 @@ export function FeedView() {
             />
 
             {/* Feed */}
-            {feed.isLoading ? (
+            {section === "fresh-loading" || section === "history-loading" ? (
+              /* Same skeletons for both: the second one is the moment a viewer
+                 with a full history would otherwise be told, wrongly, that
+                 their feed is empty. */
               <div className="space-y-5">
                 <PostSkeleton />
                 <PostSkeleton />
               </div>
-            ) : feed.error ? (
+            ) : section === "fresh-error" ? (
               <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-6 py-12 text-center">
                 <p className="text-base font-semibold text-foreground">Something went wrong</p>
                 <p className="mt-1 text-sm text-muted-foreground">The feed couldn&apos;t load. Give it another try.</p>
@@ -585,7 +619,7 @@ export function FeedView() {
                   Retry
                 </Button>
               </div>
-            ) : posts.length === 0 && !oldEnabled ? (
+            ) : section === "empty" ? (
               tab === "following" ? (
                 <EmptyBlock
                   icon={UserPlus}
@@ -647,7 +681,14 @@ export function FeedView() {
                 {/* ── The fetched history, when there is any (Part 16 §22) ──
                     Only reachable once the fresh stream is exhausted; the
                     cards the demotion already put on screen are filtered out
-                    above, so this can never repeat the feed. */}
+                    above, so this can never repeat the feed.
+
+                    When the stream above is EMPTY, this is the whole feed, so
+                    the fresh → old boundary is drawn here: the viewer is
+                    looking at their history, and the strip says so. It is the
+                    same strip, in the same words — §89 keeps the title no
+                    heavier than the feed it introduces. */}
+                {boundaryAboveHistory ? <OldFeedBoundary /> : null}
                 {oldEnabled && extraOldPosts.length > 0 && (
                   <section aria-label="More from your history" className="pt-3">
                     {/* No second heading and no second strip: this is the same

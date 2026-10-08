@@ -335,7 +335,18 @@ export function ThreadView({
   return (
     <div
       ref={scrollRef}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 sm:px-4"
+      /* THE MESSAGE COLUMN'S SIDE GUTTERS.
+       *
+       * Every row is [rail][gap][bubble]: the rail is the 28px avatar column
+       * on a received row and an invisible 28px spacer on an own row, with a
+       * 6px gap. So ONE padding value fixes BOTH gutters:
+       *     gutter = padding + 28 + 6
+       * 9px is chosen so the phone gutter measures exactly 43px — the value
+       * asked for — and it is identical on the left and on the right, so the
+       * column is mirrored rather than offset to one side. From sm there is
+       * room for the roomier 16px (50px gutters). Previously the phone value
+       * was 12px, i.e. a 46px gutter on both sides. */
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[9px] py-2 sm:px-4"
       style={{ WebkitOverflowScrolling: "touch" }}
       data-testid="thread-scroll"
     >

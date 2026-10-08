@@ -234,7 +234,20 @@ export function ConversationList({
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    /* `min-w-0` on the root is LOAD-BEARING, not decoration.
+     *
+     * This column is a flex ITEM of the page's row. Without it the automatic
+     * minimum size of a flex item is its min-content width — and a
+     * conversation row contains a `truncate` (nowrap) preview line, whose
+     * min-content width is the whole sentence. The list therefore laid itself
+     * out at ~1321px inside a page that is `overflow-hidden`, so on a phone
+     * the preview text, the timestamp, the unread badge, the search field and
+     * the "New team" button were all laid out PAST the right edge and simply
+     * clipped: the inbox had no right margin at all. Measured at 320px before
+     * this fix: list 1321px wide, preview span 1237px, search input 1309px.
+     * With `min-w-0` the rows are sized by the viewport and `truncate` finally
+     * truncates instead of being clipped. */
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Header: title + search. No giant hero, no stats (§3). */}
       <div className="shrink-0 border-b border-outline-variant px-3 pb-2 pt-3">
         <div className="mb-2 flex items-center justify-between gap-2">
@@ -317,7 +330,7 @@ export function ConversationList({
       </div>
 
       {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" onScroll={handleScroll}>
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain" onScroll={handleScroll}>
         {searching ? (
           <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-on-surface-variant">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Searching…

@@ -238,7 +238,17 @@ export function ThreadPanel({
     <>
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`Conversation with ${name}`}>
       {/* ── Header (§2) ───────────────────────────────────────────────── */}
-      <header className="flex shrink-0 items-center gap-2 border-b border-outline-variant bg-surface-container-lowest px-2 py-1.5 sm:px-3">
+      {/* On a phone this is the FIRST row on the screen — the shell's top bar
+          is desktop-only and the bottom nav is hidden inside a conversation —
+          so it owns the top edge. It pads itself clear of a notch/status bar
+          the same way the feed's top bar does, and that padding is added to the
+          6px it already had so the row's height is unchanged when there is no
+          inset. Everything in the row keeps its 44px target and the name column
+          truncates, so the row cannot grow or overflow at any phone width. */}
+      <header
+        className="flex shrink-0 items-center gap-2 border-b border-outline-variant bg-surface-container-lowest px-2 py-1.5 sm:px-3"
+        style={{ paddingTop: "calc(0.375rem + env(safe-area-inset-top, 0px))" }}
+      >
         <button
           type="button"
           onClick={onBack}

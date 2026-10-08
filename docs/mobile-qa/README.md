@@ -113,3 +113,35 @@ tab invisible on every phone — and measures the stat row, the media tiles and 
 Archive menu item at each width. Tabs are hit-tested after `scrollIntoView`,
 because on a 320x568 screen content can sit under the fixed bottom nav at
 scroll-top, which is normal and not a defect.
+
+## Messages — the inbox clamp and the two gutters
+
+```bash
+cd /var/tmp/pw
+QA_EMAIL=ana<stamp>@qa.com node check-messages.js "$(cat /var/tmp/qa-ready.json)"
+```
+
+Covers the phone widths 320/360/375/390/412/430 and desktop 1280, and asserts:
+
+1. the conversation list is clamped to the viewport (root width = viewport;
+   preview text and search field end inside it; every tab — All, Teams,
+   Archived — is checked, because they all share that one list);
+2. the message column's two gutters are equal and equal the intended value:
+   43px on phones (9px of scroller padding + the 28px avatar rail + the 6px
+   gap), 50px from `sm`;
+3. the thread header keeps its height (≤64px), owns the top edge, keeps its
+   44px targets and its notch padding, and cannot be resized by a long name;
+4. nothing anywhere on either screen is wider than the viewport — the page's
+   `overflow-hidden` is exactly what used to hide the bug, so this probe walks
+   every element instead of trusting `document.scrollWidth`.
+
+`probe-inbox.js` (this directory is disposable; the durable copy is this file)
+prints the ancestor chain of a conversation row — that is the measurement that
+found the missing `min-w-0`. `before-after.js` reproduces the old layout next to
+the new one in the SAME page (restore `min-width:auto` on the list root and put
+a long preview back into row 1) and writes
+`qa/profile-audit/msg-inbox-{320,390}-{before,after}.png`.
+
+The harness ends by POSTing one message from ben to ana: opening the thread
+marks it read, and `part9.js` §32 asserts the bottom nav's Messages badge, so the
+fixture has to be left unread.

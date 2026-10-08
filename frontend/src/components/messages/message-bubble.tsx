@@ -296,7 +296,33 @@ export const MessageBubble = memo(function MessageBubble({
           ) : null}
         </div>
 
-        {mine ? <div className="w-7 shrink-0" /> : null}
+        {/* Sent rows and the right edge (Part 15).
+         *
+         * A row is [rail][gap][bubble], with a 28px rail and a 6px gap. On a
+         * RECEIVED row the rail holds the avatar, so the bubble starting 34px
+         * in is correct. On a SENT row nothing occupies the rail — it was a
+         * phantom spacer — and it was holding every sent bubble 28px away from
+         * the edge on top of the scroller's own padding: 9 + 28 + 6 = 43px of
+         * dead space at the right of EVERY content type (text, emoji, image,
+         * shared post, long text, grouped runs). At 2.2-2.4x device pixel
+         * ratio that is the ~95px "huge gap" seen on a phone.
+         *
+         * Below `lg` the rail is therefore removed entirely. Shrinking it is
+         * not enough: the row is a `gap-1.5` flex container, so a spacer of
+         * ANY width adds its own width on top of that 6px gap (a 6px spacer
+         * measured 21px, not 15px). With the phantom item gone, what is left
+         * on the right of a sent bubble is the message column's own safe
+         * padding — 16px — which is exactly the value Part 15 asks for, and
+         * the same padding the received side and the desktop column use.
+         *
+         * `lg`, not `sm`: below 1024px the thread is a single full-width
+         * column (the shell's inbox pane is `lg:flex`), so 768px or 688px is
+         * the same mobile layout with more room — its sent bubble belongs at
+         * the safe padding too. From `lg` up the original 28px rail is
+         * untouched, so the desktop two-pane layout is byte-for-byte what it
+         * was. The bubble's own `max-w-[78%]` is unchanged: it resolves
+         * against the row, not the rail, so no bubble changes size or style. */}
+        {mine ? <div className="hidden w-7 shrink-0 lg:block" /> : null}
       </div>
     </>
   );

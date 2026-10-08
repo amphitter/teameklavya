@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "check:syntax": "node scripts/parse-check.js",
+    "prebuild": "node scripts/parse-check.js",
     "build": "next build",
     "start": "next start"
   },

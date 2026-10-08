@@ -136,6 +136,12 @@ const OVERFLOW_PROBE = () => {
         padRight: cs?.paddingRight,
         ownGutter: own.length ? Math.round(vw - Math.max(...own.map((b) => b.right))) : null,
         recvGutter: recv.length ? Math.round(Math.min(...recv.map((b) => b.left))) : null,
+        recvAvatarLeft: (() => {
+          const row = [...document.querySelectorAll('[data-mine="false"]')].pop();
+          const rail = row?.querySelector(":scope > div:first-child");
+          const b = rail?.getBoundingClientRect();
+          return b ? Math.round(b.left) : null;
+        })(),
         headerH: hr ? Math.round(hr.height) : null,
         headerTop: hr ? Math.round(hr.top) : null,
         headerPadTop: hdr ? hdr.getAttribute("style") || "" : null,
@@ -147,11 +153,19 @@ const OVERFLOW_PROBE = () => {
         scrollW: scroller ? scroller.scrollWidth : null,
       };
     });
-    const expect = W >= 640 ? 50 : 43;
-    ok(t.ownGutter === expect, `${W}: own-bubble right gutter ${t.ownGutter} (expected ${expect})`);
-    ok(t.recvGutter === expect, `${W}: received-bubble left gutter ${t.recvGutter} (expected ${expect})`);
-    ok(t.ownGutter === t.recvGutter, `${W}: the two gutters mirror each other`);
-    ok(["9px", "16px"].includes(t.padLeft) && t.padLeft === t.padRight, `${W}: scroller padding is symmetric (${t.padLeft}/${t.padRight})`);
+    /* Part 15 superseded these numbers: the message column's safe padding is
+       now 16px on every width below lg (it was 43 on phones, which put a dead
+       strip to the right of every sent bubble), and the sent rail is gone
+       below lg. Desktop (lg+) is untouched at 50. */
+    const expect = W >= 1024 ? 50 : 16;
+    ok(t.ownGutter === expect, `${W}: sent bubble's right edge is the safe padding (${t.ownGutter}, expected ${expect})`);
+    /* The received side keeps its avatar, so its BUBBLE sits one rail + one gap
+       further in — that offset is the design. The invariant that has to hold is
+       that the received AVATAR starts on the same safe padding, i.e. both sides
+       begin and end 16px from the container edge. */
+    ok(t.recvAvatarLeft === expect, `${W}: received avatar starts on the same safe padding (${t.recvAvatarLeft}, expected ${expect})`);
+    ok(t.ownGutter === t.recvAvatarLeft, `${W}: the two sides mirror each other`);
+    ok(t.padLeft === "16px" && t.padLeft === t.padRight, `${W}: scroller padding is the symmetric 16px safe padding (${t.padLeft}/${t.padRight})`);
     ok(t.scrollerW === W && t.scrollW === W, `${W}: thread scroller is exactly the viewport wide (${t.scrollerW}/${t.scrollW})`);
     ok(t.headerH !== null && t.headerH <= 64, `${W}: thread header height ${t.headerH} ≤ 64`);
     ok(t.headerTop === 0, `${W}: thread header owns the top edge (top ${t.headerTop})`);

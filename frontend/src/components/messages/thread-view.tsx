@@ -335,18 +335,23 @@ export function ThreadView({
   return (
     <div
       ref={scrollRef}
-      /* THE MESSAGE COLUMN'S SIDE GUTTERS.
+      /* THE SAFE PADDING OF THE MESSAGE COLUMN (Part 15 §5).
        *
-       * Every row is [rail][gap][bubble]: the rail is the 28px avatar column
-       * on a received row and an invisible 28px spacer on an own row, with a
-       * 6px gap. So ONE padding value fixes BOTH gutters:
-       *     gutter = padding + 28 + 6
-       * 9px is chosen so the phone gutter measures exactly 43px — the value
-       * asked for — and it is identical on the left and on the right, so the
-       * column is mirrored rather than offset to one side. From sm there is
-       * room for the roomier 16px (50px gutters). Previously the phone value
-       * was 12px, i.e. a 46px gutter on both sides. */
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[9px] py-2 sm:px-4"
+       * One value, 16px, on every width — it is the canonical EventHub
+       * spacing step and it is what the desktop column already used, so the
+       * desktop (lg+) column's output is unchanged.
+       *
+       * What it means per side (the row structure is [rail][gap][bubble], with
+       * a 28px rail and a 6px gap):
+       *   • sent   — the rail is gone on phones (see message-bubble.tsx), so
+       *              the bubble's right edge is exactly the safe padding, 16px
+       *              from the viewport edge, on every phone width.
+       *   • received — the rail holds the avatar, so the avatar starts at the
+       *              16px padding and the bubble 34px further in.
+       * The previous 9px phone value (chosen when both gutters were meant to
+       * measure 43px) put the sent bubble 43px from the edge, which is the
+       * dead strip this part removes. */
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2"
       style={{ WebkitOverflowScrolling: "touch" }}
       data-testid="thread-scroll"
     >

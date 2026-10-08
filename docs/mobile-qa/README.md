@@ -145,3 +145,37 @@ a long preview back into row 1) and writes
 The harness ends by POSTing one message from ben to ana: opening the thread
 marks it read, and `part9.js` §32 asserts the bottom nav's Messages badge, so the
 fixture has to be left unread.
+
+## Part 15 — the mobile chat right edge
+
+```bash
+cd /var/tmp/pw
+node seed-part15.js                     # one message of every content type
+QA_EMAIL=ana<stamp>@qa.com node check-part15.js      # 218 checks
+QA_EMAIL=ana<stamp>@qa.com node probe-chat-edges.js  # the audit, all widths
+QA_EMAIL=ana<stamp>@qa.com node before-after-part15.js
+```
+
+`check-part15.js` drives 320/360/375/390/412/430/688/768 and 1024/1280 and
+asserts the sent bubble's right edge is `column right − 16` for **every** content
+type (text, emoji, consecutive group, long text, image, shared post) and that the
+figure is identical across them; received stays left with its avatar on the same
+16px padding; the composer spans the column; the page never scrolls and nothing
+crosses the viewport edge; and at 1024/1280 the *exact* pre-fix desktop figures
+(sent right 1229/973, received left 627).
+
+`probe-chat-edges.js` is the §3 property audit: it walks
+`bubble → wrapper → row → inner column → scroller → panel → page` and prints
+`width / max-width / min-width / padding / margin / flex / align-self /
+justify-content / overflow / box-sizing` for each level, plus per-type geometry
+for every message on screen. That dump is what identified the phantom 28px rail
+as the shared constraint — the bubbles were never the problem.
+
+`before-after-part15.js` restores the two removed things (the rail and the old
+9px padding) **from the shipped page** and measures both states, so the
+before/after screenshots in `qa/profile-audit/p15-chat-*` are the real render in
+both cases (43 → 16).
+
+`check-messages.js` expectations were upgraded by this part: the phone safe
+padding is 16 (not 43–46), the sent rail is gone below `lg`, and the mirroring
+invariant is now "sent bubble right edge == received avatar left edge".

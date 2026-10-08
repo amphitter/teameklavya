@@ -124,6 +124,8 @@ const apiJson = async (page, method, path, body, token) =>
         logoH: lr ? Math.round(lr.height) : null,
         explore: er ? { left: Math.round(er.left), href: explore.getAttribute("href") } : null,
         bellRight: br ? Math.round(br.right) : null,
+        bellW: br ? Math.round(br.width) : null,
+        bellH: br ? Math.round(br.height) : null,
         acctRight: ar ? Math.round(ar.right) : null,
         bellLeft: br ? Math.round(br.left) : null,
       };
@@ -137,7 +139,11 @@ const apiJson = async (page, method, path, body, token) =>
       ok(bar.explore?.href === "/explore", `${tag} LEFT is Explore → /explore`, `${bar.explore?.href}`);
       ok(Boolean(bar.explore) && bar.explore.left <= 12, `${tag} Explore sits on the left edge`, `left=${bar.explore?.left}`);
       ok(Boolean(bar.bellRight) && bar.bellRight <= bar.vw && bar.bellRight > bar.vw - 110, `${tag} bell on the right`, `right=${bar.bellRight}`);
-      ok(Boolean(bar.acctRight) && bar.acctRight <= bar.vw, `${tag} account avatar on the right`, `right=${bar.acctRight}`);
+      /* The profile avatar was removed from this bar on request, so the bell is
+         now the right-most control and must genuinely reach the corner. */
+      ok(bar.acctRight === null, `${tag} no profile avatar in the top bar`, `acctRight=${bar.acctRight}`);
+      ok(Boolean(bar.bellRight) && bar.bellRight >= bar.vw - 12, `${tag} the bell is the right-hand control`, `right=${bar.bellRight} of ${bar.vw}`);
+      ok(bar.bellW >= 36 && bar.bellH >= 36, `${tag} the bell is a real touch target`, `${bar.bellW}x${bar.bellH}`);
       if (bar.explore) ok(bar.explore.left + 44 <= bar.logoCentre - 40, `${tag} left control does not crowd the logo`);
     }
 
@@ -162,6 +168,17 @@ const apiJson = async (page, method, path, body, token) =>
       ok(labels.some((l) => l.includes("message")), `${tag} nav has Messages`);
       ok(labels.some((l) => l.includes("profile")), `${tag} nav has Profile`);
       ok(!labels.some((l) => l.includes("explore")), `${tag} Explore is NOT in the bottom nav`, labels.join("|"));
+      /* …and with the top-bar avatar gone, the account menu must still be one
+         tap away: the bottom nav's Profile item carries it. */
+      const acctReachable = await page.evaluate(() => {
+        const n = document.querySelector('nav[aria-label="Primary"]');
+        if (!n) return false;
+        return (
+          Boolean(n.querySelector("button[aria-label='Account menu']")) ||
+          Array.from(n.querySelectorAll("a,button")).some((el) => /profile/i.test((el.getAttribute("aria-label") || el.textContent || "").trim()))
+        );
+      });
+      ok(acctReachable, `${tag} Profile / account menu is still one tap away`);
       ok(!nav.items.some((i) => i.href === "/explore"), `${tag} no bottom-nav item points at /explore`);
       const tooSmall = nav.items.filter((i) => i.h < 40);
       ok(tooSmall.length === 0, `${tag} every nav target is ≥40px`, tooSmall.map((i) => `${i.label}:${i.h}`).join(" "));

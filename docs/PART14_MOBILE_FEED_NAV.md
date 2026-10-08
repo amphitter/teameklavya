@@ -30,14 +30,17 @@ than unmounting, so the desktop tree — and its state — is byte-for-byte what
 shell's content column, so `sticky top-0` sticks to the real scroll edge).
 
 ```
-[ Explore ]            EventHub             [ 🔔 ] [ avatar ]
+[ Explore ]              EventHub                [ 🔔 ]
 ```
 
 * Explore (left) → `/explore` — event discovery only.
 * The logo is **absolutely centred on the bar**, because flex-centring inside the leftover space put
-  it 22px left of true centre at 320px (left control 44px vs right pair 88px). Measured centre error
-  at all six widths: ≤3px.
-* Right: the real `NotificationBell` (unread badge, dropdown) then the account menu.
+  it 22px left of true centre at 320px. Measured centre error at all six widths: ≤3px.
+* Right: the real `NotificationBell` (unread badge, dropdown), sitting in the corner.
+* **The profile avatar was removed from this bar on the product owner's request.** Nothing became
+  unreachable: the bottom nav's Profile item is wrapped in the same account menu, so profile, theme,
+  settings and log out are still one tap away, one row lower. The harness now asserts both halves of
+  that trade — no avatar in the bar, account menu reachable from the bottom nav — at all six widths.
 * The bar exists on the feed only; from `lg` up it renders nothing.
 
 > Fixed during verification: the bar had been left mounted **twice** (route + `feed-view`), which put
@@ -143,6 +146,9 @@ impressions demote (not delete) posts, the page stays full (≥8 of 12); a scrol
 **Frontend (new):** `components/shell/account-menu.tsx` (shared `AccountMenu` + `AccountAvatar`) ·
 `components/feed/feed-top-bar.tsx` · `components/feed/use-seen-impression.ts` ·
 `components/search/trending-grid.tsx` · `components/search/post-viewer-sheet.tsx`
+**Frontend (edited, follow-up):** `components/feed/feed-top-bar.tsx` — the profile avatar was
+removed from the phone top bar on request; the bell is now the right-hand control, and the account
+menu is reached from the bottom nav's Profile item.
 **Frontend (edited):** `app/(app)/page.tsx` (mounts the bar once) · `app/(app)/search/page.tsx` ·
 `components/feed/feed-view.tsx` · `components/feed/create-post.tsx` · `components/feed/feed-post.tsx`
 (impressions + "Not interested") · `components/shell/app-shell.tsx` (shared account menu, Search slot)
@@ -169,11 +175,11 @@ control absent, Post still right-aligned. `phase3/4 (+widths)`, `part9`, `part13
 
 | Suite | Result |
 | --- | --- |
-| `part14.js` (new, phone + desktop + search + toolbar + persistence) | **302 passed, 0 failed** |
+| `part14.js` (new, phone + desktop + search + toolbar + persistence) | **320 passed, 0 failed** |
 | `part9.js` (Part 9 acceptance, restated for §9) | **100 / 100** |
 | `part13.js` (one composer, sharing, people search) | **98 / 98** |
 | `ui-fixes.js` | **167 / 0** |
-| `feed-topbar.js` | **125 / 0** |
+| `feed-topbar.js` | **131 / 0** |
 | `phase3.js` / `phase3-widths.js` | **57 / 0** · **0 failures × 6 widths** |
 | `phase4.js` / `phase4-widths.js` | **50 / 0** · **120 / 0** |
 | `sweep.js` (15 routes × 320/390) | **0 overflowing elements** |
@@ -192,8 +198,9 @@ restated to the new one instead of being deleted:
 * `ui-fixes.js` — "all four tabs render" on a phone → now asserts the strip is **absent** on phones and
   still present/44px on desktop; the bottom-nav check → `Home, Search, Messages and Profile` plus a new
   check that **Explore is reachable from the top bar**.
-* `feed-topbar.js` — "bell in the right corner" → the bell is in the right half and the **account menu**
-  is the control at the far right (§2); added "exactly one bar / one bell".
+* `feed-topbar.js` — "bell in the right corner" → the bell is the control at the **far right** (the
+  account avatar was removed from the bar), plus an assertion that the account menu is still one tap
+  away in the bottom nav; added "exactly one bar / one bell".
 * `part9.js` — the filter checks now run at desktop width (where the strip lives) and a new assertion
   covers its absence on phones; section A now **creates the own-story fixture** when it is missing
   instead of silently depending on a previous run of itself.

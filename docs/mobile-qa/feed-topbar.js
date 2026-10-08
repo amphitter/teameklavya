@@ -162,19 +162,33 @@ const BAR = VISIBLE_BAR;
         );
         ok(bar.bell.w >= 36 && bar.bell.h >= 36, `${tag} · the alert icon is a real touch target`, `${bar.bell.w}×${bar.bell.h}`);
       }
-      /* The right-hand cluster: bell then account, reaching the edge. */
+      /* The bar's right-hand side is the bell alone: the account avatar was
+         removed from it on request. The account menu is still one tap away —
+         the bottom nav's Profile item is wrapped in it — and this asserts the
+         bar itself is now clean, with the bell reaching the corner. */
       const cluster = await page.evaluate(() => {
         const header = document.querySelector("header[data-feed-top-bar]");
         const acct = header?.querySelector("button[aria-label='Account menu']");
-        if (!acct) return null;
-        const r = acct.getBoundingClientRect();
-        return { right: Math.round(r.right), w: Math.round(r.width), h: Math.round(r.height), vw: window.innerWidth };
+        const bell = header?.querySelector('button[aria-label*="otification" i], a[aria-label*="otification" i]');
+        const br = bell?.getBoundingClientRect();
+        const nav = document.querySelector('nav[aria-label="Primary"]');
+        const navHasAccount = Boolean(nav?.querySelector("button[aria-label='Account menu']"));
+        const navHasProfile = Array.from(nav?.querySelectorAll("a,button") || []).some((el) =>
+          /profile/i.test((el.getAttribute("aria-label") || el.textContent || "").trim())
+        );
+        return {
+          hasAccount: Boolean(acct),
+          bellRight: br ? Math.round(br.right) : null,
+          bellW: br ? Math.round(br.width) : null,
+          bellH: br ? Math.round(br.height) : null,
+          vw: window.innerWidth,
+          stillReachable: navHasAccount || navHasProfile,
+        };
       });
-      ok(Boolean(cluster), `${tag} · the account menu is in the bar (§2)`);
-      if (cluster) {
-        ok(cluster.right >= cluster.vw - 12, `${tag} · …in the far right corner`, `right ${cluster.right} of ${cluster.vw}`);
-        ok(cluster.w >= 36 && cluster.h >= 36, `${tag} · …with a real touch target`, `${cluster.w}×${cluster.h}`);
-      }
+      ok(cluster.hasAccount === false, `${tag} · no profile avatar in the top bar`, String(cluster.hasAccount));
+      ok(cluster.bellRight !== null && cluster.bellRight >= cluster.vw - 12, `${tag} · the bell is the right-hand control`, `right ${cluster.bellRight} of ${cluster.vw}`);
+      ok(cluster.bellW >= 36 && cluster.bellH >= 36, `${tag} · …with a real touch target`, `${cluster.bellW}×${cluster.bellH}`);
+      ok(cluster.stillReachable, `${tag} · the account menu is still one tap away (bottom nav)`);
       ok(!bar.overlap, `${tag} · the bell never overlaps the logo`, `logo ends ${bar.img.right}, bell starts ${bar.bell?.left}`);
       ok(bar.header.h >= 44 && bar.header.h <= 76, `${tag} · the bar is a sensible height`, `${bar.header.h}px`);
     }

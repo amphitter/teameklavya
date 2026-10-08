@@ -4,12 +4,11 @@ import Link from "next/link";
 import { Compass } from "lucide-react";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { useSessionUser } from "@/components/shell/use-session-user";
-import { AccountAvatar, AccountMenu } from "@/components/shell/account-menu";
 
 /**
  * Feed top bar — phones only, on the news feed.
  *
- *   [Explore]        EventHub        [🔔] [avatar]
+ *   [Explore]        EventHub              [🔔]
  *
  * Part 14 §1/§27: the three zones are deliberately different things and must
  * not be confused:
@@ -85,19 +84,14 @@ export function FeedTopBar() {
           />
         </Link>
 
-        {/* RIGHT — notifications + account menu. */}
+        {/* RIGHT — notifications only.
+            The account avatar was removed from this bar at the product owner's
+            request (it duplicated the Profile item in the bottom nav, which is
+            already wrapped in the account menu, so nothing became unreachable:
+            theme, settings and log out are still one tap away, one row lower). */}
         {ready && user ? (
           <div className="flex shrink-0 items-center">
             <NotificationBell />
-            <AccountMenu>
-              <button
-                type="button"
-                aria-label="Account menu"
-                className="ml-0.5 flex h-11 w-11 items-center justify-center rounded-xl transition-colors hover:bg-muted active:scale-95"
-              >
-                <AccountAvatar size={26} />
-              </button>
-            </AccountMenu>
           </div>
         ) : (
           <Link

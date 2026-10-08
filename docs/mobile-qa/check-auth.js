@@ -15,6 +15,9 @@ const ok = (c, l, d = "") => { checks++; if (!c) { fails++; console.log(`  ❌ $
       await p.waitForTimeout(900);
       const g = await p.evaluate(() => {
         const img = document.querySelector('img[alt*="Events, People, Progress"]');
+        const imgCS = img ? getComputedStyle(img) : null;
+        const sect = document.querySelector("main section");
+        const head = document.querySelector("header");
         const r = img?.getBoundingClientRect();
         const header = document.querySelector("header");
         const logo = header?.querySelector("img");
@@ -33,9 +36,15 @@ const ok = (c, l, d = "") => { checks++; if (!c) { fails++; console.log(`  ❌ $
             return er.height > 0 && er.bottom <= gr.top + 4;
           }).map((el) => el.tagName);
         }
+        const sr = sect?.getBoundingClientRect();
+        const hr = head?.getBoundingClientRect();
         return {
           vw: window.innerWidth,
-          img: r ? { w: Math.round(r.width), h: Math.round(r.height), bottom: Math.round(r.bottom) } : null,
+          imgShadow: imgCS ? imgCS.boxShadow : null,
+          imgRadius: imgCS ? imgCS.borderRadius : null,
+          spaceAbove: sr && hr ? Math.round(sr.top - hr.bottom) : null,
+          spaceBelow: sr ? Math.round(window.innerHeight - sr.bottom) : null,
+          img: r ? { w: Math.round(r.width), h: Math.round(r.height), bottom: Math.round(r.bottom), top: Math.round(r.top) } : null,
           imgLoaded: img?.naturalWidth || 0,
           src: img?.getAttribute("src") || null,
           logoBox: lr ? { w: Math.round(lr.width), right: Math.round(lr.right) } : null,
@@ -56,8 +65,19 @@ const ok = (c, l, d = "") => { checks++; if (!c) { fails++; console.log(`  ❌ $
       ok(g.overlap === null || g.overlap <= 0, `${tag} · the header logo and link do not collide`, `overlap ${g.overlap}px`);
       ok((g.marksAboveGoogle || []).length === 0, `${tag} · no logo above the Google button`, JSON.stringify(g.marksAboveGoogle));
       ok(g.googleBottom !== null && g.googleBottom <= g.innerH, `${tag} · the Google button is above the fold`, `bottom ${g.googleBottom} of ${g.innerH}`);
+      /* "Remove bg effect": the art must sit on the page, not in a box we drew. */
+      ok(g.imgShadow === "none", `${tag} · the poster has no shadow/plate behind it`, String(g.imgShadow));
+      ok(g.imgRadius === "0px", `${tag} · the poster is not rounded into a card`, String(g.imgRadius));
+      /* "reduce the extra bottom margin": the leftover height is split above and
+         below the content instead of all of it sitting under the card. */
+      ok(
+        g.spaceAbove !== null && g.spaceBelow !== null && Math.abs(g.spaceAbove - g.spaceBelow) <= 24,
+        `${tag} · the leftover height is balanced, not dumped below the card`,
+        `above ${g.spaceAbove} below ${g.spaceBelow}`
+      );
+      ok(g.spaceBelow <= 130, `${tag} · no large dead band under the card`, `${g.spaceBelow}px`);
       ok(errs.length === 0, `${tag} · no page errors`, errs.join(" | "));
-      if (w === 320) console.log(`     · ${tag}: poster ${g.img.w}x${g.img.h}, logo right ${g.logoBox.right} vs link left ${g.linkLeft}, scrollH ${g.scrollH}/${g.innerH}`);
+      console.log(`     · ${tag}: poster ${g.img.w}x${g.img.h} @${g.img.top}..${g.img.bottom} · above ${g.spaceAbove} below ${g.spaceBelow} · google ends ${g.googleBottom}/${g.innerH}`);
       await ctx.close();
     }
   }

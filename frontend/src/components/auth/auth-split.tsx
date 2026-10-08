@@ -44,7 +44,10 @@ export function AuthSplit({
   const googleLabel = isLogin ? "Login with Google" : "Sign up with Google";
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#F8FAFF] text-[#0B1235]">
+    /* Column flex so the main block can actually grow into the viewport — the
+       page is `min-h-screen`, and before this the content simply sat at the top
+       of it, leaving a dead band underneath. */
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#F8FAFF] text-[#0B1235]">
       {/* Ambient glow orbs (per reference) */}
       <div className="pointer-events-none absolute -top-24 left-4 z-0 h-80 w-80 rounded-full bg-blue-300 opacity-60 blur-[80px]" />
       <div className="pointer-events-none absolute right-0 top-32 z-0 h-[28rem] w-[28rem] rounded-full bg-purple-300 opacity-60 blur-[80px]" />
@@ -77,8 +80,16 @@ export function AuthSplit({
       </header>
 
       {/* ── Main split ─────────────────────────────────── */}
-      <main className="relative z-10 mx-auto w-full max-w-7xl px-4 pb-10 sm:px-6">
-        <section className="grid grid-cols-1 items-center gap-8 lg:grid-cols-12 lg:gap-12">
+      <main className="relative z-10 mx-auto flex w-full max-w-7xl flex-1 flex-col px-4 pb-6 sm:px-6 sm:pb-10">
+        {/* `my-auto` — NOT `justify-center`. Auto margins split the leftover
+            height evenly and collapse to zero when there isn't any, so on a
+            320×568 phone (where the content is taller than the viewport) the
+            screen still starts at the top and scrolls, instead of being clipped
+            at both ends the way a centred flex child gets clipped.
+            `lg:my-0` keeps the desktop composition exactly where it was: there
+            the hero and the card are their own two columns and the vertical
+            rhythm is deliberate. */}
+        <section className="my-auto grid grid-cols-1 items-center gap-8 lg:my-0 lg:grid-cols-12 lg:gap-12">
           {/* LEFT — illustration (desktop) / top (mobile choice screen only) */}
           <div className={cn("relative lg:col-span-7", revealed && "hidden lg:block")}>
             {/* Desktop illustration — transparent art, floats directly on
@@ -91,15 +102,17 @@ export function AuthSplit({
             />
             {/* Mobile hero — the campaign poster, "Events · People ·
                 Progress", supplied by the product owner. Portrait art (2:3) so
-                it is bound by HEIGHT, not width: `40vh` is what keeps both
+                it is bound by HEIGHT, not width: `44vh` is what keeps both
                 choice buttons above the fold on the shortest phone we test
-                (320×568), where the poster lands at ~150×225. It is hidden the
-                moment the email form opens, because the form then owns the
-                screen.
+                (320×568): at 44vh the poster lands at ~150×250 there and both
+                buttons still finish well above the fold (Google ends at ~435,
+                mail at ~495, of 568). It is hidden the moment the email form
+                opens, because the form then owns the screen.
 
-                `rounded-xl overflow-hidden` clips the artwork's own soft edges
-                into a deliberate card instead of leaving a dark blob floating
-                on the pale page; the shadow does the rest. */}
+                NO card treatment: no shadow, no rounding, no plate. The
+                artwork carries its own alpha, so it sits directly on the page
+                — the same way the desktop hero does — instead of being put in
+                a box we drew around it. */}
             <div className={cn("flex justify-center lg:hidden", revealed ? "hidden" : "")}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -107,7 +120,7 @@ export function AuthSplit({
                 alt="EventHub — Events, People, Progress. Discover. Participate. Learn. Build. All in one place."
                 width={720}
                 height={1080}
-                className="h-auto max-h-[40vh] w-auto max-w-full overflow-hidden rounded-xl shadow-[0_10px_30px_rgba(24,39,75,0.16)]"
+                className="h-auto max-h-[44vh] w-auto max-w-full"
               />
             </div>
           </div>

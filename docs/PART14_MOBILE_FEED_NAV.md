@@ -188,9 +188,28 @@ One pre-existing bug surfaced while checking this at 320px and was fixed: the he
 flex-shrunk below its intrinsic width, so the wordmark spilled **11px** under "Create an account".
 The logo is now `shrink-0` and the link wraps instead.
 
-New harness `docs/mobile-qa/check-auth.js` — 84 checks over login + signup at all six widths: the
-poster loads from the new path, no horizontal overflow, the header logo and link never collide, **no
-mark directly above the Google button**, the Google button stays above the fold, no page errors.
+### Follow-up 2 — no plate behind the art, and the dead band is gone
+
+* **"remove bg effect"** — the poster no longer sits in a box we drew: `rounded-xl` and the drop
+  shadow are gone. The artwork's own alpha is what separates it from the page, exactly like the
+  desktop hero. Verified: computed `box-shadow: none`, `border-radius: 0px`.
+* **"reduce the extra bottom margin"** — measured, the gap *inside* the card was already just the
+  normal 24px; the real dead space was **below** the card, because the page is `min-h-screen` and its
+  content simply sat at the top of it. On a 390×844 phone that was **185px of empty page** under the
+  card. The shell is now a column flex (`flex-1` main) and the content block uses **`my-auto`** —
+  auto margins, not `justify-center`, so on a 320×568 phone (content taller than the viewport) it
+  collapses to zero and the page still starts at the top and scrolls rather than being clipped at both
+  ends. Residual band: **87px at 390** (63 above / 87 below — centred, not dumped at the bottom),
+  **30px at 360**, **0 at 320**. `lg:my-0` keeps desktop's composition untouched (verified: hero at
+  y=95 and card 485×500 at 1280/1440/1920, identical to before).
+* The poster also grew from `40vh` to `44vh` so the composition fills the phone instead of leaving a
+  gap between the art and the card. At 320×568 both buttons are still well above the fold
+  (Google ends 434, mail 494, of 568).
+
+New harness `docs/mobile-qa/check-auth.js` — **132 checks** over login + signup at all six widths: the
+poster loads from the new path, no plate/shadow/rounding behind it, no horizontal overflow, the header
+logo and link never collide, **no mark directly above the Google button**, the Google button stays
+above the fold, leftover height balanced above/below (≤24px skew) with ≤130px below, no page errors.
 
 ---
 
@@ -211,7 +230,7 @@ mark directly above the Google button**, the Google button stays above the fold,
 | backend `part10-messages` · `part10-realtime` | 59 / 0 · 38 / 0 |
 | backend `part11-profile-content` · `profile-edit` · `stories-audience` | 60 / 0 · 53 / 0 · 10 / 0 |
 | frontend unit: query · messages-store · crop · variants | 17 / 0 · 38 / 0 · 26 / 0 · 15 / 0 |
-| `check-auth.js` (new — login + signup, 6 widths) | **84 passed, 0 failed** |
+| `check-auth.js` (new — login + signup, 6 widths) | **132 passed, 0 failed** |
 | `tsc --noEmit` · `next build` | 0 errors · clean |
 
 ## Harnesses updated because Part 14 **supersedes** what they asserted

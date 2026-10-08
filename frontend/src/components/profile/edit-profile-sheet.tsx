@@ -147,6 +147,23 @@ export function EditProfileSheet({ open, onClose, user, onSaved }: EditProfileSh
   }, [user, firstName, lastName, username, bio, location, website, institution, interests, avatar, coverImage, coverPosition, profileVisibility, allowMessagesFrom]);
 
   /* §59 — "Prevent accidental navigation loss." */
+  /* Escape closes the sheet, the way every other overlay in the app already
+     behaves (search, comments, stories, the create composer). This sheet was
+     the one exception: a dialog with a visible close button and no keyboard
+     exit. `requestClose` — not `onClose` — so an accidental Escape on a dirty
+     form still asks before throwing the edits away. */
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") requestClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    /* `open` alone: the handler only needs the latest `requestClose` at the
+       moment a key is pressed, and re-subscribing on every keystroke in the bio
+       would be wasteful. */
+  }, [open]);
+
   useEffect(() => {
     if (!open || !dirty) return;
     const handler = (e: BeforeUnloadEvent) => {

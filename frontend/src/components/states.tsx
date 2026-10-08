@@ -41,30 +41,50 @@ export function EmptyState({
    */
   compact?: boolean;
 }) {
+  /* §19 (Part 17) — a tab with nothing in it should not reserve a quarter of
+     the screen. The compact variant drops the icon bubble for an inline icon
+     and tightens every step, which is the difference between 214px and ~140px;
+     the default variant keeps its proportions exactly as they were. */
+  if (compact) {
+    return (
+      <div
+        className={cn(
+          "flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-4 py-6 text-center",
+          className
+        )}
+      >
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-primary" />
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        </div>
+        {description && <p className="mt-1.5 max-w-sm text-[13px] text-muted-foreground">{description}</p>}
+        {(action || actionLabel) && (
+          <div className="mt-3">
+            {action ?? (
+              <Button size="sm" onClick={onAction}>
+                {actionLabel}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 text-center",
-        compact ? "px-4 py-8" : "px-6 py-14",
+        "flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-6 py-14 text-center",
         className
       )}
     >
-      <div
-        className={cn(
-          "flex items-center justify-center rounded-full bg-brand-light text-primary",
-          compact ? "h-11 w-11" : "h-14 w-14"
-        )}
-      >
-        <Icon className={compact ? "h-5 w-5" : "h-7 w-7"} />
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-light text-primary">
+        <Icon className="h-7 w-7" />
       </div>
-      <h3 className={cn("font-semibold text-foreground", compact ? "mt-3 text-sm" : "mt-4 text-base")}>{title}</h3>
-      {description && (
-        <p className={cn("max-w-sm text-muted-foreground", compact ? "mt-1 text-[13px]" : "mt-1.5 text-sm")}>
-          {description}
-        </p>
-      )}
+      <h3 className="mt-4 text-base font-semibold text-foreground">{title}</h3>
+      {description && <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{description}</p>}
       {(action || actionLabel) && (
-        <div className={compact ? "mt-3" : "mt-5"}>
+        <div className="mt-5">
           {action ?? (
             <Button size="sm" onClick={onAction}>
               {actionLabel}

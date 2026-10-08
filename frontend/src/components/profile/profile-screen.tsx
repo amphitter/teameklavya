@@ -377,6 +377,10 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
       <ProfileHeader
         isOwn={isMe}
         onChangePhoto={() => setEditOpen(true)}
+        /* The banner's "Edit cover" shortcut and the avatar's camera chip open
+           the same sheet the Edit profile button does — one edit flow, three
+           ways in, no second implementation. */
+        onEditProfile={() => setEditOpen(true)}
         user={profileUser}
         stats={stats}
         onOpenFollowers={() => setListModal("followers")}
@@ -553,14 +557,20 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
               whole navigation is legible at a glance, which is the entire
               reason this phase exists. */}
           {/* A three-column grid on a phone, a wrapping row from sm up.
-              Wrapping alone (the previous fix for the clipped strip) removed the
-              hidden state but left a ragged block: seven pills of different
-              widths broke into 4 + 3 + 1 across three uneven lines at 360, which
-              reads as a mistake rather than a menu. Equal columns are calm and,
-              at 11px, every label — including "Achievements" — fits at 320
-              (`whitespace-nowrap` here is a promise, and phase3-widths.js keeps
-              it: no label may be cut). */}
-          <div className="grid grid-cols-3 gap-1 rounded-2xl border border-border bg-card p-1 sm:flex sm:flex-wrap sm:items-center">
+              History: bare wrapping produced a ragged 4 + 3 + 1 block at 360;
+              a fixed 3-column grid fixed the raggedness but cost three rows
+              (and pushed the posts a third of a screen down). Part 17 §17 asks
+              for the reference's answer — one row, scrolled by the strip
+              itself, labels intact — so the strip is now the only horizontally
+              scrollable thing on the page. */}
+          <div
+            data-testid="profile-tabs"
+            /* §17 — a single row on phones, scrolled horizontally when it does
+               not fit; the PAGE never scrolls sideways and no label is shrunk
+               or cut. From `sm`, where all seven fit, it simply wraps away its
+               own overflow. */
+            className="flex flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain rounded-2xl border border-border bg-card p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap"
+          >
             {tabs.map((t) => (
               <button
                 key={t.id}
@@ -575,7 +585,11 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
                   "flex items-center justify-center whitespace-nowrap rounded-full px-2 py-1.5 text-[11px] font-semibold transition-colors",
                   "sm:px-3.5 sm:py-2 sm:text-sm",
                   tab === t.id
-                    ? "bg-primary text-primary-foreground"
+                    ? /* Blue → purple, the one gradient the reference uses here
+                         — an active/selected state, which is exactly what §27
+                         allows it for. Inactive chips keep the plain surface and
+                         subtle border the reference shows. */
+                      "bg-gradient-to-r from-[#2563FF] to-[#6C35FF] text-white shadow-sm"
                     : "border border-outline-variant bg-surface-container-lowest text-muted-foreground hover:text-foreground"
                 )}
               >

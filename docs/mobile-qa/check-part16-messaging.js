@@ -139,8 +139,8 @@ async function main() {
     await login(page, qa.ana);
     await page.goto(`${BASE}/profile/${qa.benId}`, { waitUntil: "networkidle" });
 
-    const btn = page.locator('[data-testid="message-button"]');
-    ok("the profile Message button renders", (await btn.count()) >= 1);
+    const btn = page.locator('[data-testid="message-button"]:visible');
+    ok("the profile Message button renders (visible)", (await btn.count()) === 1, `${await btn.count()} visible of the rendered regions`);
     ok("its label is Message, not a link somewhere else", /messag/i.test((await btn.first().innerText()) || ""));
 
     /* it must resolve BEFORE navigating, so the failure has somewhere to show */
@@ -151,8 +151,11 @@ async function main() {
     try {
       await page.waitForFunction(
         () => {
-          const b = document.querySelector('[data-testid="message-button"]');
-          return b && (b.getAttribute("aria-busy") === "true" || /opening/i.test(b.textContent || ""));
+          /* the VISIBLE copy: the hidden region's button never enters the busy
+             state because it is not the one being clicked */
+          const btns = [...document.querySelectorAll('[data-testid="message-button"]')];
+          const b = btns.find((n) => n.offsetParent !== null);
+          return Boolean(b) && (b.getAttribute("aria-busy") === "true" || /opening/i.test(b.textContent || ""));
         },
         { timeout: 4000 }
       );
@@ -187,7 +190,7 @@ async function main() {
 
     /* §74 — the same conversation, three clicks, no Conversation 1/2/3 */
     await page.goto(`${BASE}/profile/${qa.benId}`, { waitUntil: "networkidle" });
-    const b2 = page.locator('[data-testid="message-button"]').first();
+    const b2 = page.locator('[data-testid="message-button"]:visible').first();
     await b2.click();
     await page.waitForURL(/\/messages\/[a-f0-9]{6,}/i, { timeout: 15000 }).catch(() => {});
     const id2 = page.url().split("/").pop();
@@ -209,7 +212,7 @@ async function main() {
     });
     await page.goto(`${BASE}/profile/${qa.benId}`, { waitUntil: "networkidle" });
     burst = 0;
-    const b3 = page.locator('[data-testid="message-button"]').first();
+    const b3 = page.locator('[data-testid="message-button"]:visible').first();
     await b3.click();
     await page.waitForTimeout(150);
     const midLabel = (await b3.innerText().catch(() => "")) || "";
@@ -444,10 +447,10 @@ async function main() {
         await page.waitForURL(/\/profile\//, { timeout: 12000 }).catch(() => {});
       }
       await page.waitForSelector('[data-testid="message-button"]', { timeout: 12000 }).catch(() => {});
-      const okBtn = await page.locator('[data-testid="message-button"]').count();
+      const okBtn = await page.locator('[data-testid="message-button"]:visible').count();
       ok("a post reaches the author's profile where Message exists", okBtn >= 1);
       if (okBtn) {
-        await page.locator('[data-testid="message-button"]').first().click();
+        await page.locator('[data-testid="message-button"]:visible').first().click();
         await page.waitForURL(/\/messages\/[a-f0-9]{6,}/i, { timeout: 20000 }).catch(() => {});
         const idFromPost = page.url().split("/").pop();
         ok("post → profile → Message opens the SAME conversation", idFromPost === qa.dmId, `${qa.dmId} vs ${idFromPost}`);

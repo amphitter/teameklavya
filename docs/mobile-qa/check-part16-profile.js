@@ -132,12 +132,21 @@ const counters = (page) =>
         .map((e) => ({ w: e.getBoundingClientRect().width, tag: e.tagName, cls: (e.className || "").toString().slice(0, 30) }))
         .filter((x) => x.w > innerWidth + 1)
         .slice(0, 4);
-      const edit = [...document.querySelectorAll("button,a")].find((b) => /Edit profile/i.test(b.textContent || ""));
-      const r = edit?.getBoundingClientRect();
+      /* Part 17 §5/§22 renders the profile actions in TWO regions — a third
+         grid column on wider screens and a row under the handle on phones — and
+         hides the one that does not apply with `display: none`. So the touch
+         target to measure is the VISIBLE one; the hidden copy is 0px tall and is
+         not on the accessibility tree either. Counting them also proves the two
+         regions never show at once. */
+      const all = [...document.querySelectorAll("button,a")].filter((b) => /Edit profile/i.test(b.textContent || ""));
+      const visible = all.filter((b) => b.offsetParent !== null && b.getBoundingClientRect().height > 0);
+      const r = visible[0]?.getBoundingClientRect();
       return {
         docW: document.documentElement.scrollWidth,
         vw: innerWidth,
         wide,
+        editCount: all.length,
+        editVisible: visible.length,
         editRight: r ? Math.round(r.right) : null,
         editH: r ? Math.round(r.height) : null,
       };
@@ -145,6 +154,7 @@ const counters = (page) =>
     ok(g.docW <= g.vw, `${W}: the profile has no horizontal overflow (${g.docW} ≤ ${g.vw})`);
     ok(g.wide.length === 0, `${W}: nothing is wider than the screen (${g.wide.map((w) => w.tag + "." + w.cls).join(", ") || "clean"})`);
     ok(g.editRight !== null && g.editRight <= g.vw, `${W}: the edit affordance is inside the screen (right edge ${g.editRight})`);
+    ok(g.editVisible === 1, `${W}: exactly one edit affordance is on screen (${g.editVisible} of ${g.editCount} in the DOM)`);
     ok(g.editH !== null && g.editH >= 32, `${W}: the edit affordance is a real touch target (${g.editH}px)`);
     await c2.close();
   }

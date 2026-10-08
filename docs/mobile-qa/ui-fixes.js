@@ -253,20 +253,39 @@ const TABS = () => {
       const strip = pill?.parentElement;
       if (!strip) return null;
       const kids = [...strip.children];
+      /* Part 17 §17 asks for the reference's strip: ONE row on a phone, scrolled
+         by the strip itself. So a pill may sit beyond the window edge — provided
+         it lives inside a horizontally scrollable ancestor. What must never
+         happen (and is what this check has always been about) is a pill whose
+         TEXT is clipped, or a strip that drags the whole page sideways. */
+      const inScroller = (el) => {
+        let p = el.parentElement;
+        while (p && p !== document.body) {
+          if (p.scrollWidth > p.clientWidth + 1) return true;
+          p = p.parentElement;
+        }
+        return false;
+      };
       const rows = new Map();
       for (const k of kids) {
         const r = k.getBoundingClientRect();
-        const key = Math.round(r.top);
+        /* Cluster by a tolerance: one pill carries a count and is a pixel
+           taller, which is not a second row. */
+        const key = [...rows.keys()].find((t) => Math.abs(t - r.top) < 20) ?? Math.round(r.top);
         if (!rows.has(key)) rows.set(key, []);
         rows.get(key).push({ l: Math.round(r.left), r: Math.round(r.right), label: k.innerText.trim() });
       }
+      const beyond = kids.filter((k) => k.getBoundingClientRect().right > window.innerWidth + 1);
       return {
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         rows: rows.size,
         widths: [...new Set(kids.map((k) => Math.round(k.getBoundingClientRect().width)))],
         cut: kids
-          .filter((k) => k.scrollWidth > k.clientWidth + 1 || k.getBoundingClientRect().right > window.innerWidth + 1)
+          .filter((k) => k.scrollWidth > k.clientWidth + 1 || (k.getBoundingClientRect().right > window.innerWidth + 1 && !inScroller(k)))
           .map((k) => k.innerText.trim()),
+        beyondViewport: beyond.map((k) => k.innerText.trim()),
+        beyondAllScrollable: beyond.every(inScroller),
+        stripScrolls: strip.scrollWidth > strip.clientWidth + 1,
         firstRowRight: Math.max(...[...rows.values()][0].map((x) => x.r)),
       };
     });
@@ -274,7 +293,16 @@ const TABS = () => {
       ok(pTabs.cut.length === 0, `${tag} · no profile tab is cut off or truncated`, JSON.stringify(pTabs.cut));
       ok(pTabs.overflow <= 1, `${tag} · the profile has no horizontal overflow`, `${pTabs.overflow}px`);
       ok(pTabs.rows <= 3, `${tag} · the profile tab strip stays compact`, `${pTabs.rows} rows`);
-      info(`${tag} · profile strip`, `${pTabs.rows} rows · pill widths ${pTabs.widths.join("/")}`);
+      /* §17's other half: when the strip is wider than its box, the tabs must
+         still be reachable — the strip scrolls, not the page. */
+      if (pTabs.beyondViewport.length) {
+        ok(pTabs.beyondAllScrollable, `${tag} · off-screen tabs are reachable in the strip's own scroller`, JSON.stringify(pTabs.beyondViewport));
+        ok(pTabs.stripScrolls, `${tag} · the strip itself is the scroller`, `scrolls=${pTabs.stripScrolls}`);
+      }
+      info(
+        `${tag} · profile strip`,
+        `${pTabs.rows} rows · pill widths ${pTabs.widths.join("/")}${pTabs.beyondViewport.length ? ` · ${pTabs.beyondViewport.length} reachable by scrolling` : ""}`
+      );
     }
 
     ok(errors.length === 0, `${tag} · no uncaught page errors`, errors.join(" | "));

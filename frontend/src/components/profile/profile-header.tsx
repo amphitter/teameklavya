@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { BadgeCheck, CalendarDays, MapPin } from "lucide-react";
+import { BadgeCheck, CalendarDays, Camera, GraduationCap, Link2, MapPin } from "lucide-react";
 import { UserAvatar, avatarUrlOf, versionedUrl } from "@/components/user-avatar";
 import { AvatarPreview } from "@/components/profile/avatar-preview";
 import { handleOf, compactCount } from "@/lib/social";
@@ -24,21 +24,30 @@ export interface ProfileStats {
 
 /**
  * Participant profile header — shared by own profile and public profiles.
- * Cover image, avatar, @username, verification, bio, location, interests
- * and real stats. `actions` slot receives Edit / Follow buttons.
- */
-/**
- * One number and its label, inline.
  *
- * A button when it opens something (followers/following lists), plain text
- * otherwise — so the affordance matches the behaviour instead of every stat
- * looking tappable.
- */
-/**
- * Singular when it is one. "1 Posts" was on every new profile — the count is
- * real, the grammar was not. `label` is the plural form; the singular is derived
- * rather than passed in, so a caller cannot forget. "Following" is both forms
- * already and stays as it is.
+ * ── The one rule this file exists to obey (Part 17 §4, §34) ──────────────────
+ *
+ *   BANNER
+ *     ↓
+ *   AVATAR OVERLAPS THE BANNER'S LOWER EDGE   ← and NOTHING else does
+ *     ↓
+ *   IDENTITY · METADATA · BIO · TAGS · ACTIONS · STATS   ← all BELOW the banner
+ *
+ * The previous build pulled the WHOLE header block — avatar *and* name — up over
+ * the banner and put the two side by side. The name, the @username, the metadata
+ * and the buttons were therefore drawn on top of the photo, and the buttons (the
+ * `shrink-0` half of that row) were clipped over the text on a laptop.
+ *
+ * So the overlap is now owned by ONE row, and that row contains ONLY the avatar
+ * (plus the desktop action region, which sits in its own column to the right).
+ * Everything a reader actually reads starts on a fresh block BELOW the banner,
+ * which is why no amount of long names, long handles or extra buttons can push
+ * text onto the image: there is no shared box to collide in.
+ *
+ * Geometry, stated once because the numbers have to agree:
+ *   avatar 80px on phones / 96px from `sm`  ·  overlap 40px / 48px (half)
+ *   → the row's flow height is the avatar's *lower* half, so the name begins
+ *     12px under the photo and never under the banner.
  */
 function plural(n: number, pluralForm: string) {
   if (n !== 1) return pluralForm;
@@ -46,23 +55,58 @@ function plural(n: number, pluralForm: string) {
   return pluralForm.replace(/s$/, "");
 }
 
-function Stat({ value, label, onClick }: { value: number; label: string; onClick?: () => void }) {
+/**
+ * One number and its label, stacked — the reference's stat cell, not a card.
+ *
+ * A button when it opens something (followers/following lists), plain text
+ * otherwise, so the affordance matches the behaviour.
+ *
+ * `pluralize={false}` exists for labels that are already full phrases
+ * ("Events Attended" — naive de-pluralising would strip the final `s` and render
+ * "Events Attende"). The count is real in every case; only the grammar differs.
+ */
+function Stat({
+  value,
+  label,
+  shortLabel,
+  onClick,
+  pluralize = true,
+}: {
+  value: number;
+  /** The full name of the number (§14). */
+  label: string;
+  /** What a phone shows instead, when the full name would wrap (§14's own
+   *  example numbering reads "Attended · Hosted"). Never a different number. */
+  shortLabel?: string;
+  onClick?: () => void;
+  pluralize?: boolean;
+}) {
+  const shown = pluralize ? plural(value, label) : label;
+  const short = shortLabel ?? shown;
   const body = (
-    <>
-      <b className="text-[15px] font-extrabold text-foreground">{compactCount(value)}</b>{" "}
-      <span className="text-[13px] text-muted-foreground">{plural(value, label)}</span>
-    </>
+    <span className="flex min-w-0 flex-col items-center leading-tight sm:items-start">
+      <b className="text-[15px] font-extrabold tabular-nums text-foreground sm:text-lg">{compactCount(value)}</b>
+      {/* Both spellings exist in the DOM; CSS decides which one is shown, so
+          the accessibility tree and `innerText` always agree with the screen. */}
+      <span className="text-center text-[10px] text-muted-foreground sm:hidden">{short}</span>
+      <span className="hidden text-[11px] text-muted-foreground sm:inline">{shown}</span>
+    </span>
   );
-  if (!onClick) return <span className="flex items-baseline gap-1.5">{body}</span>;
+  if (!onClick) return body;
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-baseline gap-1.5 rounded-md transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+      className="min-w-0 rounded-md transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
     >
       {body}
     </button>
   );
+}
+
+/** `https://` and a trailing slash are noise in a one-line metadata row. */
+function prettyUrl(url: string) {
+  return url.replace(/^https?:\/\//i, "").replace(/\/$/, "");
 }
 
 export function ProfileHeader({
@@ -72,6 +116,7 @@ export function ProfileHeader({
   onOpenFollowers,
   onOpenFollowing,
   onChangePhoto,
+  onEditProfile,
   isOwn,
 }: {
   user: {
@@ -90,20 +135,28 @@ export function ProfileHeader({
   onOpenFollowing?: () => void;
   /** Own profile: the edit flow owns "change photo"; the preview hands off to it. */
   onChangePhoto?: () => void;
+  /** Own profile: opens the edit sheet from the banner / avatar shortcuts. */
+  onEditProfile?: () => void;
   isOwn?: boolean;
 }) {
   const [avatarOpen, setAvatarOpen] = useState(false);
   const p = user.profile || {};
-  const chips = [p.institution, p.course, p.year].filter(Boolean);
   const interests = (p.interests || []).slice(0, 6);
+  const coverPosition = typeof p.coverPosition === "number" ? p.coverPosition : 50;
+  const joined = user.createdAt
+    ? new Date(user.createdAt).toLocaleDateString("en-IN", { month: "long", year: "numeric" })
+    : null;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      {/* Cover */}
-      {/* Cover (§7). The gradient behind the image is the clean fallback the
-          brief asks for — with no banner the header reads as a designed
-          surface, never as an empty grey rectangle. */}
-      <div className="relative h-28 w-full bg-gradient-to-r from-[#2563FF] via-[#6C35FF] to-[#D946EF] sm:h-36">
+    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      {/* ── Cover (§3) ────────────────────────────────────────────────────────
+          A wide, clean banner with rounded top corners (from the card's own
+          radius + `overflow-hidden`), a natural crop and no overlay furniture —
+          only the owner's "Edit cover" shortcut, which is how the banner is
+          changed and is the one control the reference puts here too. The
+          gradient behind the image is the fallback for accounts with no banner,
+          so the header still reads as designed rather than as a grey hole. */}
+      <div data-testid="profile-cover" className="relative h-32 w-full bg-gradient-to-br from-[#2563FF] to-[#6C35FF] sm:h-40 lg:h-48">
         {p.coverImage ? (
           <OptimizedImage
             src={versionedUrl(p.coverImage, p.coverVersion)}
@@ -115,184 +168,225 @@ export function ProfileHeader({
             className="h-full w-full object-cover"
             /* The stored focal point, derived from the crop the user chose, so
                the same strip of the banner stays in frame on a 390px phone and
-               a 1440px desktop. The asset itself is the 3:1 canonical render —
-               this positions it, it does not re-crop it. */
-            style={{ height: "100%", objectPosition: `50% ${typeof p.coverPosition === "number" ? p.coverPosition : 50}%` }}
+               a 1440px desktop. The asset itself is the canonical render —
+               this positions it, it does not re-crop it (§30). */
+            style={{ height: "100%", objectPosition: `50% ${coverPosition}%` }}
           />
+        ) : null}
+
+        {isOwn && onEditProfile ? (
+          <button
+            type="button"
+            onClick={onEditProfile}
+            className="absolute right-3 top-3 flex h-8 touch-manipulation items-center gap-1.5 rounded-full bg-black/55 px-3 text-[12px] font-semibold text-white transition-colors hover:bg-black/70 active:bg-black/75 sm:right-4 sm:top-4"
+          >
+            <Camera className="h-3.5 w-3.5" aria-hidden />
+            Edit cover
+          </button>
         ) : null}
       </div>
 
-      {/* `relative z-10` is load-bearing, not decoration.
-       *
-       * The cover above is `position: relative`, so it paints in the positioned
-       * layer — ABOVE plain in-flow content. This block overlaps it with
-       * `-mt-12`, so without a stacking context of its own the cover covered
-       * the name, the @username and every header action: `elementFromPoint` at
-       * the centre of "Edit profile" returned the cover div, and the whole
-       * edit-profile feature was unclickable with a mouse. Measured before the
-       * fix: button top 174, cover bottom 230. */}
-      <div className="relative z-10 px-5 pb-5 sm:px-7 sm:pb-7">
-        {/* ── Header regions (§90–§95) ──────────────────────────────────
-             A GRID, because the overlap was structural rather than cosmetic:
-             identity and actions used to share one flex row in which the
-             actions were `shrink-0` and could not wrap. From 640px upward
-             that row had a min-content width larger than the card on a
-             laptop — and the card is `overflow-hidden`, so the actions were
-             CLIPPED over the name and handle instead of pushing anything.
-
-             Now each region owns a track:
-
-               [ avatar ] [ identity ]                     (phones, tablet)
-                          [ actions  ]                     ← wraps below
-
-               [ avatar ] [ identity ] [ actions ]         (xl and up)
-
-             `minmax(0,1fr)` is what lets the identity column shrink instead
-             of forcing the grid wider; the actions track sizes to its content
-             but wraps internally, so its own min-content is one button — about
-             110px, which fits even at 320px. Nothing is positioned absolutely,
-             so nothing can land on top of anything else. */}
-        <div className="-mt-10 grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-4 gap-y-4 sm:-mt-14 sm:gap-x-5 xl:grid-cols-[auto_minmax(0,1fr)_auto]">
-          {/* `w-fit` is load-bearing: in the mobile column the flex container
-              stretches its children, so this ring was drawn the full width of
-              the card — a giant pill outline lying across the cover, with the
-              photo parked at its left edge. The ring must hug the avatar. */}
-          <div className="col-start-1 row-start-1 w-fit shrink-0 rounded-full border-4 border-card">
-            {/* Tapping the avatar opens it at full size (Phase 4). This is the
-                one surface where the avatar had no handler: in the feed it is a
-                Link to the profile, and hijacking that would put two meanings
-                on one image. On your own profile the camera button below still
-                owns "change photo" — the preview is how you check the canonical
-                crop Phase 2 produced. */}
+      {/* ── Profile content area ───────────────────────────────────────────── */}
+      <div className="px-5 pb-5 sm:px-7 sm:pb-7">
+        {/* THE OVERLAP ROW (§4, §6). The avatar is lifted exactly half its
+            height so the photo straddles the banner's lower edge, and the row's
+            flow height is therefore the avatar's LOWER half — the space the
+            identity flows past on a phone. Nothing else in this row is
+            negative-margined, so nothing else can touch the banner. */}
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-4 gap-y-3 sm:gap-x-5 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+          {/* `relative z-10` is load-bearing, not decoration: the cover above is
+              `position: relative`, so it paints in the positioned layer ABOVE
+              plain in-flow content. The avatar is the one thing that must cross
+              that edge, so it is given a stacking context of its own — the
+              narrowest possible version of this (previously the whole header
+              needed it because the whole header overlapped). */}
+          <div
+            data-testid="profile-avatar"
+            className="relative z-10 -mt-10 w-fit shrink-0 rounded-full border-4 border-card sm:col-start-1 sm:row-start-1 sm:-mt-12"
+          >
             <button
               type="button"
               onClick={() => setAvatarOpen(true)}
               /* The label says what is actually there: with no photo the preview
-                 shows the initials fallback (and, on your own profile, the way to
-                 add one), so announcing "View profile photo" would be a lie. */
+                 shows the initials fallback (and, on your own profile, the way
+                 to add one), so announcing "View profile photo" would be a lie. */
               aria-label={avatarUrlOf(user) ? "View profile photo" : "Profile photo, not added yet"}
-              className="block rounded-full transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2"
+              className="block rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2"
             >
               <UserAvatar user={user} size={96} className="!h-20 !w-20 sm:!h-24 sm:!w-24" />
             </button>
+
+            {/* Owner shortcut, mirroring the reference's camera chip. A
+                separate control from the photo itself: tapping the photo still
+                opens the preview (which is how you check the canonical crop),
+                this opens the edit sheet. */}
+            {isOwn && onEditProfile ? (
+              <button
+                type="button"
+                onClick={onEditProfile}
+                aria-label="Change profile photo"
+                className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border-2 border-card bg-primary text-white transition-transform active:scale-95"
+              >
+                <Camera className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            ) : null}
           </div>
 
-          <div className="col-start-2 row-start-1 min-w-0">
-            <div className="min-w-0">
-                <h1 className="flex flex-wrap items-center gap-1.5 text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-                  {user.firstName} {user.lastName}
-                  {user.verified && (
-                    <BadgeCheck className="h-5 w-5 shrink-0 text-primary" aria-label="Verified" />
-                  )}
-                </h1>
-                {user.username ? (
-                  <Link
-                    href={`/profile/${user.username}`}
-                    className="text-sm text-muted-foreground hover:text-primary"
-                  >
-                    @{user.username}
-                  </Link>
-                ) : (
-                  <p className="text-sm text-muted-foreground">@{handleOf(user)}</p>
-                )}
+          {/* Desktop action region (§5, §6, §10): its own third column,
+              right-aligned on the same row as the name — the reference's
+              arrangement — and padded down by the avatar's overlap so it lines
+              up with the identity rather than floating beside the photo. Below
+              `sm` it is not rendered here at all: the same node appears in the
+              identity column instead (§22). One breakpoint, so the buttons are
+              never on screen twice. */}
+          {actions ? (
+            <div
+              data-testid="profile-actions"
+              className="hidden min-w-0 flex-wrap items-center justify-end gap-2 sm:col-start-3 sm:row-start-1 sm:flex sm:max-w-[20rem] sm:pt-12"
+            >
+              {actions}
+            </div>
+          ) : null}
+        {/* (the grid stays open: the identity block belongs to it) */}
 
-                {p.bio && <p className="mt-2 max-w-xl text-sm leading-relaxed text-foreground/90">{p.bio}</p>}
+        {/* ── Identity (§7, §8, §9) ───────────────────────────────────────────
+            Two placements, one rule — never on the banner:
 
-                {p.location && (
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <MapPin className="h-3.5 w-3.5" />
-                    {p.location}
-                  </p>
-                )}
+              phones   col 1, row 2   → the avatar owns row 1 alone, so the name
+                                        begins under the photo
+              sm and up col 2, row 1  → beside the avatar, as the reference draws
+                                        it, with `sm:pt-12` reserving the avatar's
+                                        overlap so the name still starts at the
+                                        banner's lower edge, not above it */}
+        <div className="col-start-1 col-end-3 row-start-2 min-w-0 sm:col-start-2 sm:col-end-3 sm:row-start-1 sm:pt-12">
+          <h1 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[22px] font-bold leading-tight tracking-tight text-foreground sm:text-[28px]">
+            <span className="min-w-0 break-words">
+              {user.firstName} {user.lastName}
+            </span>
+            {user.verified && <BadgeCheck className="h-5 w-5 shrink-0 text-primary" aria-label="Verified" />}
+          </h1>
 
-                {chips.length > 0 && (
-                  <div className="mt-2.5 flex flex-wrap gap-1.5">
-                    {chips.map((c: string) => (
-                      <span
-                        key={c}
-                        className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold text-muted-foreground"
-                      >
-                        {c}
-                      </span>
-                    ))}
-                  </div>
-                )}
+          {user.username ? (
+            <Link
+              href={`/profile/${user.username}`}
+              data-testid="profile-username"
+              className="mt-0.5 inline-block max-w-full truncate text-sm text-muted-foreground hover:text-primary"
+            >
+              @{user.username}
+            </Link>
+          ) : (
+            <p className="mt-0.5 text-sm text-muted-foreground">@{handleOf(user)}</p>
+          )}
 
-                {interests.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {interests.map((t: string) => (
-                      <Link
-                        key={t}
-                        href={`/explore?q=${encodeURIComponent(t)}`}
-                        className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary hover:bg-primary/15"
-                      >
-                        {t}
-                      </Link>
-                    ))}
-                  </div>
-                )}
+          {/* §22 — phones and tablets get the actions in the identity column,
+              directly under the handle, and the desktop third column is not
+              rendered at all below `sm`. One node visible at any width. */}
+          {actions ? (
+            <div data-testid="profile-actions" className="mt-4 flex flex-wrap items-center gap-2 sm:hidden">
+              {actions}
+            </div>
+          ) : null}
 
-                {user.createdAt && (
-                  <p className="mt-2.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <CalendarDays className="h-3.5 w-3.5" />
-                    Joined {new Date(user.createdAt).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
-                  </p>
-                )}
-              </div>
-          </div>
-
-          {/* The actions region — a direct child of the grid, so its track is
-              real. Below `xl` it spans both columns and sits under the
-              identity; at `xl` it takes its own third column on the right.
-              Either way it can wrap internally and can never reach the text. */}
-              {/* The actions region. It spans the full width under the
-                  identity below `xl` (so a laptop never squeezes the name),
-                  takes its own column at `xl`, and wraps internally — the
-                  three-button case (Follow · Message · More) can reflow but
-                  can never reach the text. */}
-              {actions && (
-                <div className="col-span-2 col-start-1 flex flex-wrap items-center gap-2 xl:col-span-1 xl:col-start-3 xl:row-start-1 xl:justify-end">
-                  {actions}
-                </div>
-              )}
-        </div>
-
-        {/* ── Social stat row (§5) ────────────────────────────────────────
-         * A compact inline row — Posts · Followers · Following — not five
-         * dashboard tiles. The tiles were a card grid with their own
-         * backgrounds and padding: 200px of vertical space to say three
-         * numbers, and they read as an admin panel rather than a profile.
-         *
-         * Real numbers only, and the Posts figure now excludes archived posts
-         * so it agrees with the Posts tab underneath it.
-         *
-         * Event-first identity is kept, not dropped: the events line below is
-         * the part of this header that no other social product has. */}
-        {stats && (
-          <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border pt-4 sm:gap-x-5">
-            <Stat value={stats.posts} label="Posts" />
-            <Stat value={stats.followers} label="Followers" onClick={onOpenFollowers} />
-            <Stat value={stats.following} label="Following" onClick={onOpenFollowing} />
-            {/* Only when there is something real to say. A brand-new account
-                shows no event line rather than "0 events attended". */}
-            {(stats.eventsAttended > 0 || (stats.eventsCreated || 0) > 0) && (
-              <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
-                <CalendarDays className="h-3.5 w-3.5" aria-hidden />
-                {stats.eventsAttended > 0 && (
-                  <span>
-                    <b className="font-semibold text-foreground">{compactCount(stats.eventsAttended)}</b> attended
-                  </span>
-                )}
-                {stats.eventsAttended > 0 && (stats.eventsCreated || 0) > 0 && <span aria-hidden>·</span>}
-                {(stats.eventsCreated || 0) > 0 && (
-                  <span>
-                    <b className="font-semibold text-foreground">{compactCount(stats.eventsCreated!)}</b> hosted
-                  </span>
-                )}
+          {/* ── Metadata (§11) ────────────────────────────────────────────────
+            Only what identifies or affiliates the person: where they are, what
+            they study at / work for, their link, and when they joined.
+            Academic year is deliberately NOT here (§1): "BTech · 2nd Year" was
+            a course-and-year chip pair the reference drops, and a year of study
+            is the least durable thing about anyone. It stays editable in the
+            profile sheet — it is simply not part of the header. */}
+        {(p.location || p.institution || p.website || joined) && (
+          <div data-testid="profile-meta" className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px] text-muted-foreground">
+            {p.location && (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="break-words">{p.location}</span>
+              </span>
+            )}
+            {p.institution && (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <GraduationCap className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="break-words">{p.institution}</span>
+              </span>
+            )}
+            {p.website && (
+              <a
+                href={p.website}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="flex min-w-0 items-center gap-1.5 hover:text-primary"
+              >
+                <Link2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="break-words">{prettyUrl(p.website)}</span>
+              </a>
+            )}
+            {joined && (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="break-words">Joined {joined}</span>
               </span>
             )}
           </div>
         )}
+
+        {/* ── Bio (§12) — real text or nothing at all ─────────────────────── */}
+        {p.bio && (
+          <p data-testid="profile-bio" className="mt-3 max-w-xl text-sm leading-relaxed text-foreground/90">
+            {p.bio}
+          </p>
+        )}
+
+        {/* ── Tags (§13) — the user's own interests, wrapping naturally ───── */}
+        {interests.length > 0 && (
+          <div data-testid="profile-tags" className="mt-3 flex flex-wrap gap-1.5">
+            {interests.map((t: string) => (
+              <Link
+                key={t}
+                href={`/explore?q=${encodeURIComponent(t)}`}
+                className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/15"
+              >
+                {t}
+              </Link>
+            ))}
+          </div>
+        )}
+
+          {/* ── Stats (§14, §15) ──────────────────────────────────────────────
+              Five real numbers, no tiles and no gauges: a five-column row on a
+              phone (so nothing is clipped at 320), a single separated row from
+              `sm`. Every value is the server's — the reference's numbers are
+              illustrative and are never copied.
+
+              It lives INSIDE the identity column so its left edge lines up with
+              the name and the metadata at every width, with no magic offsets:
+              the avatar's track is `auto`, so only a real grid sibling can
+              follow it. */}
+        {stats && (
+          <div data-testid="profile-stats" className="mt-5 grid grid-cols-5 gap-y-3 border-t border-border pt-4 sm:flex sm:flex-wrap sm:items-start sm:gap-0 sm:divide-x sm:divide-border">
+            <div className="min-w-0 sm:pr-6">
+              <Stat value={stats.posts} label="Posts" />
+            </div>
+            <div className="min-w-0 sm:px-6">
+              <Stat value={stats.followers} label="Followers" onClick={onOpenFollowers} />
+            </div>
+            <div className="min-w-0 sm:px-6">
+              <Stat value={stats.following} label="Following" onClick={onOpenFollowing} />
+            </div>
+            <div className="min-w-0 sm:px-6">
+              <Stat value={stats.eventsAttended} label="Events Attended" shortLabel="Attended" pluralize={false} />
+            </div>
+            <div className="min-w-0 sm:px-6">
+              <Stat value={stats.eventsCreated || 0} label="Events Hosted" shortLabel="Hosted" pluralize={false} />
+            </div>
+          </div>
+        )}
+          </div>
+        </div>
+        {/* ── end of the header grid ───────────────────────────────────────────
+            The identity block above is inside it, so the name occupies the grid's
+            own column beside the avatar and the actions keep their third track.
+            The stats row sits outside, spanning the full card width, the way the
+            reference draws it. */}
+
       </div>
 
       <AvatarPreview

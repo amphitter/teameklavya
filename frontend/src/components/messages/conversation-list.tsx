@@ -17,6 +17,10 @@ import { UserAvatar } from "@/components/user-avatar";
 import { handleOf, timeAgo } from "@/lib/social";
 import { PresenceDot } from "@/components/messages/presence-dot";
 import type { ConversationRow } from "@/lib/messages/store";
+import { usePeopleSearch, type PersonResult } from "@/components/people/use-people-search";
+import { PersonRow } from "@/components/people/person-row";
+import { useStartConversation } from "@/hooks/use-messages";
+import { useSessionUser } from "@/components/shell/use-session-user";
 
 export type InboxTab = "all" | "unread" | "teams" | "archived";
 
@@ -202,6 +206,38 @@ export interface ConversationListProps {
   onCreateTeam?: () => void;
 }
 
+/**
+ * One person in the search results (§78).
+ *
+ * Tapping starts or opens the conversation — never a profile detour. It uses
+ * the same `useStartConversation` path as the profile button, so a person found
+ * here and a person found on their profile reach the same thread, created once.
+ */
+function PersonHit({ person }: { person: PersonResult }) {
+  const { start, isPending } = useStartConversation();
+  const pending = isPending(person._id);
+
+  return (
+    <li>
+      <PersonRow
+        person={person}
+        onSelect={() => void start(person._id)}
+        action={
+          pending ? (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden />
+          ) : (
+            <span className="flex shrink-0 items-center gap-1 text-[12px] font-semibold text-primary">
+              <MessageCircle className="h-3.5 w-3.5" aria-hidden />
+              Message
+            </span>
+          )
+        }
+        className={pending ? "opacity-70" : undefined}
+      />
+    </li>
+  );
+}
+
 export function ConversationList({
   rows,
   loading,
@@ -221,7 +257,22 @@ export function ConversationList({
   linkPrefix,
   onCreateTeam,
 }: ConversationListProps) {
-  const shown = search.trim() ? searchResults || [] : rows;
+  const query = search.trim();
+  const isSearching = query.length > 0;
+  const shown = isSearching ? searchResults || [] : rows;
+
+  /* §76–§81 — the SAME search surface answers both questions:
+     "which chat was that?" and "who do I want to message?".
+     People come from the existing server-side search (debounced, projected,
+     paginated by the server), never from a list of every user held in the
+     browser (§79). The viewer is excluded: you cannot message yourself. */
+  const { user } = useSessionUser();
+  const { results: people, loading: peopleLoading, error: peopleError, searched: peopleSearched } = usePeopleSearch(query, {
+    limit: 8,
+    excludeIds: user?._id ? [user._id] : [],
+  });
+  const peopleToShow = people;
+  const chatsShown = searching ? [] : shown;
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
@@ -275,10 +326,16 @@ export function ConversationList({
           <input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search people or messages"
+            placeholder="Search people or chats"
             aria-label="Search conversations"
             enterKeyHint="search"
-            className="h-9 w-full rounded-lg border border-outline-variant bg-surface-container pl-8 pr-8 text-[14px] outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12"
+            /* §84 — 16px on phones, and ONLY on phones.
+               iOS Safari zooms the whole page when a focused field is
+               smaller than 16px, which is what "the DM UI zooms in" was.
+               `text-base` is 16px; it returns to the tighter 14px from `sm`
+               where no such behaviour exists, and nothing about zoom is
+               disabled elsewhere on the site. */
+            className="h-9 w-full rounded-lg border border-outline-variant bg-surface-container pl-8 pr-8 text-base outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 sm:text-[14px]"
           />
           {search ? (
             <button
@@ -331,9 +388,65 @@ export function ConversationList({
 
       {/* Body */}
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain" onScroll={handleScroll}>
-        {searching ? (
-          <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-on-surface-variant">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Searching…
+        {isSearching ? (
+          /* ── Unified search results ───────────────────────────────────
+             Two labelled sections, people first: "message someone" is the
+             action a search inside Messages is usually reaching for, and the
+             chat you were half-remembering is the second. Both are live
+             server searches; neither blocks the other. */
+          <div className="pb-4" data-testid="message-search-results">
+            <section aria-label="People">
+              <h2 className="px-3 pb-1 pt-3 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                People
+              </h2>
+              {peopleLoading && !peopleToShow.length ? (
+                <div className="flex items-center gap-2 px-3 py-3 text-[13px] text-on-surface-variant">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Searching people…
+                </div>
+              ) : peopleToShow.length ? (
+                <ul className="divide-y divide-outline-variant/50">
+                  {peopleToShow.map((person) => (
+                    <PersonHit key={person._id} person={person} />
+                  ))}
+                </ul>
+              ) : peopleError ? (
+                <p className="px-3 py-3 text-[13px] text-on-surface-variant">
+                  Couldn&apos;t search people right now.
+                </p>
+              ) : peopleSearched && query.length >= 2 ? (
+                /* §80 — a real empty state, never a blank panel. */
+                <p className="px-3 py-3 text-[13px] text-on-surface-variant" data-testid="no-people-found">
+                  No people found for “{query}”.
+                </p>
+              ) : (
+                <p className="px-3 py-3 text-[13px] text-on-surface-variant">
+                  Keep typing to search people.
+                </p>
+              )}
+            </section>
+
+            <section aria-label="Chats" className="mt-1 border-t border-outline-variant/60">
+              <h2 className="px-3 pb-1 pt-3 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                Chats
+              </h2>
+              {searching && !chatsShown.length ? (
+                <div className="flex items-center gap-2 px-3 py-3 text-[13px] text-on-surface-variant">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Searching chats…
+                </div>
+              ) : chatsShown.length ? (
+                <ul className="divide-y divide-outline-variant/50">
+                  {chatsShown.map((row) => (
+                    <ConversationItem key={row._id} row={row} active={activeId === row._id} onOpen={onOpen} />
+                  ))}
+                </ul>
+              ) : query.length >= 2 && !searching ? (
+                <p className="px-3 py-3 text-[13px] text-on-surface-variant" data-testid="no-chats-found">
+                  No chats match “{query}”. Pick someone above to start one.
+                </p>
+              ) : !searching ? (
+                <p className="px-3 py-3 text-[13px] text-on-surface-variant">Keep typing to search chats.</p>
+              ) : null}
+            </section>
           </div>
         ) : loading && !shown.length ? (
           <ConversationListSkeleton />

@@ -262,6 +262,24 @@ async function feedSection(browser) {
   }).then((r) => r.json());
   ok(Boolean(created?.post?._id), "feed fixture: an unseen post was published by another user");
 
+  /* §16/§22 — the boundary exists where the fresh stream stops being NEW, so
+     the fixture must give the viewer a real history: without one nothing can be
+     demoted and the section is correctly absent (a brand-new account has no
+     "caught up" to be). Recorded through the public impressions endpoint, on
+     the OLDEST posts, so the demoted cards land after unseen ones. */
+  const histFeed = await fetch(`${API}/posts/feed?limit=24`, {
+    headers: { Authorization: `Bearer ${QA.ana.token}` },
+  }).then((r) => r.json());
+  const historyIds = (histFeed.posts || []).slice(-3).map((p) => p._id);
+  const histRes = historyIds.length
+    ? await fetch(`${API}/posts/impressions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${QA.ana.token}` },
+        body: JSON.stringify({ postIds: historyIds, kind: "seen" }),
+      })
+    : null;
+  ok(historyIds.length === 3 && (!histRes || histRes.ok), `feed fixture: the viewer has a history to be caught up with (${historyIds.length} posts)`);
+
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
   const feedCalls = [];

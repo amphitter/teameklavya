@@ -13,6 +13,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Loader2, MessageCircleOff } from "lucide-react";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import {
   ConversationList,
@@ -20,6 +21,7 @@ import {
   isTeamRow,
   type InboxTab,
 } from "@/components/messages/conversation-list";
+import { Button } from "@/components/ui/button";
 import { TeamCreateSheet } from "@/components/messages/team-create-sheet";
 import { useConversationSearch, useInbox, useResolveConversation, useUnread } from "@/hooks/use-messages";
 import { useDmSocket } from "@/hooks/use-dm-socket";
@@ -66,7 +68,13 @@ function MessagesInbox() {
    * it is there for clients that cannot hold the full list.) */
   const { rows: allRows, loading, error, hasMore, loadMore, refresh } = useInbox(archived ? "archived" : "all");
   const { inbox: unreadInbox, archived: unreadArchived } = useUnread();
-  const { conversationId: resolvedId } = useResolveConversation(withUser, user?._id);
+  /* A notification links to `?c=<conversationId>` — the conversation already
+     exists, so there is nothing to resolve and the thread can open directly.
+     `?with=<userId>` is kept for deep links and for anything that still wants
+     the get-or-create behaviour. */
+  const withConversation = params.get("c");
+  const { conversationId: resolvedId, error: resolveError, loading: resolving, retry: retryResolve } =
+    useResolveConversation(withUser, user?._id);
 
   /* §25 — one debounced server request per settled query, never one per
      keystroke. The input's own state is separate from the query that is
@@ -88,11 +96,14 @@ function MessagesInbox() {
     [router]
   );
 
-  // Arriving with ?with=<userId> means "start a chat with this person", so
-  // navigate straight into it once the conversation exists.
+  /* §99 — every entry point lands on the same thread route. A conversation id
+     goes straight there; a user id goes through get-or-create first. */
   useEffect(() => {
-    if (resolvedId) router.replace(`/messages/${resolvedId}`);
-  }, [resolvedId, router]);
+    if (withConversation) router.replace(`/messages/${withConversation}`);
+    else if (resolvedId) router.replace(`/messages/${resolvedId}`);
+  }, [resolvedId, withConversation, router]);
+
+
 
   /* Every tab is a filter over the rows we already hold — no tab costs a
    * request, so switching is instant (§"chats load slowly"). */
@@ -106,6 +117,44 @@ function MessagesInbox() {
     return (
       <div className="h-full p-3">
         <ConversationListSkeleton />
+      </div>
+    );
+  }
+
+  /* A deep link is being resolved (or has failed). Showing the inbox underneath
+     would flash a list the user did not ask for and then replace it — so the
+     surface holds the space and says what is happening. §73: the failure is
+     STATED, with the server's reason and a retry, never swallowed. */
+  if (withUser && (resolving || resolveError)) {
+    return (
+      <div className="mx-auto flex h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))] w-full max-w-[1200px] flex-col items-center justify-center gap-3 px-6 text-center lg:h-[calc(100dvh-3.5rem)]">
+        {resolving ? (
+          <>
+            <Loader2 className="h-6 w-6 animate-spin text-primary" aria-hidden />
+            <p className="text-sm font-semibold text-on-surface">Opening conversation…</p>
+            <p className="text-xs text-on-surface-variant">This only takes a moment.</p>
+          </>
+        ) : (
+          <>
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+              <MessageCircleOff className="h-5 w-5" aria-hidden />
+            </div>
+            <p className="text-sm font-semibold text-on-surface">Couldn&apos;t open that conversation</p>
+            {/* The backend distinguishes self / blocked / "doesn't accept
+                messages" / unknown user, so its words are the useful ones. */}
+            <p role="alert" className="max-w-sm text-xs text-on-surface-variant">
+              {resolveError}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={retryResolve} data-testid="conversation-retry">
+                Try again
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => router.replace("/messages")}>
+                Back to messages
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     );
   }

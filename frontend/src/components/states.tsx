@@ -23,6 +23,7 @@ export function EmptyState({
   actionLabel,
   onAction,
   className,
+  compact = false,
 }: {
   icon?: React.ComponentType<{ className?: string }>;
   title: string;
@@ -31,21 +32,39 @@ export function EmptyState({
   actionLabel?: string;
   onAction?: () => void;
   className?: string;
+  /**
+   * §96 — tighter proportions for an empty state that sits INSIDE a page which
+   * already has a header (a profile tab). The default reserves ~220px, which
+   * under a profile header read as "this page failed to load" rather than
+   * "there is nothing here yet". Opt-in, so every other caller keeps the
+   * original proportions.
+   */
+  compact?: boolean;
 }) {
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-6 py-14 text-center",
+        "flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 text-center",
+        compact ? "px-4 py-8" : "px-6 py-14",
         className
       )}
     >
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-light text-primary">
-        <Icon className="h-7 w-7" />
+      <div
+        className={cn(
+          "flex items-center justify-center rounded-full bg-brand-light text-primary",
+          compact ? "h-11 w-11" : "h-14 w-14"
+        )}
+      >
+        <Icon className={compact ? "h-5 w-5" : "h-7 w-7"} />
       </div>
-      <h3 className="mt-4 text-base font-semibold text-foreground">{title}</h3>
-      {description && <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{description}</p>}
+      <h3 className={cn("font-semibold text-foreground", compact ? "mt-3 text-sm" : "mt-4 text-base")}>{title}</h3>
+      {description && (
+        <p className={cn("max-w-sm text-muted-foreground", compact ? "mt-1 text-[13px]" : "mt-1.5 text-sm")}>
+          {description}
+        </p>
+      )}
       {(action || actionLabel) && (
-        <div className="mt-5">
+        <div className={compact ? "mt-3" : "mt-5"}>
           {action ?? (
             <Button size="sm" onClick={onAction}>
               {actionLabel}

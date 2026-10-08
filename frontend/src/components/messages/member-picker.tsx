@@ -196,7 +196,7 @@ export function MemberPicker({ meId, lockedIds = [], selected, onChange, busy }:
             placeholder={source === "anyone" ? "Search anyone on EventHub" : "Search your list"}
             aria-label="Search people"
             enterKeyHint="search"
-            className="h-10 w-full rounded-lg border border-outline-variant bg-surface-container pl-8 pr-8 text-[14px] outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary"
+            className="h-10 w-full rounded-lg border border-outline-variant bg-surface-container pl-8 pr-8 text-base outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary sm:text-[14px]"
           />
           {query ? (
             <button

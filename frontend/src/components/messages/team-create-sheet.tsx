@@ -144,7 +144,7 @@ export function TeamCreateSheet({ open, onClose, onCreated }: TeamCreateSheetPro
             placeholder="e.g. Robotics Club Core"
             autoComplete="off"
             enterKeyHint="done"
-            className="h-11 w-full rounded-lg border border-outline-variant bg-surface-container px-3 text-[15px] outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary"
+            className="h-11 w-full rounded-lg border border-outline-variant bg-surface-container px-3 text-base outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary sm:text-[15px]"
           />
           {!trimmed ? (
             <p className="mt-1 text-[11px] text-on-surface-variant">A name is required.</p>

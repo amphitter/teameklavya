@@ -224,7 +224,11 @@ export function MessageComposer({
              pill — a scrollbar sitting in the message box. Hidden here via the
              project's own `.no-scrollbar` utility plus `scrollbar-width` for
              Firefox; wheel, drag and arrow-key scrolling all still work. */
-          className="no-scrollbar max-h-[8.25rem] min-h-[2.5rem] flex-1 resize-none overflow-y-auto [scrollbar-width:none] rounded-2xl border border-outline-variant bg-surface px-3.5 py-2.5 text-[15px] leading-snug outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 disabled:opacity-60"
+          /* §84 — the 16px floor for focus, on phones only.
+               iOS zooms the page when a focused input's font-size is under
+               16px; the composer was 15px, so tapping it magnified the whole
+               thread. From `sm` it returns to its designed 15px. */
+          className="no-scrollbar max-h-[8.25rem] min-h-[2.5rem] flex-1 resize-none overflow-y-auto [scrollbar-width:none] rounded-2xl border border-outline-variant bg-surface px-3.5 py-2.5 text-base leading-snug outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 disabled:opacity-60 sm:text-[15px]"
         />
 
         <button

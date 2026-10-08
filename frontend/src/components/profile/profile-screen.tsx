@@ -38,6 +38,7 @@ import { FollowListModal } from "@/components/social/follow-list-modal";
 import { ErrorState, PageLoader, EmptyState } from "@/components/states";
 import { ProfileHeader, type ProfileStats } from "@/components/profile/profile-header";
 import { EditProfileSheet } from "@/components/profile/edit-profile-sheet";
+import { MessageButton } from "@/components/messages/message-button";
 import { updateSessionUser } from "@/components/shell/use-session-user";
 import { MediaGrid } from "@/components/profile/media-grid";
 import { PostList } from "@/components/feed/post-list";
@@ -443,7 +444,7 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
               </DropdownMenu>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
                 variant={following || requested ? "outline" : "default"}
@@ -454,15 +455,17 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
                 <UserPlus className="h-3.5 w-3.5" />
                 {following ? "Following" : requested ? "Requested" : me ? "Follow" : "Sign in to follow"}
               </Button>
+              {/* §71–§75 — resolves the conversation HERE, then navigates
+                  straight into it. The old button pushed `/messages?with=…`
+                  and left the destination page to create the chat, so a
+                  failure surfaced after navigation, on a screen nobody asked
+                  for. This one shows "Opening…", cannot be double-fired, and
+                  reports the server's own reason when it refuses. */}
               {me && !blocked && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => router.push(`/messages?with=${profileUser._id}`)}
-                  className="gap-1.5"
-                >
-                  <MessageCircle className="h-3.5 w-3.5" /> Message
-                </Button>
+                <MessageButton
+                  userId={profileUser._id}
+                  name={`${profileUser.firstName || ""} ${profileUser.lastName || ""}`.trim() || profileUser.username}
+                />
               )}
               {me && (
                 <DropdownMenu>
@@ -586,12 +589,14 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
               key={`posts-${profileUser._id}`}
               endpoint={({ page }) => `/users/${profileUser._id}/posts?page=${page}&limit=12`}
               emptyIcon={CalendarDays}
-              emptyTitle={isMe ? "Your story starts here." : "Nothing shared yet."}
+              /* §96 — short, specific, and not a full-height dashed panel. */
+              emptyTitle={isMe ? "No posts yet." : "No posts yet."}
               emptyDescription={
                 isMe
-                  ? "Share an event moment and it will show up here — with the same likes, comments and saves as the feed."
-                  : `When ${profileUser.firstName} shares event moments, they'll appear here.`
+                  ? "When you share something, it'll appear here."
+                  : `When ${profileUser.firstName} shares something, it'll appear here.`
               }
+              emptyCompact
               emptyAction={
                 isMe ? (
                   <Button asChild size="sm" className="gap-1.5">
@@ -700,6 +705,7 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
               key="saved"
               endpoint={({ cursor }) => `/posts/saved?limit=12${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`}
               emptyIcon={Bookmark}
+              emptyCompact
               emptyTitle="Nothing saved yet"
               emptyDescription="Save something you want to come back to — tap the bookmark on any post."
               notice={<PrivateNote>Only you can see what you save. Other people never see this list.</PrivateNote>}
@@ -712,6 +718,7 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
               key="liked"
               endpoint={({ cursor }) => `/posts/liked?limit=12${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`}
               emptyIcon={Heart}
+              emptyCompact
               emptyTitle="Nothing liked yet"
               emptyDescription="Posts you like show up here, newest reaction first."
               notice={<PrivateNote>Only you can see this. Liking a post is public — this list is not.</PrivateNote>}
@@ -731,6 +738,7 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
                 key="archive"
                 endpoint={({ cursor }) => `/posts/archived?limit=12${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`}
                 emptyIcon={ArchiveIcon}
+              emptyCompact
                 emptyTitle="Nothing archived"
                 emptyDescription="Archive a post from its ••• menu to set it aside without deleting it."
                 /* A restored post belongs on the profile, not in the archive —

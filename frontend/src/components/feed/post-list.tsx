@@ -44,6 +44,8 @@ interface PostListProps {
   emptyTitle: string;
   emptyDescription?: string;
   emptyAction?: React.ReactNode;
+  /** §96 — compact empty state for a tab inside a page with its own header. */
+  emptyCompact?: boolean;
   /** Page size hint. */
   limit?: number;
   /** Extra line above the list (e.g. "private to you"). */
@@ -67,6 +69,7 @@ export function PostList({
   emptyTitle,
   emptyDescription,
   emptyAction,
+  emptyCompact = false,
   limit = 12,
   notice,
   onStateChange,
@@ -170,6 +173,7 @@ export function PostList({
   if (posts.length === 0) {
     return (
       <EmptyState
+        compact={emptyCompact}
         icon={EmptyIcon ?? (({ className }) => <span className={className} />)}
         title={emptyTitle}
         description={emptyDescription}

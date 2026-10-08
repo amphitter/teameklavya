@@ -204,7 +204,7 @@ export function TeamInfoSheet({ open, conversationId, name, onClose, onLeft }: T
                 <input
                   value={teamName}
                   onChange={(e) => setTeamName(e.target.value.slice(0, 80))}
-                  className="h-10 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface-container px-3 text-[14px] outline-none focus-visible:border-primary"
+                  className="h-10 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface-container px-3 text-base outline-none focus-visible:border-primary sm:text-[14px]"
                   aria-label="Team name"
                 />
                 <button

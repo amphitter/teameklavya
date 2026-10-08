@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/utils/api";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import type { ChatMessage } from "@/hooks/use-social";
@@ -247,6 +248,94 @@ export interface UseThreadResult extends ThreadState {
 }
 
 /**
+ * Put a conversation row in the inbox store before its thread exists.
+ *
+ * Opening a chat straight after creating it used to depend on the inbox having
+ * been fetched already; if it had not, the thread rendered with no name and no
+ * avatar until the list arrived. Seeding the row means the header is correct on
+ * the first paint (§6 — "show user B in the chat header").
+ */
+export function seedConversationRow(conversationId: string, other?: ConversationRow["other"] | null) {
+  /* Without the peer there is nothing to show, so there is nothing to seed —
+     the header falls back to its own loading state instead of an empty row. */
+  if (!conversationId || !other) return;
+  inbox.upsert(false, {
+    _id: conversationId,
+    other,
+    lastMessage: null,
+    updatedAt: new Date().toISOString(),
+    unreadCount: 0,
+    archived: false,
+  });
+}
+
+/**
+ * START A CONVERSATION — the one path for "message this person" (§72–§75).
+ *
+ * Every entry point uses this: the profile button, a people-search result, a
+ * notification, a shared post. It exists because the previous flow pushed
+ * `/messages?with=<id>` and left the *destination page* to create the
+ * conversation — so a failure happened after navigation, on a screen the user
+ * did not ask for, with no way to tell them what went wrong. The button now
+ * resolves the conversation BEFORE it navigates and reports the server's own
+ * message when it cannot.
+ *
+ * Guarantees:
+ *  · get-or-create — the endpoint is idempotent, so opening an existing chat
+ *    never makes a second one (§74); repeated clicks are collapsed client-side
+ *    too, so a double tap is one request (§75);
+ *  · the pending state is per person, so a slow request for one row cannot
+ *    disable a different row;
+ *  · the returned conversation id is used directly — no intermediate route,
+ *    no full inbox round-trip (§2, "load speed is acceptance").
+ */
+export function useStartConversation() {
+  const router = useRouter();
+  const [pendingFor, setPendingFor] = useState<string | null>(null);
+  const [error, setError] = useState<{ userId: string; message: string } | null>(null);
+  /* A ref, not state: two taps in the same tick must not both pass the guard. */
+  const inFlight = useRef<Set<string>>(new Set());
+
+  const start = useCallback(
+    async (userId: string): Promise<string | null> => {
+      if (!userId) return null;
+      if (inFlight.current.has(userId)) return null;
+      inFlight.current.add(userId);
+      setPendingFor(userId);
+      setError(null);
+      try {
+        const r = await api.post("/messages/conversations", { userId });
+        const conversationId = r.data?.conversationId;
+        if (!conversationId) {
+          setError({ userId, message: "Couldn't open that conversation. Please try again." });
+          return null;
+        }
+        seedConversationRow(conversationId, r.data?.other);
+        router.push(`/messages/${conversationId}`);
+        return conversationId;
+      } catch (e) {
+        /* The server distinguishes these cases itself — self, blocked, "this
+           user doesn't accept messages", unknown user — so its message is the
+           one worth showing. A generic string would throw that away (§73). */
+        const message =
+          (e as { response?: { data?: { message?: string } }; message?: string })?.response?.data?.message ||
+          "Couldn't open that conversation. Check your connection and try again.";
+        setError({ userId, message });
+        return null;
+      } finally {
+        inFlight.current.delete(userId);
+        setPendingFor(null);
+      }
+    },
+    [router]
+  );
+
+  const clearError = useCallback(() => setError(null), []);
+
+  return { start, pendingFor, error, clearError, isPending: (id: string) => pendingFor === id };
+}
+
+/**
  * Resolve a conversation id for the thread.
  *
  * `withUser` covers "message this person" from a profile: we need a
@@ -257,6 +346,9 @@ export function useResolveConversation(withUser: string | null | undefined, curr
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(withUser));
+  /* Bumped by `retry()`; part of the effect's identity so asking again really
+     asks again (a same-URL replace would otherwise be a no-op). */
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!withUser || withUser === currentUserId) {
@@ -291,9 +383,15 @@ export function useResolveConversation(withUser: string | null | undefined, curr
     return () => {
       alive = false;
     };
-  }, [withUser, currentUserId]);
+  }, [withUser, currentUserId, nonce]);
 
-  return { conversationId, error, loading };
+  const retry = useCallback(() => {
+    setError(null);
+    setConversationId(null);
+    setNonce((n) => n + 1);
+  }, []);
+
+  return { conversationId, error, loading, retry };
 }
 
 export function useThread(conversationId: string | null): UseThreadResult {

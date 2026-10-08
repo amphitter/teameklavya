@@ -132,12 +132,32 @@ export function ProfileHeader({
        * edit-profile feature was unclickable with a mouse. Measured before the
        * fix: button top 174, cover bottom 230. */}
       <div className="relative z-10 px-5 pb-5 sm:px-7 sm:pb-7">
-        <div className="-mt-12 flex flex-col gap-5 sm:-mt-14 sm:flex-row sm:items-start">
+        {/* ── Header regions (§90–§95) ──────────────────────────────────
+             A GRID, because the overlap was structural rather than cosmetic:
+             identity and actions used to share one flex row in which the
+             actions were `shrink-0` and could not wrap. From 640px upward
+             that row had a min-content width larger than the card on a
+             laptop — and the card is `overflow-hidden`, so the actions were
+             CLIPPED over the name and handle instead of pushing anything.
+
+             Now each region owns a track:
+
+               [ avatar ] [ identity ]                     (phones, tablet)
+                          [ actions  ]                     ← wraps below
+
+               [ avatar ] [ identity ] [ actions ]         (xl and up)
+
+             `minmax(0,1fr)` is what lets the identity column shrink instead
+             of forcing the grid wider; the actions track sizes to its content
+             but wraps internally, so its own min-content is one button — about
+             110px, which fits even at 320px. Nothing is positioned absolutely,
+             so nothing can land on top of anything else. */}
+        <div className="-mt-10 grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-4 gap-y-4 sm:-mt-14 sm:gap-x-5 xl:grid-cols-[auto_minmax(0,1fr)_auto]">
           {/* `w-fit` is load-bearing: in the mobile column the flex container
               stretches its children, so this ring was drawn the full width of
               the card — a giant pill outline lying across the cover, with the
               photo parked at its left edge. The ring must hug the avatar. */}
-          <div className="w-fit shrink-0 rounded-full border-4 border-card">
+          <div className="col-start-1 row-start-1 w-fit shrink-0 rounded-full border-4 border-card">
             {/* Tapping the avatar opens it at full size (Phase 4). This is the
                 one surface where the avatar had no handler: in the feed it is a
                 Link to the profile, and hijacking that would put two meanings
@@ -153,13 +173,12 @@ export function ProfileHeader({
               aria-label={avatarUrlOf(user) ? "View profile photo" : "Profile photo, not added yet"}
               className="block rounded-full transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2"
             >
-              <UserAvatar user={user} size={96} className="!h-24 !w-24" />
+              <UserAvatar user={user} size={96} className="!h-20 !w-20 sm:!h-24 sm:!w-24" />
             </button>
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
+          <div className="col-start-2 row-start-1 min-w-0">
+            <div className="min-w-0">
                 <h1 className="flex flex-wrap items-center gap-1.5 text-xl font-bold tracking-tight text-foreground sm:text-2xl">
                   {user.firstName} {user.lastName}
                   {user.verified && (
@@ -220,9 +239,22 @@ export function ProfileHeader({
                   </p>
                 )}
               </div>
-              {actions && <div className="flex shrink-0 gap-2">{actions}</div>}
-            </div>
           </div>
+
+          {/* The actions region — a direct child of the grid, so its track is
+              real. Below `xl` it spans both columns and sits under the
+              identity; at `xl` it takes its own third column on the right.
+              Either way it can wrap internally and can never reach the text. */}
+              {/* The actions region. It spans the full width under the
+                  identity below `xl` (so a laptop never squeezes the name),
+                  takes its own column at `xl`, and wraps internally — the
+                  three-button case (Follow · Message · More) can reflow but
+                  can never reach the text. */}
+              {actions && (
+                <div className="col-span-2 col-start-1 flex flex-wrap items-center gap-2 xl:col-span-1 xl:col-start-3 xl:row-start-1 xl:justify-end">
+                  {actions}
+                </div>
+              )}
         </div>
 
         {/* ── Social stat row (§5) ────────────────────────────────────────

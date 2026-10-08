@@ -244,7 +244,7 @@ export function ProfileHeader({
           {actions ? (
             <div
               data-testid="profile-actions"
-              className="hidden min-w-0 flex-wrap items-center justify-end gap-2 sm:col-start-2 sm:col-end-3 sm:row-start-1 sm:flex"
+              className="hidden min-w-0 flex-wrap items-center justify-end gap-2 sm:col-start-2 sm:col-end-3 sm:row-start-1 sm:flex sm:pt-3"
             >
               {actions}
             </div>

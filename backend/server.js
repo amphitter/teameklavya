@@ -47,6 +47,13 @@ connectDB();
 // Social migrations (Part 3) — idempotent, runs once the DB is connected
 require('./migrations/social.migration').ensureUsernames();
 
+// Conversation pair-index repair (Part 10) — idempotent, same contract.
+// Mongoose creates the indexes a schema declares but never drops the ones it
+// does not, so the legacy unique `{ participants: 1 }` index (which permitted
+// exactly one conversation per person, and answered "Failed to start
+// conversation" with a 500) survived every deploy. This removes it in place.
+require('./migrations/conversation-index.migration').ensureConversationIndexes();
+
 // Initialize Express
 const app = express();
 

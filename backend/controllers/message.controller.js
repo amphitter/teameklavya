@@ -101,6 +101,30 @@ async function getOrCreateConversation(me, other) {
   try {
     return await Conversation.create({ participants: sorted, type: "direct" });
   } catch (err) {
+    /* ── The legacy index, met in the wild ────────────────────────────────
+     * `E11000` on `participants` is not a race and not the pair constraint —
+     * it is the old MULTIKEY unique `{ participants: 1 }` index, which
+     * forbids a person from being in a second conversation. Production served
+     * that as 500 "Failed to start conversation" for every new chat.
+     *
+     * The boot migration drops it; this is the same repair on the path that
+     * hit it, so a request arriving before (or between) boots does not have to
+     * wait for the next deploy. Bounded and idempotent: one repair, one retry,
+     * and the original error is re-thrown if the retry cannot help. */
+    if (err?.code === 11000 && err?.keyPattern?.participants) {
+      console.error(
+        "[conversations] legacy participants index hit at request time — repairing: " +
+          JSON.stringify({ index: err.keyValue, code: err.code })
+      );
+      const { ensureConversationIndexes } = require("../migrations/conversation-index.migration");
+      const repaired = await ensureConversationIndexes({ reason: "request-path" });
+      if (repaired?.dropped) {
+        const retried = await Conversation.create({ participants: sorted, type: "direct" }).catch(
+          () => null
+        );
+        if (retried) return retried;
+      }
+    }
     // Race: two requests created the pair at once — the unique index on
     // participantsKey let exactly one win. Return the winner.
     const raced = await Conversation.findOne({ participantsKey: key });
@@ -557,7 +581,28 @@ exports.startConversation = async (req, res) => {
     const convo = await getOrCreateConversation(req.user.id, otherId);
     res.json({ success: true, conversationId: convo._id, other });
   } catch (error) {
-    console.error("Start conversation error:", error.message);
+    /* A malformed id is a bad request, not a server fault — the frontend can
+       send a stale one after a user is deleted. */
+    if (error instanceof mongoose.Error.CastError) {
+      return res.status(400).json({ success: false, message: "That user no longer exists" });
+    }
+    /* No more mysteries (§73): a duplicate-key failure names the index that
+       caused it, so the log says WHICH constraint refused the write instead of
+       just "Failed to start conversation". */
+    if (error?.code === 11000) {
+      console.error(
+        "Start conversation E11000:",
+        JSON.stringify({ keyPattern: error.keyPattern, keyValue: error.keyValue })
+      );
+      const isPairConstraint = Boolean(error?.keyPattern?.participantsKey);
+      return res.status(isPairConstraint ? 409 : 500).json({
+        success: false,
+        message: isPairConstraint
+          ? "You already have a chat with this person"
+          : "Couldn't start the conversation — please try again",
+      });
+    }
+    console.error("Start conversation error:", error.message, error.stack?.split("\n")[1] || "");
     res.status(500).json({ success: false, message: "Failed to start conversation" });
   }
 };

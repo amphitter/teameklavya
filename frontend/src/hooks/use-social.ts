@@ -44,6 +44,8 @@ export interface StoryItem {
   categoryLabel?: string;
   event?: { _id: string; title?: string; slug?: string; bannerUrl?: string } | null;
   textOverlay?: string;
+  /** Part 9 §21 — the overlay layers, re-rendered by every client. */
+  layers?: import("@/components/stories/story-layer").StoryLayer[];
   link?: string;
   createdAt: string;
   expiresAt: string;

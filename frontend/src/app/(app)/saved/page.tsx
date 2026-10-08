@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Bookmark } from "lucide-react";
 import { OwnerListPage } from "@/components/feed/owner-list-page";
 
@@ -18,8 +19,15 @@ export default function SavedPage() {
       subtitle="Private to you — only you can see this list."
       icon={Bookmark}
       endpoint={({ cursor }) => `/posts/saved?limit=12${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`}
-      emptyTitle="Nothing saved yet"
+      emptyTitle="No saved posts yet."
       emptyDescription="Save something you want to come back to — tap the bookmark on any post."
+      /* §10 names the empty state and its way out; the action is a real link to
+         the events list, not a dead sentence. */
+      emptyAction={
+        <Link href="/events" className="text-[13px] font-semibold text-primary hover:underline">
+          Explore events →
+        </Link>
+      }
     />
   );
 }

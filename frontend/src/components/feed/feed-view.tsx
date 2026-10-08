@@ -10,7 +10,7 @@ import { CreatePost } from "@/components/feed/create-post";
 import { FeedPost } from "@/components/feed/feed-post";
 import { PostSkeleton } from "@/components/feed/post-skeleton";
 import { StoryRail } from "@/components/stories/story-rail";
-import { StoryComposer } from "@/components/stories/story-composer";
+import { useComposer } from "@/components/post/composer-provider";
 import { StoryViewer } from "@/components/stories/story-viewer";
 import { useStories, useStoryCategories, useMarkStoryViewed, type StoryGroup } from "@/hooks/use-social";
 import { HomeGreeting } from "@/components/feed/home-greeting";
@@ -53,6 +53,7 @@ interface LiveBoard {
  */
 export function FeedView() {
   const { user, ready } = useSessionUser();
+  const { openStory } = useComposer();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("for-you");
   // Restore the last filter, and write it back on change.
@@ -381,7 +382,9 @@ export function FeedView() {
               never renders as a bare top edge. */}
           <StoryRailSection
             canCreate={Boolean(user)}
-            onCompose={() => composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+            /* §15 — the ring opens the same creator as the "+" menu: ONE
+               editor, reachable from the rail and from anywhere else. */
+            onCompose={openStory}
             autoOpenComposer={searchParams.get("story") === "1"}
           />
 
@@ -412,7 +415,11 @@ export function FeedView() {
                 On a phone the four tabs sit in a 2x2 grid — equal cells, no ragged
               half-row — and from sm up they are the single flex line they always
               were. Nothing is clipped at any width. */}
-            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
+            <div
+              role="group"
+              aria-label="Feed filters"
+              className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-2"
+            >
               {(
                 [
                   { id: "for-you", label: "For You" },
@@ -584,11 +591,12 @@ function StoryRailSection({
 }) {
   const { groups, categories, isLoading, refetch } = useStoriesSafe();
   const markViewed = useMarkStoryViewed();
-  const [composerOpen, setComposerOpen] = useState(false);
-
+  /* `?story=1` is still honoured — it is a real deep link, used by links and by
+     browser history — but it opens the shared creator instead of a second,
+     feed-only implementation. */
   useEffect(() => {
-    if (autoOpenComposer && canCreate) setComposerOpen(true);
-  }, [autoOpenComposer, canCreate]);
+    if (autoOpenComposer && canCreate) onCompose();
+  }, [autoOpenComposer, canCreate, onCompose]);
   const [openGroup, setOpenGroup] = useState<number | null>(null);
   const [startIndex, setStartIndex] = useState(0);
   const [categoryStories, setCategoryStories] = useState<StoryGroup[]>([]);
@@ -609,6 +617,7 @@ function StoryRailSection({
   };
 
   const activeGroups = categoryView !== null ? categoryStories : groups;
+  const myGroupIndex = groups.findIndex((g) => g.isMe && g.stories.length > 0);
 
   return (
     <>
@@ -618,7 +627,14 @@ function StoryRailSection({
           categories={categories}
           loading={isLoading}
           canCreate={canCreate}
-          onYourStory={() => setComposerOpen(true)}
+          onYourStory={onCompose}
+          /* §23/§45 — with an active story the ring opens the viewer on it, so
+             "Your story" means the same thing it means for everyone else. */
+          hasStory={myGroupIndex >= 0}
+          onViewYourStory={() => {
+            setStartIndex(0);
+            setOpenGroup(myGroupIndex);
+          }}
           onOpenGroup={(i) => {
             setStartIndex(0);
             setOpenGroup(i);
@@ -629,12 +645,6 @@ function StoryRailSection({
           }}
         />
       </div>
-
-      <StoryComposer
-        open={composerOpen}
-        onClose={() => setComposerOpen(false)}
-        onPublished={() => refetch()}
-      />
 
       {openGroup !== null && groups[openGroup] ? (
         <StoryViewer

@@ -10,7 +10,14 @@ async function main() {
     }, QA.ana);
     const p = await ctx.newPage();
     console.log(`\n════════ ${size.n}px ════════`);
-    for (const path of ['/', '/events', '/communities', '/notifications', '/search', '/saved', '/profile/ana_roy', '/communities', '/user/registrations']) {
+    /* Part 9 §49 — every screen the brief names, plus the new destinations
+       (activity, settings) and the two archives. */
+    for (const path of [
+      '/', '/events', '/communities', '/notifications', '/search',
+      '/saved', '/liked', '/archived', '/stories/archive',
+      '/user/profile', '/user/activity', '/user/settings', '/user/registrations',
+      '/messages', '/profile/ana_roy',
+    ]) {
       const errs = [];
       p.on('pageerror', (e) => errs.push(String(e).slice(0, 90)));
       await p.goto(`http://127.0.0.1:3211${path}`, { waitUntil: 'domcontentloaded' }).catch(() => {});

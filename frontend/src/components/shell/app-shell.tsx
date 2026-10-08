@@ -43,9 +43,7 @@ import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { useTheme } from "@/context/ThemeContext";
 import { prefetchInbox, useUnread } from "@/hooks/use-messages";
 import { initialsOf, useSessionUser } from "@/components/shell/use-session-user";
-import { resetMessagesStore } from "@/lib/messages/store";
-import { clearMessagesCache } from "@/lib/messages/cache";
-import { resetSocket } from "@/lib/socket";
+import { useLogout } from "@/components/shell/use-logout";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { ComposerProvider, useComposer } from "@/components/post/composer-provider";
@@ -106,7 +104,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
   const isChatRoute = /^\/messages\/[^/]+$/.test(pathname ?? "");
   const router = useRouter();
   const { user, role } = useSessionUser();
-  const { open: openComposer } = useComposer();
+  const { open: openComposer, openStory } = useComposer();
   /* The bottom nav carries the messages badge on mobile, the account menu
      carries the theme switch — both used to live in the top bar, which is gone
      below lg. Read here (not inside `AccountMenu`, which is re-created on every
@@ -157,22 +155,9 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("role");
-    localStorage.removeItem("user");
-    /* Part 10 §23 — the messages store and its IndexedDB cache hold this
-     * user's conversations. Left in place, the next account to sign in on
-     * this device would paint them for a frame before its own loaded: a
-     * privacy leak, not a cosmetic bug. Both are cleared here, and the
-     * socket is dropped so the new session reconnects with its own token. */
-    resetMessagesStore();
-    void clearMessagesCache();
-    resetSocket();
-    toast.success("Logged out");
-    router.push("/");
-    router.refresh();
-  };
+  /* Sign-out lives in one hook — the account menu and Settings must not be two
+     different sign-outs (§13). The cache-clearing order is explained there. */
+  const handleLogout = useLogout();
 
   const isActive = (item: NavItem) =>
     item.exact ? pathname === "/" : Boolean(item.href && pathname.startsWith(item.href));
@@ -247,10 +232,12 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
           </div>
         </DropdownMenuItem>
 
-        {/* §41 — Story belongs in the create sheet now that stories exist.
-            Routed with ?story=1; the feed owns the composer so it can
-            refetch the rail after a publish. */}
-        <DropdownMenuItem onClick={() => router.push("/?story=1")} className="gap-2.5 py-2.5">
+        {/* §41 + Part 9 §14 — the story creator opens IN PLACE. It used to route
+            to /?story=1, which navigated the user to the feed and lost their
+            context; the creator is hosted by the shell now, so it opens over
+            whatever page they were on. The device decides what they get: the
+            editor on a phone, an honest explanation on a desktop. */}
+        <DropdownMenuItem onClick={openStory} className="gap-2.5 py-2.5">
           <span className="material-symbols-outlined text-[18px] leading-none text-foreground">add_photo_alternate</span>
           <div>
             <div className="text-sm font-semibold">Create Story</div>

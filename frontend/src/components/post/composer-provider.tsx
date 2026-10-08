@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { CreatePost } from "@/components/feed/create-post";
+import { StoryCreator } from "@/components/stories/story-creator";
 import type { FeedPostData } from "@/components/feed/types";
 import { queryClient } from "@/lib/query";
 
@@ -26,11 +27,21 @@ import { queryClient } from "@/lib/query";
  * because it is an overlay in the current page, not a route change.
  */
 interface ComposerContextValue {
-  /** Open the composer. */
+  /** Open the post composer. */
   open: () => void;
   /** Close it without publishing. */
   close: () => void;
   isOpen: boolean;
+  /**
+   * Open the story creator (Part 9 §14).
+   *
+   * Hosted here for the same reason the post composer is: "+ → Create Story"
+   * used to navigate to `/?story=1`, which threw away whatever the user was
+   * doing. A story is now created as an overlay, from any surface, with no
+   * navigation. The creator itself decides whether this device may compose one.
+   */
+  openStory: () => void;
+  storyOpen: boolean;
 }
 
 const ComposerContext = createContext<ComposerContextValue | null>(null);
@@ -43,9 +54,20 @@ export function useComposer() {
 
 export function ComposerProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [storyOpen, setStoryOpen] = useState(false);
 
-  const open = useCallback(() => setIsOpen(true), []);
+  /* Overlays must not fight (Part 13 §31): opening one closes the other, so two
+     full-screen surfaces can never be stacked on top of each other. */
+  const open = useCallback(() => {
+    setStoryOpen(false);
+    setIsOpen(true);
+  }, []);
   const close = useCallback(() => setIsOpen(false), []);
+  const openStory = useCallback(() => {
+    setIsOpen(false);
+    setStoryOpen(true);
+  }, []);
+  const closeStory = useCallback(() => setStoryOpen(false), []);
 
   /* §8 — the post is already saved by the time this runs. A publish from the
      feed can insert into the feed's own optimistic overlay because the feed
@@ -58,12 +80,23 @@ export function ComposerProvider({ children }: { children: React.ReactNode }) {
     queryClient.invalidateQueries(["posts"]);
   }, []);
 
-  const value = useMemo(() => ({ open, close, isOpen }), [open, close, isOpen]);
+  const value = useMemo(
+    () => ({ open, close, isOpen, openStory, storyOpen }),
+    [open, close, isOpen, openStory, storyOpen]
+  );
 
   return (
     <ComposerContext.Provider value={value}>
       {children}
       {isOpen ? <CreatePost variant="modal" onCreated={onCreated} onClose={close} /> : null}
+      {storyOpen ? (
+        <StoryCreator
+          open={storyOpen}
+          onClose={closeStory}
+          /* §23 — the rail refetches on publish (the creator invalidates the
+             story queries itself), so the new story appears without a reload. */
+        />
+      ) : null}
     </ComposerContext.Provider>
   );
 }

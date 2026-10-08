@@ -24,6 +24,9 @@ export interface StoryRailProps {
   categories: { key: string; label: string; icon: string; count: number }[];
   loading?: boolean;
   onYourStory?: () => void;
+  /** §23/§45 — the viewer's own ring: tapping it watches, the ⊕ creates. */
+  hasStory?: boolean;
+  onViewYourStory?: () => void;
   onOpenGroup?: (index: number) => void;
   onOpenCategory?: (key: string) => void;
   /** Signed-out visitors still see category stories (§15). */
@@ -35,11 +38,16 @@ export function StoryRail({
   categories,
   loading,
   onYourStory,
+  hasStory = false,
+  onViewYourStory,
   onOpenGroup,
   onOpenCategory,
   canCreate = true,
 }: StoryRailProps) {
   const railRef = useRef<HTMLDivElement>(null);
+  /* The user's own group as the server reports it — one source for the ring's
+     avatar, count and unseen state. */
+  const myStory = groups.find((g) => g.isMe);
 
   if (loading) return <StoryRailSkeleton />;
 
@@ -54,29 +62,71 @@ export function StoryRail({
       role="list"
       aria-label="Stories"
     >
-      {/* Your story */}
+      {/* Your story.
+          With an active story the ring means "watch mine" — the same thing a
+          follower's ring means — and creating moves to the ⊕ on its corner, so
+          a user can always see what they just published (§23: it appears in
+          Your Story; §45: the viewer's own gestures). With nothing active the
+          whole item is the create entry (§15: Camera / Gallery / Text).
+          When a story IS active the ring is the SAME `StoryAvatar` their
+          followers get, so "your story" and "their story" cannot drift. */}
       {canCreate ? (
-        <button
-          type="button"
-          onClick={onYourStory}
-          className="group flex w-[4.5rem] shrink-0 flex-col items-center gap-1.5 focus-visible:outline-none"
-          aria-label="Add to your story"
-        >
-          <span className="relative flex h-16 w-16 items-center justify-center rounded-full bg-surface-container transition-transform group-active:scale-95">
-            <span className="flex h-[3.25rem] w-[3.25rem] items-center justify-center rounded-full border border-outline-variant bg-surface-container-lowest">
-              <Plus className="h-6 w-6 text-primary" />
-            </span>
-            {/* The gradient is reserved for CTAs (§3) — this is one. */}
-            <span className="brand-gradient absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border-[3px] border-surface-container-lowest">
-              <Plus className="h-3 w-3 text-white" strokeWidth={3} />
-            </span>
-          </span>
-          <span className="w-full truncate text-center text-[11px] font-medium text-on-surface">Your story</span>
-        </button>
+        <div className="relative flex w-[4.5rem] shrink-0 flex-col items-center">
+          {hasStory && myStory ? (
+            <StoryAvatar
+              name={displayName(myStory.author)}
+              src={myStory.author.profile?.avatar}
+              version={myStory.author.profile?.avatarVersion}
+              verified={myStory.author.verified}
+              unseen={myStory.hasUnseen}
+              isMe
+              count={myStory.stories.length}
+              onClick={() => onViewYourStory?.()}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={onYourStory}
+              className="group flex w-full shrink-0 flex-col items-center gap-1.5 transition-transform active:scale-95 focus-visible:outline-none"
+              aria-label="Add to your story"
+            >
+              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-container">
+                <span className="flex h-[3.25rem] w-[3.25rem] items-center justify-center rounded-full border border-outline-variant bg-surface-container-lowest">
+                  <Plus className="h-6 w-6 text-primary" />
+                </span>
+              </span>
+              <span className="w-full truncate text-center text-[11px] font-medium text-on-surface">Your story</span>
+            </button>
+          )}
+          {/* The ⊕ badge is a SECOND control next to the ring, so its hit area
+              must not cover the ring's own centre: measured, a 44px box at the
+              ring's corner swallowed taps aimed at the middle of the avatar and
+              "view my story" opened the creator instead. The box is 36px, sits
+              on the disc's bottom-right corner and starts 2px outside the
+              column, so a tap on the face always reaches the ring. */}
+          {hasStory ? (
+            <button
+              type="button"
+              onClick={onYourStory}
+              aria-label="Add to your story"
+              className="absolute -right-0.5 top-[44px] flex h-9 w-9 items-center justify-center"
+            >
+              {/* The gradient is reserved for CTAs (§3) — this is one. */}
+              <span className="brand-gradient flex h-6 w-6 items-center justify-center rounded-full border-[3px] border-surface-container-lowest">
+                <Plus className="h-3 w-3 text-white" strokeWidth={3} />
+              </span>
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
-      {/* People you follow */}
-      {groups.map((g, i) => (
+      {/* People you follow — your own row is skipped, because "Your story"
+          above IS your row. It used to render twice: the rail showed a ring
+          labelled "Your story" and then, right beside it, your group again
+          (measured: two buttons with that label, at x=12 and x=96). The index
+          stays the index in `groups` so the viewer still opens the right one. */}
+      {groups.map((g, i) =>
+        g.isMe ? null : (
         <StoryAvatar
           key={g.author._id}
           name={displayName(g.author)}
@@ -88,7 +138,8 @@ export function StoryRail({
           count={g.stories.length}
           onClick={() => onOpenGroup?.(i)}
         />
-      ))}
+        )
+      )}
 
       {/* Category stories — icons, never letters (§39) */}
       {categories.map((c) => (
@@ -99,8 +150,16 @@ export function StoryRail({
           className="group flex w-[4.5rem] shrink-0 flex-col items-center gap-1.5 transition-transform active:scale-95 focus-visible:outline-none"
           aria-label={`${c.label} stories — ${c.count} active`}
         >
-          <span className="relative">
-            <span className="rounded-full bg-surface-container p-[2.5px] ring-1 ring-outline-variant">
+          {/* §27/§28 — a category is a ring with its ICON on a tinted disc, and
+              the tint carries the meaning: `brand-light` → `purple-light` is the
+              same lavender-blue wash the story rings use, so a category reads as
+              "stories in this topic" rather than as a plain avatar.
+              `block` on the ring is not cosmetic: as an inline box holding a
+              flex child it split, and the browser painted its ring as two
+              vertical lines running past the circle (measured in the 320/390
+              sweep). A block box cannot split. */}
+          <span className="relative block">
+            <span className="block rounded-full bg-surface-container p-[2.5px] ring-1 ring-outline-variant">
               <span className="flex h-[3.4rem] w-[3.4rem] items-center justify-center rounded-full bg-gradient-to-br from-brand-light to-purple-light">
                 <Icon name={c.icon || storyCategoryIcon(c.key)} size={28} className="text-primary" />
               </span>

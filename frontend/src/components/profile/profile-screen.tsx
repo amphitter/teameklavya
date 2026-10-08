@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
+  Activity,
   BadgeCheck,
   CalendarDays,
   CalendarRange,
@@ -12,11 +13,14 @@ import {
   Pencil,
   Bookmark,
   Heart,
+  History,
   ImageOff,
   Lock,
   Archive as ArchiveIcon,
   MessageCircle,
   MoreHorizontal,
+  Settings,
+  Share2,
   ShieldOff,
   UserPlus,
 } from "lucide-react";
@@ -27,6 +31,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FollowListModal } from "@/components/social/follow-list-modal";
@@ -377,7 +382,7 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
         onOpenFollowing={() => setListModal("following")}
         actions={
           isMe ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="gap-1.5">
                 <Pencil className="h-3.5 w-3.5" /> Edit profile
               </Button>
@@ -386,6 +391,56 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
                   <UserPlus className="h-3.5 w-3.5" /> {requestCount} request{requestCount > 1 ? "s" : ""}
                 </Button>
               )}
+              {/* §13 — your own "…" menu. It holds the things you do to your OWN
+                  account; the Block/Report items below are the other person's. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="More options"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => setEditOpen(true)} className="gap-2">
+                    <Pencil className="h-4 w-4" /> Edit profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="gap-2">
+                    <Link href="/user/activity">
+                      <Activity className="h-4 w-4" /> Your activity
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild className="gap-2">
+                    <Link href="/saved">
+                      <Bookmark className="h-4 w-4" /> Saved posts
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="gap-2">
+                    <Link href="/liked">
+                      <Heart className="h-4 w-4" /> Liked posts
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="gap-2">
+                    <Link href="/archived">
+                      <ArchiveIcon className="h-4 w-4" /> Archived posts
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="gap-2">
+                    <Link href="/stories/archive">
+                      <History className="h-4 w-4" /> Story archive
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild className="gap-2">
+                    <Link href="/user/settings">
+                      <Settings className="h-4 w-4" /> Settings
+                    </Link>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -420,14 +475,32 @@ export function ProfileScreen({ id: idProp }: { id?: string }) {
                       <MoreHorizontal className="h-4 w-4" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                  <DropdownMenuContent align="end" className="w-56">
+                    {/* §13 — the other person's menu. Never an owner action here:
+                        no Edit profile, no Saved/Liked for someone else. */}
+                    <DropdownMenuItem
+                      onClick={async () => {
+                        const url = `${window.location.origin}/${profileUser.username || profileUser._id}`;
+                        try {
+                          if (navigator.share) await navigator.share({ title: profileUser.firstName, url });
+                          else {
+                            await navigator.clipboard.writeText(url);
+                            toast.success("Profile link copied");
+                          }
+                        } catch {
+                          /* the user dismissed the share sheet — not a failure */
+                        }
+                      }}
+                      className="gap-2"
+                    >
+                      <Share2 className="h-4 w-4" /> Share profile
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setReporting(true)} className="gap-2">
+                      <Flag className="h-4 w-4" /> Report person
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={toggleBlock} className="gap-2 text-destructive focus:text-destructive">
                       <ShieldOff className="h-4 w-4" />
                       {blocked ? "Unblock user" : "Block user"}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setReporting(true)} className="gap-2">
-                      <Flag className="h-4 w-4" />
-                      Report person
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

@@ -49,6 +49,25 @@ const storySchema = new mongoose.Schema(
     textOverlay: { type: String, default: "", maxlength: 200 },
     link: { type: String, default: "" },
 
+    /* ── Story layers (Part 9 §21) ────────────────────────────────────────
+     * Every overlay the creator places is a LAYER, stored as metadata rather
+     * than flattened into the image: text, emoji, stickers and freehand
+     * strokes, each with its own transform.
+     *
+     * Why metadata and not a flattened render: the published story has to look
+     * exactly like the preview (it is re-rendered by the same component), a
+     * stroke stays crisp at any size instead of carrying the resolution of
+     * whatever canvas happened to draw it, and "store enough metadata to
+     * reproduce the story" is then literally true — nothing about the original
+     * edit is lost.
+     *
+     * `Mixed` on purpose: the layer vocabulary is owned by one sanitizer
+     * (`sanitizeLayers` in story.controller.js) which whitelists every type and
+     * clamps every number before anything is written. A rigid sub-schema here
+     * would be a second, silently-drifting copy of that contract.
+     */
+    layers: { type: [mongoose.Schema.Types.Mixed], default: [] },
+
     // ── Lifecycle ────────────────────────────────────────────────────────
     createdAt: { type: Date, default: Date.now },
     expiresAt: {

@@ -152,7 +152,7 @@ export function MemberPicker({ meId, lockedIds = [], selected, onChange, busy }:
             aria-selected={source === t.id}
             onClick={() => setSource(t.id)}
             className={cn(
-              "min-h-[36px] flex-1 touch-manipulation rounded-full px-3 text-[13px] font-semibold transition-colors",
+              "min-h-[44px] flex-1 touch-manipulation rounded-full px-3 text-[13px] font-semibold transition-colors",
               source === t.id
                 ? "bg-primary text-white"
                 : "bg-surface-container text-on-surface-variant hover:text-on-surface"

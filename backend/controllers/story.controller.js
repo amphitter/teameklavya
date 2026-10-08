@@ -78,6 +78,144 @@ const CATEGORY_LABELS = {
   default: "Other",
 };
 
+/* Is this a media URL we are willing to store and hand back to every viewer?
+ *
+ * Absolute http(s) only, plus the server-relative `/uploads/…` paths the local
+ * storage provider returns (see `services/storage.provider.js`). Protocol-
+ * relative `//host/x` is rejected because it borrows whatever scheme the viewer
+ * is on, and `..` is rejected because the path is proxied by path. */
+const MEDIA_PATH_RE = /^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+$/;
+const isSafeMediaUrl = (url) => {
+  if (typeof url !== "string" || !url) return false;
+  if (url.startsWith("//")) return false;
+  if (url.startsWith("/")) return MEDIA_PATH_RE.test(url) && !url.includes("..");
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+/* ── Layers (Part 9 §21) ──────────────────────────────────────────────
+ *
+ * The client sends an array of overlays; this is the ONLY place that decides
+ * what a legal layer is. Everything a client could get wrong or abuse is
+ * handled here: unknown types are dropped, strings are capped, numbers are
+ * clamped into the canvas, and the total is bounded so a hostile payload cannot
+ * grow a document without limit.
+ *
+ * Geometry is normalised to the 9:16 canvas (0..1 in x, 0..1 in y for anchors;
+ * `size` and stroke widths are fractions of the canvas width). Normalised
+ * numbers are what let the same story render correctly at 320px and at 4K
+ * without shipping a pixel size that only happens to fit one screen.
+ */
+const LAYER_TYPES = ["text", "emoji", "sticker", "draw"];
+const STICKER_KINDS = ["mention", "location", "event", "hashtag", "poll", "question"];
+const DRAW_MODES = ["pen", "marker", "highlighter", "eraser"];
+const MAX_LAYERS = 40;
+const MAX_POINTS_PER_STROKE = 400;
+const MAX_STROKES = 40;
+const HEX = /^#[0-9a-f]{3,8}$/i;
+
+const num = (v, min, max, fallback = 0) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+};
+const str = (v, max) => String(v == null ? "" : v).slice(0, max);
+const color = (v, fallback) => (HEX.test(String(v || "")) ? String(v) : fallback);
+
+function sanitizePoints(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const p of raw.slice(0, MAX_POINTS_PER_STROKE)) {
+    if (!p || typeof p !== "object") continue;
+    out.push({ x: Number(num(p.x, 0, 1).toFixed(4)), y: Number(num(p.y, 0, 1).toFixed(4)) });
+  }
+  return out;
+}
+
+function sanitizeLayers(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const l of raw.slice(0, MAX_LAYERS)) {
+    if (!l || typeof l !== "object" || !LAYER_TYPES.includes(l.type)) continue;
+
+    const base = {
+      type: l.type,
+      // Anchors: the layer's centre, as a fraction of the canvas.
+      x: num(l.x, -0.5, 1.5, 0.5),
+      y: num(l.y, -0.5, 1.5, 0.5),
+      scale: num(l.scale, 0.1, 8, 1),
+      rotation: num(l.rotation, -360, 360, 0),
+    };
+
+    if (l.type === "draw") {
+      const strokes = Array.isArray(l.strokes) ? l.strokes.slice(0, MAX_STROKES) : [];
+      const clean = strokes
+        .filter((st) => st && typeof st === "object")
+        .map((st) => ({
+          mode: DRAW_MODES.includes(st.mode) ? st.mode : "pen",
+          color: color(st.color, "#ffffff"),
+          width: num(st.width, 0.001, 0.12, 0.01),
+          points: sanitizePoints(st.points),
+        }))
+        .filter((st) => st.points.length > 1);
+      if (!clean.length) continue;
+      out.push({ type: "draw", strokes: clean, x: 0, y: 0, scale: 1, rotation: 0 });
+      continue;
+    }
+
+    if (l.type === "text") {
+      const text = str(l.text, 220);
+      if (!text.trim()) continue;
+      out.push({
+        ...base,
+        text,
+        color: color(l.color, "#ffffff"),
+        /** Font size as a fraction of canvas width — 0.06 ≈ a 65px line on a
+         *  1080-wide canvas, which is the size the preview shows. */
+        size: num(l.size, 0.02, 0.3, 0.07),
+        weight: l.weight === 800 ? 800 : l.weight === 400 ? 400 : 700,
+        align: ["left", "center", "right"].includes(l.align) ? l.align : "center",
+        /** Optional plate behind the text so it stays readable on any photo. */
+        background: color(l.background, "transparent"),
+      });
+      continue;
+    }
+
+    if (l.type === "emoji") {
+      const emoji = str(l.emoji, 8);
+      if (!emoji) continue;
+      out.push({ ...base, emoji, size: num(l.size, 0.02, 0.6, 0.14) });
+      continue;
+    }
+
+    // sticker
+    const kind = STICKER_KINDS.includes(l.kind) ? l.kind : null;
+    if (!kind) continue;
+    const payload = l.payload && typeof l.payload === "object" ? l.payload : {};
+    out.push({
+      ...base,
+      kind,
+      // The label is what the viewer renders; the payload is what makes the
+      // sticker *do* something (open a profile, an event, a topic).
+      label: str(l.label, 120),
+      payload: {
+        username: str(payload.username, 40),
+        userId: str(payload.userId, 40),
+        eventId: str(payload.eventId, 40),
+        slug: str(payload.slug, 80),
+        topic: str(payload.topic, 40),
+        question: str(payload.question, 140),
+        options: Array.isArray(payload.options) ? payload.options.slice(0, 4).map((o) => str(o, 60)) : [],
+      },
+    });
+  }
+  return out;
+}
+
 function iconFor(category) {
   return CATEGORY_ICONS[String(category || "").toLowerCase()] || CATEGORY_ICONS.default;
 }
@@ -102,6 +240,9 @@ function shape(story, { viewerId } = {}) {
     organization: s.organization,
     mentions: s.mentions,
     textOverlay: s.textOverlay,
+    // Part 9 §21 — the overlay layers, so every client re-renders the story
+    // exactly as it was composed instead of guessing from a single string.
+    layers: Array.isArray(s.layers) ? s.layers : [],
     link: s.link,
     createdAt: s.createdAt,
     expiresAt: s.expiresAt,
@@ -254,15 +395,17 @@ exports.create = async (req, res) => {
     if (!url || typeof url !== "string") {
       return res.status(400).json({ message: "Story media is required" });
     }
-    // Only http(s) — a javascript:/data: URL in a media field is stored XSS.
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch {
+    /* Only a real http(s) URL, or a server-relative upload path.
+     *
+     * The relative case is not slack: with no Cloudinary configured the storage
+     * provider returns `/uploads/<folder>/<file>` — the exact shape posts store
+     * and the frontend proxies to the backend. The old check demanded an
+     * absolute URL, so publishing was impossible on that provider: the upload
+     * answered 200 and the create call answered 400. `javascript:` and `data:`
+     * are still refused (a media field is stored XSS), as are protocol-relative
+     * `//host` URLs and any path that tries to traverse. */
+    if (!isSafeMediaUrl(url)) {
       return res.status(400).json({ message: "Media must be a valid URL" });
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return res.status(400).json({ message: "Media must be an http(s) URL" });
     }
 
     const type = b.media?.type === "video" ? "video" : "image";
@@ -286,6 +429,7 @@ exports.create = async (req, res) => {
       textOverlay: String(b.textOverlay || "").slice(0, 200),
       link: String(b.link || "").slice(0, 500),
       mentions: Array.isArray(b.mentions) ? b.mentions.slice(0, 20) : [],
+      layers: sanitizeLayers(b.layers),
       createdAt: new Date(now),
       expiresAt: new Date(now + STORY_TTL_HOURS * 60 * 60 * 1000),
     });

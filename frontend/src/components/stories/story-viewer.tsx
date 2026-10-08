@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { StoryLayers } from "@/components/stories/story-layer";
 import { ChevronLeft, ChevronRight, Loader2, MoreVertical, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
@@ -303,8 +304,18 @@ export function StoryViewer({
             />
           )}
 
-          {/* Text overlay (§17) */}
-          {story.textOverlay ? (
+          {/* Overlays (§21) — every layer exactly where its author put it,
+              rendered by the SAME component the creator and the preview use, so
+              a story cannot look different for a viewer than it did in preview.
+              The container is a size container for the same reason: layer sizes
+              are expressed in cqw. */}
+          <div className="pointer-events-none absolute inset-0" style={{ containerType: "inline-size" }}>
+            <StoryLayers layers={story.layers} />
+          </div>
+
+          {/* Legacy centred text overlay — stories published before layers
+              existed still render their text rather than losing it. */}
+          {story.textOverlay && !(story.layers || []).length ? (
             <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 px-6 text-center text-2xl font-extrabold leading-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.6)]">
               {story.textOverlay}
             </p>

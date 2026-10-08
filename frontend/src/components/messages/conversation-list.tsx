@@ -279,7 +279,7 @@ export function ConversationList({
           ) : null}
         </div>
 
-        {/* Segment control (§3). Each tab clears the 44px touch minimum. */}
+        {/* Segment control (§3) — now genuinely 44px tall (§30, §44). */}
         <div
           role="tablist"
           aria-label="Conversation filters"
@@ -295,7 +295,10 @@ export function ConversationList({
                 onClick={() => onTabChange(t.id)}
                 className={cn(
                   "relative shrink-0 touch-manipulation rounded-full px-3 text-[13px] font-semibold transition-colors",
-                  "min-h-[32px] py-1.5",
+                  /* §30/§44 — measured 32px tall, which is a mouse target, not a
+                     thumb one. The pill keeps its shape; the hit area grows to
+                     the 44px minimum. */
+                  "min-h-[44px] py-2.5",
                   tab === t.id
                     ? "bg-primary text-white"
                     : "bg-surface-container text-on-surface-variant hover:text-on-surface"

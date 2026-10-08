@@ -20,6 +20,8 @@ export function OwnerListPage({
   endpoint,
   emptyTitle,
   emptyDescription,
+  emptyAction,
+  bare = false,
 }: {
   title: string;
   subtitle: string;
@@ -27,7 +29,23 @@ export function OwnerListPage({
   endpoint: (params: { cursor: string | null }) => string;
   emptyTitle: string;
   emptyDescription: string;
+  /** Optional way out of the empty state (§10: "Explore events"). */
+  emptyAction?: React.ReactNode;
+  /** Skip the heading — the caller already drew one (e.g. the Archive tabs). */
+  bare?: boolean;
 }) {
+  const list = (
+    <PostList
+      endpoint={endpoint}
+      emptyIcon={Icon}
+      emptyTitle={emptyTitle}
+      emptyDescription={emptyDescription}
+      emptyAction={emptyAction}
+    />
+  );
+
+  if (bare) return list;
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 px-3 py-5 sm:px-6 sm:py-7">
       <div>
@@ -43,12 +61,7 @@ export function OwnerListPage({
         <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>
       </div>
 
-      <PostList
-        endpoint={endpoint}
-        emptyIcon={Icon}
-        emptyTitle={emptyTitle}
-        emptyDescription={emptyDescription}
-      />
+      {list}
     </div>
   );
 }

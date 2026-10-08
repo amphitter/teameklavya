@@ -52,11 +52,20 @@ export function AuthSplit({
       <div className="bg-dots pointer-events-none absolute inset-0 opacity-60" aria-hidden />
 
       {/* ── Header ─────────────────────────────────────── */}
-      <header className="relative z-20 mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-5 sm:px-6">
-        <Link href="/" aria-label="EventHub home" className="transition-opacity hover:opacity-90">
+      <header className="relative z-20 mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
+        {/* `shrink-0` matters at 320px: without it the flex row shrinks the
+            logo's BOX below the image's intrinsic width and the wordmark spills
+            out to its right, under the "Create an account" link — measured
+            overlapping by ~11px on a 320px screen. The link is what should give
+            way, so it wraps instead. */}
+        <Link
+          href="/"
+          aria-label="EventHub home"
+          className="shrink-0 transition-opacity hover:opacity-90"
+        >
           <Logo size={38} />
         </Link>
-        <div className="flex items-center gap-1.5 text-sm font-medium">
+        <div className="flex min-w-0 items-center gap-1.5 text-right text-[13px] font-medium sm:text-sm">
           <span className="hidden text-[#64709A] sm:inline">{isLogin ? "New to EventHub?" : "Already have an account?"}</span>
           <Link
             href={isLogin ? "/signup" : "/login"}
@@ -80,28 +89,39 @@ export function AuthSplit({
               alt="EventHub — People, Events, Progress"
               className="hidden h-auto w-full object-contain lg:block"
             />
-            {/* Mobile illustration (portrait) — shrunk so it is fully
-                visible on the choice screen; hidden entirely once the
-                email form opens (the form then covers the page) */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/brand/auth-mobile.webp"
-              alt="EventHub — Discover, Participate, Learn, Build"
-              className={cn(
-                "mx-auto rounded-2xl object-contain lg:hidden",
-                revealed ? "hidden" : "max-h-[40vh] w-auto"
-              )}
-            />
+            {/* Mobile hero — the campaign poster, "Events · People ·
+                Progress", supplied by the product owner. Portrait art (2:3) so
+                it is bound by HEIGHT, not width: `40vh` is what keeps both
+                choice buttons above the fold on the shortest phone we test
+                (320×568), where the poster lands at ~150×225. It is hidden the
+                moment the email form opens, because the form then owns the
+                screen.
+
+                `rounded-xl overflow-hidden` clips the artwork's own soft edges
+                into a deliberate card instead of leaving a dark blob floating
+                on the pale page; the shadow does the rest. */}
+            <div className={cn("flex justify-center lg:hidden", revealed ? "hidden" : "")}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/brand/auth-mobile-poster.webp"
+                alt="EventHub — Events, People, Progress. Discover. Participate. Learn. Build. All in one place."
+                width={720}
+                height={1080}
+                className="h-auto max-h-[40vh] w-auto max-w-full overflow-hidden rounded-xl shadow-[0_10px_30px_rgba(24,39,75,0.16)]"
+              />
+            </div>
           </div>
 
           {/* RIGHT — auth card */}
           <div className="relative lg:col-span-5">
             <div className="relative z-10 rounded-[28px] border border-[#E4E9F4]/80 bg-white/95 p-6 shadow-[0_10px_40px_rgba(24,39,75,0.08)] backdrop-blur-xl sm:p-9">
-              {/* Mobile: choice screen (before reveal) */}
+              {/* Mobile: choice screen (before reveal).
+                  The EventHub lockup that used to sit directly above the Google
+                  button was removed at the product owner's request — the
+                  header's own logo (top-left, always visible) already brands the
+                  screen, and the poster above carries the mark and the tagline
+                  at full size. */}
               <div className={cn("space-y-3 lg:hidden", revealed && "hidden")}>
-                <div className="mb-2 flex justify-center lg:hidden">
-                  <Logo size={44} />
-                </div>
                 <button type="button" className={SOCIAL_BTN} onClick={onGoogle}>
                   <GoogleMark /> {googleLabel}
                 </button>

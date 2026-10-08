@@ -169,6 +169,29 @@ rendered**, sidebar Explore present, feed column still offset by the sidebar, th
 control absent, Post still right-aligned. `phase3/4 (+widths)`, `part9`, `part13`, `ui-fixes`,
 `feed-topbar`, `sweep` and the backend suites all pass.
 
+## 11 · Mobile login / signup screens (follow-up)
+
+Two changes on the auth screens, both requested directly:
+
+1. **The mobile hero is the supplied campaign poster** ("Events · People · Progress"),
+   `public/brand/auth-mobile-poster.webp` (720×1080 WebP, 213 KB — down from the 2.2 MB PNG master;
+   the artwork keeps its own alpha, so it floats on the page's pale gradient rather than sitting in a
+   black box). It replaces the old portrait `auth-mobile.webp` on **login and signup**, since both
+   routes render the shared `AuthSplit`. It is bound by height (`max-h-[40vh]`), which is what keeps
+   both choice buttons above the fold even at 320×568, and it disappears the moment the email form
+   opens — the form then owns the screen. Desktop is untouched: it still uses `auth-hero.webp`.
+2. **The EventHub lockup that sat directly above the Google button was removed** from the mobile choice
+   card. The screen is still branded twice — the header's logo (top-left) and the poster itself — so
+   nothing is lost.
+
+One pre-existing bug surfaced while checking this at 320px and was fixed: the header's logo was being
+flex-shrunk below its intrinsic width, so the wordmark spilled **11px** under "Create an account".
+The logo is now `shrink-0` and the link wraps instead.
+
+New harness `docs/mobile-qa/check-auth.js` — 84 checks over login + signup at all six widths: the
+poster loads from the new path, no horizontal overflow, the header logo and link never collide, **no
+mark directly above the Google button**, the Google button stays above the fold, no page errors.
+
 ---
 
 ## Gate results (this round)
@@ -188,6 +211,7 @@ control absent, Post still right-aligned. `phase3/4 (+widths)`, `part9`, `part13
 | backend `part10-messages` · `part10-realtime` | 59 / 0 · 38 / 0 |
 | backend `part11-profile-content` · `profile-edit` · `stories-audience` | 60 / 0 · 53 / 0 · 10 / 0 |
 | frontend unit: query · messages-store · crop · variants | 17 / 0 · 38 / 0 · 26 / 0 · 15 / 0 |
+| `check-auth.js` (new — login + signup, 6 widths) | **84 passed, 0 failed** |
 | `tsc --noEmit` · `next build` | 0 errors · clean |
 
 ## Harnesses updated because Part 14 **supersedes** what they asserted

@@ -21,7 +21,11 @@ const { cache, keys, TTL } = require("../services/cache.service");
 const { parseLimit, buildPage, withCursor } = require("./cursor");
 
 /** Public profile fields — the org card, nothing internal. */
-const PUBLIC_FIELDS = "name slug description logoUrl coverUrl website isVerified createdBy";
+const PUBLIC_FIELDS = [
+  "name handle slug category description logo cover logoUrl coverUrl",
+  "website email phone address city state country postalCode socialLinks",
+  "isVerified verifiedAt createdBy parentOrganizationId",
+].join(" ");
 
 /**
  * Cache-first public organization profile by slug.
@@ -29,16 +33,27 @@ const PUBLIC_FIELDS = "name slug description logoUrl coverUrl website isVerified
  * null — the same reasoning as EventRepository.publicBySlug.
  */
 async function publicBySlug(slug) {
-  const key = `org:slug:${slug}`;
+  const normalized = String(slug || "").trim().toLowerCase();
+  const key = keys.orgSlug(normalized);
 
   const hit = await cache.peek(key);
   if (hit !== undefined) return hit;
 
-  const doc = await Organization.findOne({ slug }).select(PUBLIC_FIELDS).lean();
+  const doc = await Organization.findOne({ $or: [{ handle: normalized }, { slug: normalized }] })
+    .select(PUBLIC_FIELDS)
+    .lean();
   if (!doc) return null;
 
-  await cache.getOrSet(key, async () => doc, { ttl: TTL.ORG_PROFILE });
-  return doc;
+  const profile = {
+    ...doc,
+    handle: doc.handle || doc.slug,
+    category: doc.category || "OTHER",
+    logo: doc.logo || doc.logoUrl || "",
+    cover: doc.cover || doc.coverUrl || "",
+    socialLinks: doc.socialLinks && typeof doc.socialLinks === "object" ? doc.socialLinks : {},
+  };
+  await cache.getOrSet(key, async () => profile, { ttl: TTL.ORG_PROFILE });
+  return profile;
 }
 
 /**
@@ -51,7 +66,7 @@ async function counts(organizationId) {
     async () => {
       const [followers, events] = await Promise.all([
         OrgFollow.countDocuments({ organization: organizationId }),
-        Event.countDocuments({ organization: organizationId, removedAt: null }),
+        Event.countDocuments({ organization: organizationId, removedAt: null, archivedAt: null }),
       ]);
       return { followers, events };
     },
@@ -83,6 +98,9 @@ async function invalidate(organization) {
       cache.invalidate(keys.organization(id)),
       cache.invalidate(keys.orgCounts(id)),
       organization.slug ? cache.invalidate(keys.orgSlug(organization.slug)) : Promise.resolve(),
+      organization.handle && organization.handle !== organization.slug
+        ? cache.invalidate(keys.orgSlug(organization.handle))
+        : Promise.resolve(),
     ]);
   } catch (err) {
     console.warn("[cache] invalidation failed:", err?.message || err);

@@ -1,9 +1,10 @@
 /**
  * Activity Controller (Part 4, Phase 1) — Activity Builder + Question CRUD.
  * ─────────────────────────────────────────────────────────────────────────
- * Every route is organizer-authorized server-side via canManageEvent
- * (owner or admin). Participants never touch these endpoints; they receive
- * sanitized live state through the realtime engine (Phase 2+).
+ * Every route is owner-authorized server-side via canManageEvent, including
+ * active Organization Event Managers for explicitly Organization-owned Events.
+ * Participants never touch these endpoints; they receive sanitized live state
+ * through the realtime engine (Phase 2+).
  *
  *  GET    /api/events/:eventId/activities          list (organizer)
  *  POST   /api/events/:eventId/activities          create

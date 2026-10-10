@@ -81,6 +81,8 @@ export function ExploreView() {
   const [topicPosts, setTopicPosts] = useState<FeedPostData[]>([]);
   const [topicLoading, setTopicLoading] = useState(false);
   const [total, setTotal] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
@@ -120,6 +122,9 @@ export function ExploreView() {
     let cancelled = false;
     setLoading(true);
     setError(false);
+    setNextCursor(null);
+    setHasMore(false);
+    setTotal(0);
 
     const baseParams: Record<string, string | number | undefined> = {
       limit: tab === "trending" ? 24 : PAGE_SIZE,
@@ -159,10 +164,12 @@ export function ExploreView() {
         .finally(() => !cancelled && setLoading(false));
     } else {
       fetchEventsWithCounts(baseParams)
-        .then(({ events: list, pagination }) => {
+        .then(({ events: list, nextCursor: cursor, hasMore: more }) => {
           if (cancelled) return;
           setEvents(list);
-          setTotal(pagination?.total ?? list.length);
+          setTotal(list.length);
+          setNextCursor(cursor);
+          setHasMore(more);
         })
         .catch(() => !cancelled && setError(true))
         .finally(() => !cancelled && setLoading(false));
@@ -196,17 +203,23 @@ export function ExploreView() {
   const removeTopicPost = (id: string) => setTopicPosts((p) => p.filter((x) => x._id !== id));
 
   const loadMore = () => {
+    if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     fetchEventsWithCounts({
       limit: PAGE_SIZE,
-      page: Math.ceil(events.length / PAGE_SIZE) + 1,
+      cursor: nextCursor,
       eventType: format,
       price: price === "any" ? undefined : price,
       category: category || undefined,
-      q: q || undefined,
+      q: topic || q || undefined,
       type: tab === "live" ? "ongoing" : "upcoming",
     })
-      .then(({ events: list }) => setEvents((p) => [...p, ...list]))
+      .then(({ events: list, nextCursor: cursor, hasMore: more }) => {
+        setEvents((previous) => [...previous, ...list]);
+        setTotal((previous) => previous + list.length);
+        setNextCursor(cursor);
+        setHasMore(more);
+      })
       .catch(() => {})
       .finally(() => setLoadingMore(false));
   };
@@ -228,7 +241,7 @@ export function ExploreView() {
           onChange={(e) => setSearchText(e.target.value)}
           placeholder="Search events, tags, or locations..."
           aria-label="Search events"
-          className="h-12 w-full rounded-full border border-input bg-card pl-12 pr-11 text-[15px] text-foreground shadow-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+          className="h-12 w-full rounded-full border border-input bg-card pl-12 pr-12 text-base text-foreground shadow-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary/50 focus:ring-4 focus:ring-primary/10 sm:text-sm"
         />
         {searchText && (
           <button
@@ -239,7 +252,7 @@ export function ExploreView() {
               inputRef.current?.focus();
             }}
             aria-label="Clear search"
-            className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>
@@ -268,7 +281,7 @@ export function ExploreView() {
               onClick={() => setParam({ tab: t.id })}
               aria-pressed={tab === t.id}
               className={cn(
-                "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors sm:text-sm",
+                "min-h-11 shrink-0 touch-manipulation flex items-center gap-1.5 rounded-full px-2 py-1.5 text-xs font-semibold transition-colors sm:px-3.5 sm:text-sm",
                 tab === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -278,14 +291,14 @@ export function ExploreView() {
           ))}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <SelectPill options={FORMATS} value={format} onChange={(v) => setParam({ format: v })} />
           <SelectPill options={PRICES} value={price} onChange={(v) => setParam({ price: v })} />
           {activeFilters && (
             <button
               type="button"
               onClick={clearFilters}
-              className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+              className="min-h-11 touch-manipulation inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
             >
               <X className="h-3 w-3" /> Clear
             </button>
@@ -308,7 +321,7 @@ export function ExploreView() {
             <button
               type="button"
               onClick={() => setParam({ topic: null })}
-              className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+              className="min-h-11 touch-manipulation rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
             >
               Clear topic
             </button>
@@ -332,7 +345,7 @@ export function ExploreView() {
       <div className="mt-6">
         {q && (
           <p className="mb-4 text-sm text-muted-foreground">
-            {loading ? "Searching…" : <><span className="font-semibold text-foreground">{total}</span> event{total === 1 ? "" : "s"} for <span className="font-semibold text-foreground">“{q}”</span></>}
+            {loading ? "Searching…" : <><span className="font-semibold text-foreground">{hasMore ? `${total}+` : total}</span> event{total === 1 && !hasMore ? "" : "s"} for <span className="font-semibold text-foreground">“{q}”</span></>}
           </p>
         )}
 
@@ -383,7 +396,7 @@ export function ExploreView() {
               ))}
             </div>
 
-            {events.length < total && (
+            {hasMore && (
               <div className="mt-7 text-center">
                 <button
                   type="button"
@@ -458,7 +471,7 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+        "min-h-11 shrink-0 touch-manipulation rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
         active
           ? "border-primary bg-primary text-primary-foreground"
           : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
@@ -484,7 +497,7 @@ function SelectPill({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label={options[0]?.label}
-        className="h-9 appearance-none rounded-full border border-border bg-card pl-3.5 pr-8 text-xs font-semibold text-foreground outline-none transition-colors hover:border-primary/40 focus:border-primary/50"
+        className="min-h-11 touch-manipulation appearance-none rounded-full border border-border bg-card pl-3.5 pr-8 text-base font-semibold text-foreground outline-none transition-colors hover:border-primary/40 focus:border-primary/50 sm:text-xs"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

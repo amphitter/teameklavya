@@ -207,20 +207,18 @@ function validateDimensions(buffer) {
 /**
  * §6 — enforce the CANONICAL SHAPE the uploader declares.
  *
- * The crop editor renders the avatar as a square and the cover as 3:1 before
- * uploading, so those files arrive with a shape that is already the user's
- * decision. Checking it here makes "canonical" a property of the stored asset
- * rather than a promise made by the client: a build that forgot to crop, or a
- * script posting straight to this endpoint, gets a clear 400 instead of quietly
- * writing a 3:1 "avatar" that every surface then crops differently — the exact
- * defect this contract exists to end.
+ * The crop editor renders avatars and Event logos as squares, and covers as
+ * 3:1, before uploading. Checking it here makes "canonical" a property of the
+ * stored asset rather than a promise made by the client: a build that forgot to
+ * crop, or a script posting straight to this endpoint, gets a clear 400 instead
+ * of quietly storing a non-square avatar/logo that each surface crops differently.
  *
  * This is a CONTRACT check, not a security boundary, and it is deliberately
  * opt-in (`?purpose=`): every security-relevant property — real content type
  * from magic bytes, per-folder size limits, decompression-bomb guard and
  * dimension ceilings — is enforced on every upload regardless of what the
- * caller declares. Shape is validated when declared, because the failure it
- * prevents is the declarer's own profile looking wrong.
+ * caller declares. Shape is validated when declared because this contract
+ * protects the user's declared profile/Event asset from inconsistent crops.
  *
  * @returns a user-facing message, or null when the shape is acceptable
  */
@@ -236,16 +234,22 @@ function validateShape(buffer, purpose) {
      very file this project generates. */
   const TOLERANCE = 0.02;
 
-  if (purpose === "avatar") {
+  if (purpose === "avatar" || purpose === "logo") {
     const ratio = width / height;
     if (Math.abs(ratio - 1) > TOLERANCE) {
-      return `A profile photo is uploaded as a square, but that one is ${width}×${height}. Crop it first.`;
+      return purpose === "logo"
+        ? `An event logo is uploaded as a square, but that one is ${width}×${height}. Crop it first.`
+        : `A profile photo is uploaded as a square, but that one is ${width}×${height}. Crop it first.`;
     }
     if (width < MIN_CANONICAL_AVATAR_PX) {
-      return `A profile photo needs to be at least ${MIN_CANONICAL_AVATAR_PX}×${MIN_CANONICAL_AVATAR_PX}.`;
+      return purpose === "logo"
+        ? `An event logo needs to be at least ${MIN_CANONICAL_AVATAR_PX}×${MIN_CANONICAL_AVATAR_PX}.`
+        : `A profile photo needs to be at least ${MIN_CANONICAL_AVATAR_PX}×${MIN_CANONICAL_AVATAR_PX}.`;
     }
     if (width > MAX_CANONICAL_PX) {
-      return `A profile photo should be at most ${MAX_CANONICAL_PX}px — it is rendered at 512px.`;
+      return purpose === "logo"
+        ? `An event logo should be at most ${MAX_CANONICAL_PX}px per side.`
+        : `A profile photo should be at most ${MAX_CANONICAL_PX}px — it is rendered at 512px.`;
     }
     return null;
   }
@@ -304,8 +308,8 @@ async function uploadImage({
   publicId,
   uploadedBy = null,
   purpose = "default",
-  /* "avatar" | "cover" when the caller is uploading a CANONICAL render (§6).
-   * Absent for every other upload, which then keeps the rules it always had. */
+  /* "avatar" | "cover" | "logo" when the caller uploads a CANONICAL render
+   * (§6). Absent for every other upload, which then keeps the rules it had. */
   shape = null,
 }) {
   const validationError = validateImageBuffer(buffer, mimetype, folder);
@@ -403,14 +407,16 @@ function imageVariants(urlOrId, preset = "default") {
 
 /** Confirm an asset is in use by a domain object (event, post, user…). */
 async function markAttached(publicId, attachedTo) {
-  if (!publicId) return;
+  if (!publicId) return false;
   try {
-    await MediaAsset.updateOne(
+    const result = await MediaAsset.updateOne(
       { publicId },
-      { $set: { status: "active", attachedTo: String(attachedTo || null), cleanupAfter: null } }
+      { $set: { status: "active", attachedTo: String(attachedTo || null), cleanupAfter: null, cleanupReason: null } }
     );
+    return Boolean(result.matchedCount);
   } catch (err) {
     console.warn("[media] markAttached failed:", err?.message || err);
+    return false;
   }
 }
 

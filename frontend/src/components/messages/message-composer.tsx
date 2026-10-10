@@ -131,7 +131,7 @@ export function MessageComposer({
           <button
             type="button"
             onClick={onCancelReply}
-            className="rounded-full p-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container hover:text-on-surface"
             aria-label="Cancel reply"
           >
             <X className="h-3.5 w-3.5" />
@@ -162,7 +162,7 @@ export function MessageComposer({
             <button
               type="button"
               onClick={() => imageRef.current?.click()}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary"
+              className="flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary"
               aria-label="Send a photo"
             >
               <ImagePlus className="h-5 w-5" />
@@ -228,14 +228,14 @@ export function MessageComposer({
                iOS zooms the page when a focused input's font-size is under
                16px; the composer was 15px, so tapping it magnified the whole
                thread. From `sm` it returns to its designed 15px. */
-          className="no-scrollbar max-h-[8.25rem] min-h-[2.5rem] flex-1 resize-none overflow-y-auto [scrollbar-width:none] rounded-2xl border border-outline-variant bg-surface px-3.5 py-2.5 text-base leading-snug outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 disabled:opacity-60 sm:text-[15px]"
+          className="no-scrollbar max-h-[8.25rem] min-h-11 flex-1 resize-none overflow-y-auto [scrollbar-width:none] rounded-2xl border border-outline-variant bg-surface px-3.5 py-2.5 text-base leading-snug outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 disabled:opacity-60 sm:text-[15px]"
         />
 
         <button
           type="submit"
           disabled={!canSend}
           className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all",
+            "flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all",
             canSend
               ? "brand-gradient text-white elevation-glow hover:brightness-105"
               : "bg-surface-container text-on-surface-variant"

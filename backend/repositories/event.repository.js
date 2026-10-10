@@ -23,9 +23,11 @@
  *    This is the §10 rule: never share a cached response whose contents
  *    depend on who is asking.
  *
- *  • Only the already-redacted public projection is stored, so the cache
- *    never holds sensitive fields (join codes, meeting passcodes, ticket
- *    settings) even in process memory.
+ *  • Only the already-redacted public projection is stored, so meeting IDs,
+ *    passcodes, ticket settings and attendee check-ins never reach the cache.
+ *    The short `joinCode` is intentionally included: it is a display/lookup
+ *    hint, not an authorization credential, and the read-only projector shows
+ *    it. Access control must still be enforced by the API and Socket.IO.
  */
 
 const Event = require("../models/event.model");
@@ -40,8 +42,14 @@ const STRIP_FIELDS = [
   "passcode",
   "checkIns",
   "bannerPublicId",
+  "logoPublicId",
+  "createdBy",
   "ticketSettings",
   "whatsappGroup",
+  "organizerType",
+  "organizerId",
+  "archivedAt",
+  "archivedBy",
 ];
 
 /**
@@ -52,6 +60,8 @@ const STRIP_FIELDS = [
 function toPublicEvent(event) {
   const doc = event && event.toObject ? event.toObject() : { ...(event || {}) };
   STRIP_FIELDS.forEach((key) => delete doc[key]);
+  // Older documents predate the optional field and may not contain it.
+  if (doc.logoUrl == null) doc.logoUrl = null;
   if (doc.visibility === "private") {
     delete doc.onlineEventLink;
     delete doc.materials;
@@ -74,7 +84,7 @@ async function publicBySlug(slug) {
   const hit = await cache.peek(key);
   if (hit !== undefined) return hit; // 0 database queries
 
-  const doc = await Event.findOne({ slug, removedAt: null })
+  const doc = await Event.findOne({ slug, removedAt: null, archivedAt: null })
     .populate("organization", ORG_SUMMARY)
     .lean();
 
@@ -93,7 +103,9 @@ async function publicById(id) {
   const hit = await cache.peek(key);
   if (hit !== undefined) return hit;
 
-  const doc = await Event.findById(id).populate("organization", ORG_SUMMARY).lean();
+  const doc = await Event.findOne({ _id: id, removedAt: null, archivedAt: null })
+    .populate("organization", ORG_SUMMARY)
+    .lean();
   if (!doc) return null;
   if (doc.visibility === "private") return doc;
 

@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  Building2,
   CalendarDays,
   Loader2,
   MessageSquare,
@@ -25,9 +26,10 @@ interface SearchResults {
   communities: { _id: string; name: string; slug: string; description?: string }[];
   people: { _id: string; firstName: string; lastName: string; username?: string; profile?: any; verified?: boolean }[];
   posts: { _id: string; content: string; author?: { firstName: string; lastName: string; username?: string } | null }[];
+  organizations: { _id: string; name: string; handle?: string; slug: string; category?: string; city?: string; country?: string; isVerified?: boolean }[];
 }
 
-const EMPTY: SearchResults = { events: [], communities: [], people: [], posts: [] };
+const EMPTY: SearchResults = { events: [], communities: [], people: [], posts: [], organizations: [] };
 
 export function SearchBar() {
   const router = useRouter();
@@ -59,7 +61,13 @@ export function SearchBar() {
     timerRef.current = setTimeout(() => {
       api
         .get("/search", { params: { q, type: "all" } })
-        .then((r) => setResults(r.data ? { events: r.data.events || [], communities: r.data.communities || [], people: r.data.people || [], posts: r.data.posts || [] } : EMPTY))
+        .then((r) => setResults(r.data ? {
+          events: r.data.events || [],
+          communities: r.data.communities || [],
+          people: r.data.people || [],
+          posts: r.data.posts || [],
+          organizations: r.data.organizations || [],
+        } : EMPTY))
         .catch(() => setResults(EMPTY))
         .finally(() => setLoading(false));
     }, 350);
@@ -95,7 +103,7 @@ export function SearchBar() {
   };
 
   const hasAny =
-    results.events.length + results.communities.length + results.people.length + results.posts.length > 0;
+    results.events.length + results.communities.length + results.people.length + results.posts.length + results.organizations.length > 0;
   const q = query.trim();
 
   return (
@@ -110,7 +118,7 @@ export function SearchBar() {
               setOpen(true);
             }}
             onFocus={() => setOpen(true)}
-            placeholder="Search events, people, or topics..."
+            placeholder="Search events, organizations, people, or topics..."
             aria-label="Search EventHub"
             className="h-10 w-full rounded-full border border-input bg-muted/60 pl-10 pr-4 text-sm text-foreground outline-none transition-all placeholder:text-muted-foreground focus:border-primary/50 focus:bg-background focus:ring-4 focus:ring-primary/10"
           />
@@ -155,6 +163,27 @@ export function SearchBar() {
                         {c.description ? (
                           <span className="block truncate text-xs text-muted-foreground">{c.description}</span>
                         ) : null}
+                      </span>
+                    </SearchItem>
+                  ))}
+                </SearchGroup>
+              )}
+              {results.organizations.length > 0 && (
+                <SearchGroup icon={Building2} label="Organizations">
+                  {results.organizations.map((organization) => (
+                    <SearchItem
+                      key={organization._id}
+                      href={`/organizations/${encodeURIComponent(organization.handle || organization.slug)}`}
+                      onGo={() => setOpen(false)}
+                    >
+                      <span className="rounded-lg bg-brand-light p-1.5 text-primary">
+                        <Building2 className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-bold text-foreground">{organization.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {[organization.category?.toLowerCase().replaceAll("_", " "), organization.city, organization.country].filter(Boolean).join(" · ")}
+                        </span>
                       </span>
                     </SearchItem>
                   ))}

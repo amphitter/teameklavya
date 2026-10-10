@@ -4,139 +4,140 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ══════════════════════════════════════════════════════════
-   EVENTHUB DESIGN SYSTEM — "Vibrant Pulse" (DESIGN.md), light-first
-   ══════════════════════════════════════════════════════════
-
-   One source of truth. The supplied references and DESIGN.md speak a
-   Material-3 vocabulary (`surface`, `on-surface`, `surface-container-low`…)
-   while the existing components speak shadcn (`background`, `card`, `muted`…).
-
-   Rather than replace the existing layer — which would churn every component
-   at once — the DESIGN.md palette is canonical and the shadcn names are
-   ALIASES pointing at it. Both resolve to the same colour, so a component may
-   use either and the two can never drift apart.
-
-   Gradient is reserved (§3): primary CTA, create button, selected state,
-   milestone moments. Not ambient decoration.
+   EVENTHUB PREMIUM DESIGN SYSTEM — Dual Theme
+   Light: clean SaaS, Dark: near-black premium (#0a0a0c)
+   Primary: electric blue #3b82f6
    ══════════════════════════════════════════════════════════ */
 @theme {
-  /* ── Brand (DESIGN.md) ──────────────────────────────────── */
-  --color-navy: #0b1235; /* display headings, brand mark */
-  --color-navy-deep: #111936; /* layered dark surfaces */
-  --color-brand: #2563ff; /* primary blue */
-  --color-brand-dark: #1677ff; /* hover / focus */
-  --color-purple: #6c35ff; /* transition anchor */
-  --color-violet: #7c3aed; /* badges, selected states */
-  --color-magenta: #d946ef; /* energy highlight */
-  --color-cyan: #10b0f0;
+  /* ── Brand ───────────────────────────────────────────── */
+  --color-brand: #3b82f6;
+  --color-brand-hover: #2563eb;
+  --color-brand-soft: #dbeafe;
+  --color-brand-ring: rgba(59, 130, 246, 0.15);
 
-  /* ── Canvas & surfaces ──────────────────────────────────── */
-  --color-surface: #f8faff;
-  --color-surface-container-lowest: #ffffff;
-  --color-surface-container-low: #f4f2ff;
-  --color-surface-container: #ececff;
-  --color-surface-container-high: #e5e6ff;
-  --color-surface-container-highest: #dee0ff;
-  --color-surface-variant: #dee0ff;
-  --color-surface-tint: #004fe5;
-  --color-inverse-surface: #272e52;
-  --color-inverse-on-surface: #f0efff;
+  /* ── Light Theme (default) ───────────────────────────── */
+  --color-background: #f8fafc;
+  --color-foreground: #0f172a;
 
-  --color-brand-light: #eff6ff; /* unread, info chips, message bubbles */
-  --color-purple-light: #ede9fe; /* lavender tint — selected tags */
-  --color-magenta-light: #fdf4ff;
+  --color-surface: #f8fafc;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f1f5f9;
+  --color-surface-3: #e2e8f0;
+  --color-surface-4: #cbd5e1;
 
-  /* ── Text ───────────────────────────────────────────────── */
-  --color-on-surface: #12193c;
-  --color-on-surface-variant: #64709a; /* secondary labels, timestamps */
-  --color-outline: #737687;
-  --color-outline-variant: #e4e9f4; /* structural separators */
+  --color-card: #ffffff;
+  --color-card-foreground: #0f172a;
+  --color-card-hover: #f8fafc;
 
-  /* ── Semantic aliases (shadcn names → DESIGN.md values) ───
-     Every existing component keeps working; these now resolve to the
-     reference palette instead of the older logo-derived one. */
-  --color-background: var(--color-surface);
-  --color-foreground: var(--color-on-surface);
-  --color-card: var(--color-surface-container-lowest);
-  --color-card-foreground: var(--color-on-surface);
-  --color-popover: var(--color-surface-container-lowest);
-  --color-popover-foreground: var(--color-on-surface);
-  --color-primary: var(--color-brand);
+  --color-popover: #ffffff;
+  --color-popover-foreground: #0f172a;
+
+  --color-primary: #3b82f6;
   --color-primary-foreground: #ffffff;
-  --color-secondary: var(--color-purple);
-  --color-secondary-foreground: #ffffff;
-  --color-muted: var(--color-surface-container-low);
-  --color-muted-foreground: var(--color-on-surface-variant);
-  --color-accent: var(--color-purple-light);
-  --color-accent-foreground: var(--color-on-surface);
-  --color-border: var(--color-outline-variant);
-  --color-input: var(--color-outline-variant);
-  --color-ring: var(--color-brand);
 
-  --color-destructive: #ba1a1a;
+  --color-secondary: #f1f5f9;
+  --color-secondary-foreground: #0f172a;
+
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #64748b;
+
+  --color-accent: #f1f5f9;
+  --color-accent-foreground: #0f172a;
+
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+  --color-input: #e2e8f0;
+  --color-ring: #3b82f6;
+
+  --color-destructive: #ef4444;
   --color-destructive-foreground: #ffffff;
-  --color-success: #16a34a;
-  --color-success-light: #e8f9ee;
-  --color-warning: #d97706;
-  --color-warning-light: #fdf3e3;
 
-  /* ── Elevation — cool indigo ambient, per DESIGN.md ──────── */
-  --shadow-card: 0px 4px 16px rgba(24, 39, 75, 0.04), 0px 1px 2px rgba(24, 39, 75, 0.02);
-  --shadow-float: 0px 10px 40px rgba(24, 39, 75, 0.08), 0px 2px 6px rgba(24, 39, 75, 0.03);
-  --shadow-glow: 0px 8px 24px rgba(37, 99, 255, 0.25);
+  --color-success: #10b981;
+  --color-success-soft: #dcfce7;
+  --color-success-border: #86efac;
 
-  /* ── Shape ────────────────────────────────────────────────
-     Containers 18-24px · controls 10-12px · pills full. */
-  --radius-md: 0.625rem;
-  --radius-lg: 0.875rem;
-  --radius-xl: 1.125rem;
-  --radius-2xl: 1.5rem;
-  --radius-control: 0.75rem;
+  --color-warning: #f59e0b;
+  --color-warning-soft: #fef3c7;
+  --color-warning-border: #fcd34d;
 
-  /* ── Typography — Inter, DESIGN.md scale ────────────────── */
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --text-display: 3rem; /* 48/800/-0.03em */
-  --text-headline-lg: 2rem; /* 32/700/-0.02em */
-  --text-headline-md: 1.5rem; /* 24/700/-0.015em */
-  --text-headline-sm: 1.25rem; /* 20/600/-0.01em */
-  --text-title-md: 1.125rem; /* 18/600 */
-  --text-label-sm: 0.6875rem; /* 11/600/+0.03em */
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #64748b;
+  --color-text-tertiary: #94a3b8;
+  --color-text-inverse: #ffffff;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 6px rgba(15, 23, 42, 0.07), 0 2px 4px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 10px 15px rgba(15, 23, 42, 0.08), 0 4px 6px rgba(15, 23, 42, 0.05);
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
-/* ── Dark mode — designed, not inverted ────────────────────
-   Deep navy surfaces, brighter brand for contrast,
-   tinted state surfaces instead of light pastels. */
+/* ── Dark Theme — Premium Near-Black ──────────────────── */
 .dark {
-  --color-background: #0a111c;
-  --color-foreground: #e6ecf5;
-  --color-card: #101b2b;
-  --color-card-foreground: #e6ecf5;
-  --color-popover: #131f30;
-  --color-popover-foreground: #e6ecf5;
-  --color-primary: #4b95f7;
-  --color-primary-foreground: #08101d;
-  --color-secondary: #182740;
-  --color-secondary-foreground: #e6ecf5;
-  --color-muted: #172438;
-  --color-muted-foreground: #8fa0b5;
-  --color-accent: #182740;
-  --color-accent-foreground: #e6ecf5;
-  --color-destructive: #f05252;
-  --color-destructive-foreground: #08101d;
-  --color-success: #34c977;
-  --color-success-light: #0f2a1d;
-  --color-warning: #f5a623;
-  --color-warning-light: #2f230e;
-  --color-border: #223349;
-  --color-input: #2a3d57;
-  --color-ring: #4b95f7;
-  --color-navy: #e6ecf5;
-  --color-brand: #4b95f7;
-  --color-brand-dark: #2b7be8;
-  --color-brand-light: #142a45;
-  --color-purple: #8f7bff;
-  --color-purple-light: #1e1c3f;
-  --color-cyan: #3ec4f5;
+  --color-background: #0a0a0c;
+  --color-foreground: #ffffff;
+
+  --color-surface: #0a0a0c;
+  --color-surface-1: #121214;
+  --color-surface-2: #18181b;
+  --color-surface-3: #1f1f23;
+  --color-surface-4: #27272a;
+
+  --color-card: #121214;
+  --color-card-foreground: #ffffff;
+  --color-card-hover: #1a1a1e;
+
+  --color-popover: #18181b;
+  --color-popover-foreground: #ffffff;
+
+  --color-primary: #3b82f6;
+  --color-primary-foreground: #ffffff;
+
+  --color-secondary: #1f1f23;
+  --color-secondary-foreground: #e4e4e7;
+
+  --color-muted: #18181b;
+  --color-muted-foreground: #a1a1aa;
+
+  --color-accent: #1f1f23;
+  --color-accent-foreground: #ffffff;
+
+  --color-border: #232326;
+  --color-border-strong: #2a2a30;
+  --color-input: #232326;
+  --color-ring: #3b82f6;
+
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+
+  --color-success: #10b981;
+  --color-success-soft: #052e1f;
+  --color-success-border: #065f46;
+
+  --color-warning: #f59e0b;
+  --color-warning-soft: #2a1e05;
+  --color-warning-border: #92400e;
+
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #a1a1aa;
+  --color-text-tertiary: #71717a;
+  --color-text-inverse: #0a0a0c;
+
+  --color-brand-soft: #1e293b;
+  --color-brand-ring: rgba(59, 130, 246, 0.2);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.25), 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3), 0 4px 6px rgba(0, 0, 0, 0.2);
 }
 
 /* ── Base ───────────────────────────────────────────────── */
@@ -144,119 +145,39 @@
   border-color: var(--color-border);
 }
 
+html {
+  background: var(--color-background);
+}
+
 body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--color-foreground);
 }
 
-/* ── Signature utilities ─────────────────────────────────── */
-
-/* The EventHub brand gradient. 135deg, blue → purple → magenta.
-   RESERVED (§3): primary CTA, create button, selected state, milestone.
-   If you are reaching for this on a surface that is not one of those, use a
-   flat token instead — the gradient reads as decoration when it is everywhere. */
-.brand-gradient {
-  background: linear-gradient(135deg, #2563ff 0%, #6c35ff 52%, #d946ef 100%);
-}
-
-.text-gradient {
-  background: linear-gradient(135deg, #2563ff 0%, #6c35ff 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-/* ── Elevation helpers (DESIGN.md depth hierarchy) ───────── */
-.elevation-card {
-  box-shadow: 0px 4px 16px rgba(24, 39, 75, 0.04), 0px 1px 2px rgba(24, 39, 75, 0.02);
-}
-.elevation-float {
-  box-shadow: 0px 10px 40px rgba(24, 39, 75, 0.08), 0px 2px 6px rgba(24, 39, 75, 0.03);
-}
-.elevation-glow {
-  box-shadow: 0px 8px 24px rgba(37, 99, 255, 0.25);
-}
-
-/* ── PRIMARY GRADIENT CTA (DESIGN.md buttons) ──────────────
-   48px tall, 12px radius, glow shadow, brightness lift on hover. */
-.btn-gradient {
-  background: linear-gradient(135deg, #2563ff 0%, #6c35ff 52%, #d946ef 100%);
-  color: #ffffff;
-  border: 0;
-  border-radius: 12px;
-  min-height: 48px;
-  font-weight: 600;
-  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
-}
-.btn-gradient:hover:not(:disabled) {
-  filter: brightness(1.05);
-  box-shadow: 0px 10px 24px rgba(108, 53, 255, 0.35);
-}
-.btn-gradient:active:not(:disabled) {
-  transform: scale(0.985);
-}
-.btn-gradient:disabled {
-  opacity: 0.55;
-  filter: none;
-  box-shadow: none;
-}
-
-/* ── Focus ring (DESIGN.md form inputs) ──────────────────── */
-.focus-brand:focus-visible {
-  outline: none;
-  border-color: #2563ff;
-  box-shadow: 0 0 0 3px rgba(37, 99, 255, 0.12);
-}
-.focus-error:focus-visible {
-  outline: none;
-  border-color: #ef4444;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
-}
-
-/* Thin custom scrollbar for horizontal rails (story rail, filters) */
-.rail-scroll {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  scroll-snap-type: x proximity;
-}
-.rail-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-/* Safe-area padding for fixed mobile chrome (bottom nav, sticky composer) */
-.pb-safe {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
-}
-.pt-safe {
-  padding-top: env(safe-area-inset-top, 0px);
-}
-
-/* Subtle dotted texture for hero sections */
-.bg-dots {
-  background-image: radial-gradient(color-mix(in srgb, var(--color-primary) 14%, transparent) 1px, transparent 1px);
-  background-size: 22px 22px;
-}
-
-/* Thin, unobtrusive scrollbars */
+/* ── Scrollbars ─────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent);
-  border-radius: 8px;
-  border: 3px solid var(--color-background);
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-border-strong) 80%, var(--color-foreground) 20%);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -265,195 +186,250 @@ body {
   scrollbar-width: none;
 }
 
-/* ── Animations (subtle, professional) ──────────────────── */
-@keyframes fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(14px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* ── Focus ──────────────────────────────────────────────── */
+.focus-ring:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-brand-ring);
 }
 
+/* ══════════════════════════════════════════════════════════
+   FORM & DROPDOWN FIXES — Critical for dark mode
+   Ensures inputs, selects, dropdowns, dialogs look correct
+   in both light and dark themes
+   ══════════════════════════════════════════════════════════ */
+
+/* Inputs, textareas, selects — base */
+input,
+textarea,
+select {
+  background: var(--color-card);
+  border: 1px solid var(--color-input);
+  color: var(--color-foreground);
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  background: #18181b !important;
+  border-color: #232326 !important;
+  color: #ffffff !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #71717a !important;
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: rgba(59, 130, 246, 0.5) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+  outline: none !important;
+}
+
+/* Light mode focus */
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  outline: none;
+}
+
+/* Dropdown / Popover / Dialog — Radix UI */
+[data-radix-popper-content-wrapper] {
+  z-index: 50 !important;
+}
+
+.dark [data-radix-popper-content-wrapper] [role="menu"],
+.dark [data-radix-popper-content-wrapper] [role="listbox"],
+.dark [data-radix-popper-content-wrapper] [role="dialog"],
+.dark [role="menu"],
+.dark [role="listbox"],
+.dark [role="dialog"] {
+  background: #121214 !important;
+  border: 1px solid #1f1f23 !important;
+  color: #ffffff !important;
+}
+
+/* DropdownMenuContent, SelectContent, PopoverContent */
+.dark [data-radix-dropdown-menu-content],
+.dark [data-radix-select-content],
+.dark [data-radix-popover-content],
+.dark [data-radix-dialog-content] {
+  background: #121214 !important;
+  border: 1px solid #232326 !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Dropdown items */
+.dark [data-radix-dropdown-menu-item],
+.dark [data-radix-select-item] {
+  color: #e4e4e7 !important;
+}
+
+.dark [data-radix-dropdown-menu-item]:hover,
+.dark [data-radix-dropdown-menu-item][data-highlighted],
+.dark [data-radix-select-item]:hover,
+.dark [data-radix-select-item][data-highlighted] {
+  background: #1f1f23 !important;
+  color: #ffffff !important;
+}
+
+/* Dialog overlay */
+.dark [data-radix-dialog-overlay] {
+  background: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Form labels in dark */
+.dark label {
+  color: #a1a1aa !important;
+}
+
+/* Buttons in dark — ensure contrast */
+.dark button {
+  border-color: #232326;
+}
+
+/* Shadcn UI components — Card, etc already use CSS vars, but ensure */
+.dark .bg-card {
+  background: #121214 !important;
+}
+
+.dark .bg-popover {
+  background: #18181b !important;
+}
+
+.dark .bg-muted {
+  background: #18181b !important;
+}
+
+.dark .text-muted-foreground {
+  color: #a1a1aa !important;
+}
+
+.dark .border-border {
+  border-color: #232326 !important;
+}
+
+/* Select trigger in dark */
+.dark [data-radix-select-trigger],
+.dark .select-trigger {
+  background: #18181b !important;
+  border-color: #232326 !important;
+  color: #ffffff !important;
+}
+
+/* ── Premium utilities ──────────────────────────────────── */
+.eh-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.eh-card-hover:hover {
+  background: var(--color-card-hover);
+  border-color: var(--color-border-strong);
+}
+
+.eh-panel {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.eh-input {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.eh-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-brand-ring);
+  outline: none;
+}
+.eh-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.dark .eh-input {
+  background: #18181b !important;
+  border-color: #232326 !important;
+  color: #ffffff !important;
+}
+
+.dark .eh-input::placeholder {
+  color: #71717a !important;
+}
+
+/* Status badges */
+.badge-verified {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+.badge-open {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+.badge-pending {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+}
+.badge-coming {
+  background: rgba(168, 85, 247, 0.1);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  color: #d8b4fe;
+}
+
+.dark .badge-verified {
+  background: rgba(59, 130, 246, 0.12) !important;
+  border-color: rgba(59, 130, 246, 0.25) !important;
+  color: #93c5fd !important;
+}
+
+/* ── Animations ─────────────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .animate-fade-in-up {
-  animation: fade-in-up 0.5s ease-out both;
+  animation: fade-in-up 0.3s ease-out;
 }
 
 @keyframes shimmer {
-  0% {
-    background-position: -400px 0;
-  }
-  100% {
-    background-position: 400px 0;
-  }
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
 }
-
 .shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--color-muted) 0%,
-    color-mix(in srgb, var(--color-muted) 55%, var(--color-foreground)) 50%,
-    var(--color-muted) 100%
-  );
+  background: linear-gradient(90deg, var(--color-surface-2) 0%, var(--color-border) 50%, var(--color-surface-2) 100%);
   background-size: 800px 100%;
   animation: shimmer 1.4s infinite linear;
 }
 
-/* Live indicator pulse — used for LIVE states only */
-@keyframes live-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
-.animate-live-pulse {
-  animation: live-pulse 1.6s ease-in-out infinite;
+.dark .shimmer {
+  background: linear-gradient(90deg, #1a1a1e 0%, #232326 50%, #1a1a1e 100%) !important;
+  background-size: 800px 100% !important;
 }
 
-/* ── Part 8 micro-interactions (§46) ─────────────────────
-   Fast, natural, 60fps. transform/opacity only — nothing here triggers
-   layout, so a like animation cannot stall a feed scroll. */
-
-/* Double-tap heart: scale up, float, fade (§8). */
-@keyframes heart-burst {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.3);
-  }
-  25% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1.15);
-  }
-  55% {
-    opacity: 1;
-    transform: translate(-50%, -55%) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -95%) scale(0.9);
-  }
-}
-.animate-heart-burst {
-  animation: heart-burst 0.75s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  /* §8 — the animation must never intercept a scroll or a second tap. */
-  pointer-events: none;
-}
-
-/* Like button pop */
-@keyframes like-pop {
-  0% {
-    transform: scale(1);
-  }
-  40% {
-    transform: scale(1.28);
-  }
-  70% {
-    transform: scale(0.94);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-.animate-like-pop {
-  animation: like-pop 0.34s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* Bookmark / save press */
-@keyframes save-press {
-  0% {
-    transform: scale(1) rotate(0deg);
-  }
-  50% {
-    transform: scale(1.22) rotate(-8deg);
-  }
-  100% {
-    transform: scale(1) rotate(0deg);
-  }
-}
-.animate-save-press {
-  animation: save-press 0.32s ease-out;
-}
-
-/* Bottom sheet rise (§12) */
-@keyframes sheet-up {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
-.animate-sheet-up {
-  animation: sheet-up 0.26s cubic-bezier(0.32, 0.72, 0, 1);
-}
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-.animate-fade-in {
-  animation: fade-in 0.2s ease-out both;
-}
-
-/* Story ring progress + viewer enter (§15) */
-@keyframes story-progress {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-.story-progress {
-  transform-origin: left center;
-  animation-name: story-progress;
-  animation-timing-function: linear;
-  animation-fill-mode: forwards;
-}
-
-/* Message send: sent bubble settles into place (§46) */
-@keyframes msg-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.animate-msg-in {
-  animation: msg-in 0.18s ease-out;
-}
-
-/* Story / media viewer zoom-in open */
-@keyframes viewer-in {
-  from {
-    opacity: 0;
-    transform: scale(1.03);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-.animate-viewer-in {
-  animation: viewer-in 0.2s ease-out;
-}
-
-/* ── Reduced motion: respect the OS preference (§49) ────── */
+/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
@@ -461,7 +437,7 @@ body {
   }
 }
 
-/* Legacy helpers still referenced during migration */
+/* Line clamp */
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -473,4 +449,21 @@ body {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* Safe area */
+.pb-safe {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.rail-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-snap-type: x proximity;
+}
+.rail-scroll::-webkit-scrollbar {
+  display: none;
 }

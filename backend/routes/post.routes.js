@@ -20,6 +20,7 @@ const { idempotencyWindow } = require("../middleware/idempotency");
 const router = express.Router();
 const postController = require("../controllers/post.controller");
 const { requireAuth, optionalUser } = require("../middleware/auth.middleware");
+const { requirePosting, requireCommenting } = require("../middleware/enforcement.middleware");
 
 router.get("/feed", optionalUser, postController.getFeed);
 
@@ -45,13 +46,13 @@ router.get("/liked", requireAuth, postController.getLikedPosts);
 // Part 9 §12 — the author's own archive. Distinct from moderation-hidden.
 router.get("/archived", requireAuth, postController.getArchivedPosts);
 router.post("/:id/archive", requireAuth, postController.toggleArchive);
-router.post("/", requireAuth, idempotencyWindow, limiters.social, postController.createPost);
+router.post("/", requireAuth, requirePosting, idempotencyWindow, limiters.social, postController.createPost);
 router.get("/event/:eventId", optionalUser, postController.getEventPosts);
 router.get("/:id", optionalUser, postController.getPostById);
 router.post("/:id/like", requireAuth, limiters.social, actionGuard("GUARD_INTERACT_TOGGLE"), postController.toggleLike);
 router.post("/:id/save", requireAuth, limiters.social, actionGuard("GUARD_INTERACT_TOGGLE"), postController.toggleSave);
 router.get("/:id/comments", optionalUser, postController.getComments);
-router.post("/:id/comments", requireAuth, limiters.social, actionGuard("GUARD_COMMENT"), postController.addComment);
+router.post("/:id/comments", requireAuth, requireCommenting, limiters.social, actionGuard("GUARD_COMMENT"), postController.addComment);
 router.delete("/:id/comments/:commentId", requireAuth, postController.deleteComment);
 router.get("/:id/comments/:commentId/replies", optionalUser, postController.getReplies);
 router.post("/:id/comments/:commentId/like", requireAuth, limiters.social, actionGuard("GUARD_INTERACT_TOGGLE"), postController.likeComment);

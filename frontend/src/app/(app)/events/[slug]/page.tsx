@@ -44,6 +44,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EventCard, type EventCardData } from "@/components/event-card";
+import { EventLogo } from "@/components/events/event-logo";
 import { UserAvatar } from "@/components/user-avatar";
 import { ReportDialog } from "@/components/moderation/report-dialog";
 import { Memories } from "@/components/events/memories";
@@ -90,6 +91,7 @@ interface EventData {
   startTime?: string;
   endTime?: string;
   bannerUrl?: string;
+  logoUrl?: string | null;
   organizer?: string;
   category?: string;
   maxAttendees?: number;
@@ -453,19 +455,22 @@ export default function EventDetailPage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="relative -mt-16 rounded-xl border border-border bg-card p-5 shadow-sm sm:-mt-20 sm:p-7">
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <h1 className="text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl md:text-4xl">
-                  {event.title}
-                </h1>
-                {event.organizer && (
-                  <div className="mt-2.5 flex items-center gap-2 text-sm text-muted-foreground">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-light text-[10px] font-bold text-purple">
-                      {(event.organizer[0] || "E").toUpperCase()}
-                    </span>
-                    Hosted by{" "}
-                    <span className="font-semibold text-foreground">{event.organizer}</span>
-                  </div>
-                )}
+              <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
+                <EventLogo logoUrl={event.logoUrl} title={event.title} className="mt-0.5 h-12 w-12 rounded-xl sm:h-16 sm:w-16" />
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl md:text-4xl">
+                    {event.title}
+                  </h1>
+                  {event.organizer && (
+                    <div className="mt-2.5 flex items-center gap-2 text-sm text-muted-foreground">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-light text-[10px] font-bold text-purple">
+                        {(event.organizer[0] || "E").toUpperCase()}
+                      </span>
+                      Hosted by{" "}
+                      <span className="font-semibold text-foreground">{event.organizer}</span>
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <Button variant="outline" size="sm" onClick={shareEvent}>

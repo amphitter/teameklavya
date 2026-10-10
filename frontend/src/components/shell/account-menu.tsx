@@ -40,6 +40,7 @@ import { useSessionUser } from "@/components/shell/use-session-user";
 import { useLogout } from "@/components/shell/use-logout";
 import { useTheme } from "@/context/ThemeContext";
 import { cn } from "@/lib/utils";
+import { hasPlatformAdminAccess } from "@/lib/superAdmin";
 
 /** The signed-in avatar (or a placeholder), always through the canonical crop. */
 export function AccountAvatar({ size = 32, user }: { size?: number; user?: any }) {
@@ -122,7 +123,7 @@ export function AccountMenu({ children }: { children: React.ReactNode }) {
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           {theme === "dark" ? "Light mode" : "Dark mode"}
         </DropdownMenuItem>
-        {role === "admin" && (
+        {hasPlatformAdminAccess(role, user) && (
           <DropdownMenuItem asChild className="gap-2.5 py-2.5">
             <Link href="/admin/dashboard">
               <LayoutDashboard className="h-4 w-4" /> Organizer dashboard

@@ -51,6 +51,8 @@ const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "im
 const FOLDER_LIMITS = {
   avatars: 2 * 1024 * 1024, // 2 MB — rendered at 64–400 px
   organizers: 2 * 1024 * 1024, // logos
+  organizations: 2 * 1024 * 1024, // backwards-compatible Organization-logo folder alias
+  "event-logos": 2 * 1024 * 1024, // separate square Event marks
   posts: 5 * 1024 * 1024, // feed photos
   posters: 8 * 1024 * 1024, // event banners are the widest asset we serve
   questions: 3 * 1024 * 1024, // live-quiz question media
@@ -322,9 +324,26 @@ const LocalProvider = {
     };
   },
 
-  async remove(_publicId) {
-    // Local files are ephemeral dev artifacts — nothing to reclaim.
-    return { ok: true };
+  async remove(publicId) {
+    if (!publicId) return { ok: true };
+    const value = String(publicId);
+    if (!value.startsWith("local/")) return { ok: true };
+
+    // Public IDs are generated as `local/<folder>/<filename>`. Resolve under
+    // UPLOADS_DIR and reject traversal instead of trusting a stored identifier.
+    const root = path.resolve(UPLOADS_DIR);
+    const target = path.resolve(root, value.slice("local/".length));
+    if (target === root || !target.startsWith(root + path.sep)) {
+      return { ok: false, error: "Invalid local asset id" };
+    }
+    try {
+      await fs.promises.unlink(target);
+      return { ok: true };
+    } catch (error) {
+      if (error.code === "ENOENT") return { ok: true };
+      console.error("Local image delete error:", error.message);
+      return { ok: false, error: error.message };
+    }
   },
 
   // No transformation engine locally: served as-is.

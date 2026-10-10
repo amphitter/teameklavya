@@ -12,28 +12,19 @@ export interface LabelProps extends React.LabelHTMLAttributes<HTMLLabelElement> 
 }
 
 const Label = React.forwardRef<HTMLLabelElement, LabelProps>(
-  ({ 
-    className, 
-    variant = "default", 
-    size = "md", 
-    required = false,
-    disabled = false,
-    children,
-    ...props 
-  }, ref) => {
-    
+  ({ className, variant = "default", size = "md", required = false, disabled = false, children, ...props }, ref) => {
     const variantClasses = {
-      default: "text-gray-900",
-      description: "text-gray-600",
-      error: "text-red-600",
-      success: "text-green-600",
-      warning: "text-amber-600"
+      default: "text-foreground dark:text-[#e4e4e7]",
+      description: "text-muted-foreground dark:text-[#a1a1aa]",
+      error: "text-destructive",
+      success: "text-emerald-600 dark:text-emerald-400",
+      warning: "text-amber-600 dark:text-amber-400",
     };
 
     const sizeClasses = {
-      sm: "text-sm",
-      md: "text-base",
-      lg: "text-lg"
+      sm: "text-[12px]",
+      md: "text-[13px]",
+      lg: "text-[14px]",
     };
 
     const disabledClasses = disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer";

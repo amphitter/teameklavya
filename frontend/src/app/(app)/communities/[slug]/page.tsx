@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/utils/api";
-import { isSuperAdminEmail } from "@/lib/superAdmin";
+import { isSuperAdminHint } from "@/lib/superAdmin";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { PageLoader, ErrorState, EmptyState } from "@/components/states";
 import { UserAvatar } from "@/components/user-avatar";
@@ -112,7 +112,7 @@ export default function CommunityPage() {
   const [claimError, setClaimError] = useState("");
 
   // Super Admin panel (Ownership Verification)
-  const meSuperAdmin = isSuperAdminEmail(user?.email);
+  const meSuperAdmin = isSuperAdminHint(user);
   const [showAudit, setShowAudit] = useState(false);
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [adminForm, setAdminForm] = useState({ name: "", slug: "" });
@@ -350,7 +350,7 @@ export default function CommunityPage() {
           {!user && (
             <Link
               href="/login"
-              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
             >
               Log in to join
             </Link>
@@ -364,7 +364,7 @@ export default function CommunityPage() {
                   community.joinPolicy === "open" ? "Joined!" : "Request sent"
                 )
               }
-              className="gap-1.5"
+              className="min-h-11 gap-1.5"
             >
               <UserPlus className="h-4 w-4" />
               {community.joinPolicy === "open" ? "Join community" : "Request to join"}
@@ -386,20 +386,20 @@ export default function CommunityPage() {
             <Button
               variant="outline"
               onClick={() => act(`/communities/${slug}/leave`, "You left the community")}
-              className="gap-1.5"
+              className="min-h-11 gap-1.5"
             >
               <UserMinus className="h-4 w-4" /> Leave
             </Button>
           )}
 
           {community.isManager && (
-            <Button variant="outline" onClick={() => setShowManage((v) => !v)} className="gap-1.5">
+            <Button variant="outline" onClick={() => setShowManage((v) => !v)} className="min-h-11 gap-1.5">
               <Settings className="h-4 w-4" /> {showManage ? "Hide manage" : "Manage"}
             </Button>
           )}
 
           {user && myOrgs.length > 0 && ["unverified", "revoked"].includes(community.status || "unverified") && !community.officialOrganization?._id && (
-            <Button variant="outline" onClick={() => setShowClaim(true)} className="gap-1.5">
+            <Button variant="outline" onClick={() => setShowClaim(true)} className="min-h-11 gap-1.5">
               <Flag className="h-4 w-4" /> Claim for my organization
             </Button>
           )}
@@ -422,13 +422,14 @@ export default function CommunityPage() {
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
             <p className="text-sm font-semibold text-foreground">You&apos;re invited to join this community</p>
             <div className="flex gap-2">
-              <Button size="sm" onClick={() => act(`/communities/${slug}/invitations/accept`, "Welcome!")}>
+              <Button size="sm" onClick={() => act(`/communities/${slug}/invitations/accept`, "Welcome!")} className="min-h-11">
                 <Check className="mr-1 h-3.5 w-3.5" /> Accept
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => act(`/communities/${slug}/invitations/decline`, "Invitation declined")}
+                className="min-h-11"
               >
                 <X className="mr-1 h-3.5 w-3.5" /> Decline
               </Button>
@@ -452,7 +453,7 @@ export default function CommunityPage() {
                 <button
                   key={p}
                   onClick={() => changePolicy(p)}
-                  className={`rounded-lg border px-2 py-2 text-xs font-semibold capitalize transition-colors ${
+                  className={`min-h-11 touch-manipulation rounded-lg border px-2 py-2 text-xs font-semibold capitalize transition-colors ${
                     community.joinPolicy === p
                       ? "border-primary bg-primary/10 text-primary"
                       : "border-border text-muted-foreground hover:bg-muted/50"
@@ -472,9 +473,9 @@ export default function CommunityPage() {
                 value={inviteName}
                 onChange={(e) => setInviteName(e.target.value)}
                 placeholder="username"
-                className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-11 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               />
-              <Button size="sm" onClick={invite} disabled={inviting}>
+              <Button size="sm" onClick={invite} disabled={inviting} className="min-h-11">
                 {inviting ? "…" : "Invite"}
               </Button>
             </div>
@@ -499,7 +500,7 @@ export default function CommunityPage() {
                     <Button
                       size="sm"
                       onClick={() => act(`/communities/${slug}/requests/${m._id}/approve`, "Request approved")}
-                      className="h-7 px-2.5 text-[11px]"
+                      className="min-h-11 px-2.5 text-xs"
                     >
                       Approve
                     </Button>
@@ -507,7 +508,7 @@ export default function CommunityPage() {
                       size="sm"
                       variant="outline"
                       onClick={() => act(`/communities/${slug}/requests/${m._id}/reject`, "Request rejected")}
-                      className="h-7 px-2.5 text-[11px]"
+                      className="min-h-11 px-2.5 text-xs"
                     >
                       Reject
                     </Button>
@@ -519,7 +520,7 @@ export default function CommunityPage() {
 
           {/* Danger zone */}
           <div className="border-t border-border pt-3">
-            <Button variant="outline" onClick={deleteCommunity} className="gap-1.5 text-[#ba1a1a]">
+            <Button variant="outline" onClick={deleteCommunity} className="min-h-11 gap-1.5 text-[#ba1a1a]">
               <Trash2 className="h-4 w-4" /> Delete community
             </Button>
           </div>
@@ -536,26 +537,26 @@ export default function CommunityPage() {
           {/* Verification */}
           <div className="flex flex-wrap gap-2">
             {community.status !== "verified" ? (
-              <Button size="sm" onClick={() => adminAction(`/communities/${slug}/verification`, { action: "verify" }, "post", "Verified badge granted")}>
+              <Button size="sm" onClick={() => adminAction(`/communities/${slug}/verification`, { action: "verify" }, "post", "Verified badge granted")} className="min-h-11">
                 <BadgeCheck className="mr-1 h-3.5 w-3.5" /> Grant verification
               </Button>
             ) : (
-              <Button size="sm" variant="outline" onClick={() => adminAction(`/communities/${slug}/verification`, { action: "revoke" }, "post", "Verification revoked")}>
+              <Button size="sm" variant="outline" onClick={() => adminAction(`/communities/${slug}/verification`, { action: "revoke" }, "post", "Verification revoked")} className="min-h-11">
                 Revoke verification
               </Button>
             )}
             {community.status === "suspended" ? (
-              <Button size="sm" variant="outline" onClick={() => adminAction(`/communities/${slug}/suspend`, { action: "unsuspend" }, "post", "Community restored")}>
+              <Button size="sm" variant="outline" onClick={() => adminAction(`/communities/${slug}/suspend`, { action: "unsuspend" }, "post", "Community restored")} className="min-h-11">
                 Unsuspend
               </Button>
             ) : (
-              <Button size="sm" variant="outline" onClick={() => adminAction(`/communities/${slug}/suspend`, { action: "suspend" }, "post", "Community suspended")}>
+              <Button size="sm" variant="outline" onClick={() => adminAction(`/communities/${slug}/suspend`, { action: "suspend" }, "post", "Community suspended")} className="min-h-11">
                 Suspend
               </Button>
             )}
             <Link
               href="/admin/claims"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/5"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-semibold text-primary hover:bg-primary/5"
             >
               <Flag className="h-3.5 w-3.5" /> Claims queue
             </Link>
@@ -577,15 +578,15 @@ export default function CommunityPage() {
                 value={adminForm.name}
                 onChange={(e) => setAdminForm((f) => ({ ...f, name: e.target.value }))}
                 placeholder="Name"
-                className="min-w-40 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-11 min-w-40 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               />
               <input
                 value={adminForm.slug}
                 onChange={(e) => setAdminForm((f) => ({ ...f, slug: e.target.value }))}
                 placeholder="handle"
-                className="min-w-40 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-11 min-w-40 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               />
-              <Button size="sm" onClick={() => adminAction(`/communities/${slug}/admin`, adminForm, "put", "Official handle updated")}>
+              <Button size="sm" className="min-h-11" onClick={() => adminAction(`/communities/${slug}/admin`, adminForm, "put", "Official handle updated")}>
                 Save
               </Button>
             </div>
@@ -599,9 +600,9 @@ export default function CommunityPage() {
                 value={transferId}
                 onChange={(e) => setTransferId(e.target.value)}
                 placeholder="5f… user id"
-                className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-11 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               />
-              <Button size="sm" onClick={() => adminAction(`/communities/${slug}/transfer`, { userId: transferId }, "post", "Ownership transferred")}>
+              <Button size="sm" className="min-h-11" onClick={() => adminAction(`/communities/${slug}/transfer`, { userId: transferId }, "post", "Ownership transferred")}>
                 Transfer
               </Button>
             </div>
@@ -614,7 +615,7 @@ export default function CommunityPage() {
                 setShowAudit((v) => !v);
                 if (!showAudit) loadAudit();
               }}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-foreground hover:text-primary"
+              className="inline-flex min-h-11 items-center gap-1.5 px-1 text-xs font-bold text-foreground hover:text-primary"
             >
               <ScrollText className="h-4 w-4 text-primary" /> {showAudit ? "Hide" : "View"} ownership & verification history
             </button>
@@ -642,7 +643,7 @@ export default function CommunityPage() {
 
       {/* Claim dialog */}
       <Dialog open={showClaim} onOpenChange={setShowClaim}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Claim this community for your organization</DialogTitle>
           </DialogHeader>
@@ -656,7 +657,7 @@ export default function CommunityPage() {
               <select
                 value={claimForm.organizationId}
                 onChange={(e) => setClaimForm((f) => ({ ...f, organizationId: e.target.value }))}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               >
                 <option value="">Pick your organization</option>
                 {myOrgs.map((o) => (
@@ -674,7 +675,7 @@ export default function CommunityPage() {
                 placeholder="Who you are, why your organization is the official owner…"
                 rows={3}
                 maxLength={2000}
-                className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-24 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               />
             </div>
             <div>
@@ -683,7 +684,7 @@ export default function CommunityPage() {
                 value={claimForm.documentUrl}
                 onChange={(e) => setClaimForm((f) => ({ ...f, documentUrl: e.target.value }))}
                 placeholder="https://… (letter, authorization, website page)"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               />
             </div>
             <div>
@@ -692,11 +693,11 @@ export default function CommunityPage() {
                 value={claimForm.contactEmail}
                 onChange={(e) => setClaimForm((f) => ({ ...f, contactEmail: e.target.value }))}
                 placeholder="admin@your-college.edu"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               />
             </div>
             {claimError && <p className="text-xs font-medium text-[#ba1a1a]">{claimError}</p>}
-            <Button onClick={submitClaim} disabled={claiming} className="w-full">
+            <Button onClick={submitClaim} disabled={claiming} className="min-h-11 w-full">
               {claiming ? "Submitting…" : "Submit claim for review"}
             </Button>
           </div>
@@ -718,10 +719,10 @@ export default function CommunityPage() {
                 placeholder={`Share something with ${community.name}…`}
                 rows={2}
                 maxLength={2000}
-                className="w-full resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                className="min-h-11 w-full resize-none bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground sm:text-sm"
               />
               <div className="mt-2 flex justify-end">
-                <Button size="sm" onClick={submitPost} disabled={posting || !composerText.trim()}>
+                <Button size="sm" onClick={submitPost} disabled={posting || !composerText.trim()} className="min-h-11">
                   {posting ? "Posting…" : "Post"}
                 </Button>
               </div>
@@ -797,7 +798,7 @@ export default function CommunityPage() {
                     size="sm"
                     variant="ghost"
                     onClick={() => act(`/communities/${slug}/members/${m._id}/remove`, "Member removed")}
-                    className="h-7 px-2 text-[11px] text-muted-foreground hover:text-[#ba1a1a]"
+                    className="min-h-11 px-2.5 text-xs text-muted-foreground hover:text-[#ba1a1a]"
                   >
                     Remove
                   </Button>

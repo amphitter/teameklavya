@@ -37,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EmptyState, ErrorState, PageLoader, Skeleton } from "@/components/states";
 import { cn } from "@/lib/utils";
+import { hasPlatformAdminAccess } from "@/lib/superAdmin";
 
 /**
  * The user as `/auth/me` returns it.
@@ -54,6 +55,7 @@ interface ProfileUser {
   email: string;
   username?: string;
   role: string;
+  isSuperAdmin?: boolean;
   emailVerified: boolean;
   profile?: {
     avatar?: string;
@@ -296,7 +298,7 @@ export default function ProfileView() {
                     <BadgeCheck className="h-3.5 w-3.5" /> Verified
                   </span>
                 )}
-                {user.role === "admin" && (
+                {hasPlatformAdminAccess(user.role, user) && (
                   <span className="rounded-full bg-purple-light px-2.5 py-1 text-[11px] font-semibold text-purple">
                     Organizer
                   </span>

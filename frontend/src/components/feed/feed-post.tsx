@@ -26,6 +26,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { ReportDialog } from "@/components/moderation/report-dialog";
 import { RichContent } from "@/components/feed/rich-content";
 import { profilePathOf } from "@/lib/social";
+import { hasPlatformAdminAccess } from "@/lib/superAdmin";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -136,7 +137,7 @@ export function FeedPost({
   const [reporting, setReporting] = useState(false);
 
   const isOwn = user && post.author?._id === user._id;
-  const canDelete = isOwn || role === "admin";
+  const canDelete = isOwn || hasPlatformAdminAccess(role, user);
 
   const toggleLike = async () => {
     if (!user) {
@@ -521,7 +522,7 @@ export function FeedPost({
           aria-pressed={liked}
           aria-label={liked ? "Unlike" : "Like"}
           className={cn(
-            "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors",
+            "min-h-11 min-w-11 touch-manipulation flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors",
             liked ? "text-destructive" : "text-muted-foreground hover:bg-muted hover:text-foreground"
           )}
         >
@@ -538,7 +539,7 @@ export function FeedPost({
           type="button"
           onClick={() => setCommentsOpen(true)}
           aria-label="Comments"
-          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="min-h-11 min-w-11 touch-manipulation flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <MessageCircle className="h-[18px] w-[18px]" />
           {commentCount > 0 && compactCount(commentCount)}
@@ -548,7 +549,7 @@ export function FeedPost({
           type="button"
           onClick={share}
           aria-label="Share"
-          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="min-h-11 min-w-11 touch-manipulation flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <Share2 className="h-[18px] w-[18px]" />
         </button>
@@ -559,7 +560,7 @@ export function FeedPost({
           aria-pressed={saved}
           aria-label={saved ? "Unsave" : "Save"}
           className={cn(
-            "ml-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors",
+            "ml-auto min-h-11 min-w-11 touch-manipulation flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors",
             saved ? "text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
           )}
         >

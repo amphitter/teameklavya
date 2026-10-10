@@ -105,6 +105,39 @@ const userSchema = new mongoose.Schema({
   suspendedAt: { type: Date, default: null },
   suspensionReason: { type: String, default: "" },
 
+  // ── Enhanced moderation & enforcement (Onboarding & Trust & Safety) ──
+  // Token version for session revocation after ban/suspension
+  tokenVersion: { type: Number, default: 0 },
+  // Permanent ban
+  bannedAt: { type: Date, default: null },
+  banReason: { type: String, default: "" },
+  banCategory: { type: String, default: "" },
+  // Temporary suspension with expiry
+  suspensionExpiresAt: { type: Date, default: null },
+  // Feature restrictions: { posting: { until, reason }, commenting, messaging, eventCreation }
+  restrictions: {
+    posting: {
+      until: { type: Date, default: null },
+      reason: { type: String, default: "" },
+    },
+    commenting: {
+      until: { type: Date, default: null },
+      reason: { type: String, default: "" },
+    },
+    messaging: {
+      until: { type: Date, default: null },
+      reason: { type: String, default: "" },
+    },
+    eventCreation: {
+      until: { type: Date, default: null },
+      reason: { type: String, default: "" },
+    },
+  },
+  // Warning count and violation history
+  warningCount: { type: Number, default: 0 },
+  violationCount: { type: Number, default: 0 },
+  lastViolationAt: { type: Date, default: null },
+
   // ── Social identity (Part 3) ─────────────────────────────
   username: {
     type: String,
@@ -114,9 +147,20 @@ const userSchema = new mongoose.Schema({
     // sparse: legacy users without a username don't collide on the unique index
     index: { unique: true, sparse: true }
   },
+  usernameLastChangedAt: { type: Date, default: null },
+  // For first-time assignment tracking
+  usernameFirstSetAt: { type: Date, default: null },
+
   verified: { type: Boolean, default: false },
   points: { type: Number, default: 0, min: 0 },
   socialSettings: { type: socialSettingsSchema, default: () => ({}) },
+
+  // ── Discovery privacy (org-only event creation & profile hide) ──
+  // When true, personal profile is excluded from people search/discovery listings
+  // (suggested users, search type=people). Org remains searchable. Distinct from
+  // suspension/deletion/org visibility. Safe default false preserves visibility.
+  hidePersonalProfileFromDiscovery: { type: Boolean, default: false },
+  hideFromPeopleDiscoveryUpdatedAt: { type: Date, default: null },
 
   // Email verification fields
   /* Part 11 — presence. Written from the socket layer, throttled (see
@@ -135,6 +179,27 @@ const userSchema = new mongoose.Schema({
   // silently drops undeclared fields, which previously broke password reset.
   passwordResetToken: { type: String },
   passwordResetTokenExpires: { type: Date },
+
+  // ── Onboarding (User onboarding & profile personalization) ──
+  ageConfirmed: { type: Boolean, default: false },
+  ageConfirmedAt: { type: Date, default: null },
+  // We do NOT store full DOB unless required; just confirmation boolean + timestamp
+  // Minimum age policy: 13 (documented assumption, not inventing legal requirement)
+  onboardingVersion: { type: Number, default: 0 },
+  onboardingCompletedAt: { type: Date, default: null },
+  onboardingSteps: {
+    username: { type: Boolean, default: false },
+    age: { type: Boolean, default: false },
+    privacy: { type: Boolean, default: false },
+    avatarBanner: { type: Boolean, default: false },
+    bio: { type: Boolean, default: false },
+    institution: { type: Boolean, default: false },
+    interests: { type: Boolean, default: false },
+  },
+  // Institution as Organization ref (canonical source)
+  institutionOrgId: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", default: null },
+  // Interests with stable IDs
+  interestsV2: { type: [String], default: [] },
 
   // OAuth providers (e.g., Google, GitHub)
   oauthProviders: [{
@@ -190,6 +255,14 @@ userSchema.pre('save', async function (next) {
   }
   next();
 });
+
+// Indexes for new onboarding & enforcement fields
+userSchema.index({ bannedAt: 1 });
+userSchema.index({ suspendedAt: 1, suspensionExpiresAt: 1 });
+userSchema.index({ institutionOrgId: 1 });
+userSchema.index({ onboardingVersion: 1 });
+userSchema.index({ tokenVersion: 1 });
+userSchema.index({ hidePersonalProfileFromDiscovery: 1 });
 
 // 🔹 Optional: virtual full name for convenience
 userSchema.virtual('fullName').get(function () {

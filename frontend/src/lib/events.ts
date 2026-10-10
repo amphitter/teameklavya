@@ -6,7 +6,16 @@ import type { EventCardData } from "@/components/event-card";
 interface EventsResponse {
   success: boolean;
   events: EventCardData[];
-  pagination?: { page: number; limit: number; total: number; pages: number };
+  nextCursor?: string | null;
+  hasMore?: boolean;
+  pagination?: {
+    page?: number;
+    limit?: number;
+    total?: number;
+    pages?: number;
+    nextCursor?: string | null;
+    hasMore?: boolean;
+  };
 }
 
 /**
@@ -15,7 +24,12 @@ interface EventsResponse {
  */
 export async function fetchEventsWithCounts(
   params: Record<string, string | number | undefined> = {}
-): Promise<{ events: EventCardData[]; pagination?: EventsResponse["pagination"] }> {
+): Promise<{
+  events: EventCardData[];
+  pagination?: EventsResponse["pagination"];
+  nextCursor: string | null;
+  hasMore: boolean;
+}> {
   const clean = Object.fromEntries(
     Object.entries(params).filter(([, v]) => v !== undefined && v !== "" && v !== "all")
   );
@@ -41,7 +55,12 @@ export async function fetchEventsWithCounts(
     }
   }
 
-  return { events, pagination: res.data?.pagination };
+  return {
+    events,
+    pagination: res.data?.pagination,
+    nextCursor: res.data?.nextCursor ?? res.data?.pagination?.nextCursor ?? null,
+    hasMore: Boolean(res.data?.hasMore ?? res.data?.pagination?.hasMore),
+  };
 }
 
 /** Compute upcoming/ongoing/past from dates (mirrors backend logic). */

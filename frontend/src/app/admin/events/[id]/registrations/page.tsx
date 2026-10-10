@@ -174,17 +174,17 @@ export default function EventRegistrationsPage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <Link href={`/admin/events`} className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
+          <Link href={`/admin/events`} className="inline-flex min-h-11 items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
             <ChevronLeft className="h-3.5 w-3.5" /> All events
           </Link>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground">Registrations</h1>
           <p className="text-sm text-muted-foreground">{event?.title || "Event"}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Link href={`/admin/events/${id}/scan`}>
-            <Button variant="outline">Scan tickets</Button>
+            <Button variant="outline" className="min-h-11">Scan tickets</Button>
           </Link>
-          <Button onClick={exportCsv} disabled={exporting || total === 0}>
+          <Button onClick={exportCsv} disabled={exporting || total === 0} className="min-h-11">
             <Download className="mr-2 h-4 w-4" /> {exporting ? "Exporting…" : "Export CSV"}
           </Button>
         </div>
@@ -193,18 +193,18 @@ export default function EventRegistrationsPage() {
       <EventTabs active="registrations" />
 
       {/* Stats chips — aggregate counts, independent of the current filter */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
         {[
           { label: "Total", value: total, icon: Users, cls: "text-primary bg-brand-light" },
           { label: "Confirmed", value: confirmed, icon: UserCheck, cls: "text-success bg-success-light" },
           { label: "Pending", value: pending, icon: Clock3, cls: "text-warning bg-warning-light" },
         ].map((s) => (
-          <div key={s.label} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
-            <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", s.cls)}>
+          <div key={s.label} className="flex min-w-0 items-center gap-2 rounded-xl border border-border bg-card p-3 sm:gap-3 sm:p-4">
+            <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg sm:h-10 sm:w-10", s.cls)}>
               <s.icon className="h-5 w-5" />
             </div>
-            <div>
-              <div className="text-xl font-bold text-foreground">{s.value}</div>
+            <div className="min-w-0">
+              <div className="truncate text-lg font-bold text-foreground sm:text-xl">{s.value}</div>
               <div className="text-xs text-muted-foreground">{s.label}</div>
             </div>
           </div>
@@ -219,16 +219,16 @@ export default function EventRegistrationsPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by name, email or answers…"
-            className="pl-9"
+            className="min-h-11 pl-9 text-base sm:text-sm"
           />
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex flex-wrap gap-1.5">
           {(["all", "confirmed", "pending"] as const).map((f) => (
             <button
               key={f}
               onClick={() => setStatusFilter(f)}
               className={cn(
-                "rounded-lg border px-3.5 py-2 text-xs font-semibold capitalize transition-colors",
+                "min-h-11 touch-manipulation rounded-lg border px-3.5 py-2 text-xs font-semibold capitalize transition-colors",
                 statusFilter === f
                   ? "border-primary bg-primary text-primary-foreground"
                   : "border-border text-muted-foreground hover:border-primary/40"

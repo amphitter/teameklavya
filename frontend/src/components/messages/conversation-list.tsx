@@ -310,7 +310,7 @@ export function ConversationList({
             <button
               type="button"
               onClick={onCreateTeam}
-              className="flex h-9 shrink-0 touch-manipulation items-center gap-1.5 rounded-full bg-primary px-3 text-[13px] font-semibold text-white active:opacity-90"
+              className="flex h-11 min-h-11 shrink-0 touch-manipulation items-center gap-1.5 rounded-full bg-primary px-3 text-[13px] font-semibold text-white active:opacity-90"
             >
               <Plus className="h-4 w-4" aria-hidden />
               New team
@@ -335,13 +335,13 @@ export function ConversationList({
                `text-base` is 16px; it returns to the tighter 14px from `sm`
                where no such behaviour exists, and nothing about zoom is
                disabled elsewhere on the site. */
-            className="h-9 w-full rounded-lg border border-outline-variant bg-surface-container pl-8 pr-8 text-base outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 sm:text-[14px]"
+            className="h-11 w-full rounded-lg border border-outline-variant bg-surface-container pl-8 pr-10 text-base outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 sm:text-[14px]"
           />
           {search ? (
             <button
               type="button"
               onClick={() => onSearchChange("")}
-              className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-high"
+              className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-high"
               aria-label="Clear search"
             >
               <X className="h-3.5 w-3.5" />
@@ -457,7 +457,7 @@ export function ConversationList({
             <button
               type="button"
               onClick={onRetry}
-              className="mt-1 rounded-full bg-primary px-4 py-2 text-[12px] font-semibold text-white"
+              className="mt-1 min-h-11 rounded-full bg-primary px-4 py-2 text-[12px] font-semibold text-white"
             >
               Try again
             </button>

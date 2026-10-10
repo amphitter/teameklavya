@@ -7,25 +7,24 @@ const { actionGuard } = require("../middleware/action-guard");
 
 const router = express.Router();
 const ticketController = require("../controllers/ticket.controller");
-const { requireAuth, requireAdmin } = require("../middleware/auth.middleware");
+const { requireAuth, requireEventManager } = require("../middleware/auth.middleware");
 
 // User routes
 router.post("/generate", requireAuth, idempotencyWindow, limiters.event, ticketController.generateTicket);
 router.get("/user-tickets", requireAuth, ticketController.getUserTickets);
 
-// Admin ticket management routes
-router.post("/bulk-generate", requireAuth, requireAdmin, idempotencyWindow, ticketController.generateBulkTickets);
-router.post("/approve-pending", requireAuth, requireAdmin, idempotencyWindow, ticketController.approvePendingTickets);
-router.get("/pending/:eventId", requireAuth, requireAdmin, ticketController.getPendingTickets);
-router.post("/send-ticket", requireAuth, requireAdmin, idempotencyWindow, ticketController.sendTicketToUser);
+// Event-specific operational management: owners/admins and active Organization
+// EVENT_MANAGERs for explicitly Organization-owned Events.
+router.post("/bulk-generate", requireAuth, requireEventManager, idempotencyWindow, ticketController.generateBulkTickets);
+router.post("/approve-pending", requireAuth, limiters.event, idempotencyWindow, ticketController.approvePendingTickets);
+router.get("/pending/:eventId", requireAuth, requireEventManager, ticketController.getPendingTickets);
+router.post("/send-ticket", requireAuth, limiters.event, idempotencyWindow, ticketController.sendTicketToUser);
 
-// Scan routes (admin only)
-router.post("/scan", requireAuth, requireAdmin, actionGuard("GUARD_TICKET_SCAN"), ticketController.scanTicket);
-router.get("/token/:token", requireAuth, requireAdmin, ticketController.getTicketByToken);
+router.post("/scan", requireAuth, actionGuard("GUARD_TICKET_SCAN"), ticketController.scanTicket);
+router.get("/token/:token", requireAuth, ticketController.getTicketByToken);
 
-// Analytics routes (admin only)
-router.get("/event/:eventId/stats", requireAuth, requireAdmin, ticketController.getEventScanStats);
-router.get("/event/:eventId/recent-scans", requireAuth, requireAdmin, ticketController.getRecentScans);
-router.get("/event/:eventId/scanned-tickets", requireAuth, requireAdmin, ticketController.getEventScannedTickets);
+router.get("/event/:eventId/stats", requireAuth, requireEventManager, ticketController.getEventScanStats);
+router.get("/event/:eventId/recent-scans", requireAuth, requireEventManager, ticketController.getRecentScans);
+router.get("/event/:eventId/scanned-tickets", requireAuth, requireEventManager, ticketController.getEventScannedTickets);
 
 module.exports = router;

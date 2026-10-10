@@ -7,6 +7,7 @@
  *   node scripts/retention-sweeper.js                    # dry run (default)
  *   node scripts/retention-sweeper.js --apply            # actually change data
  *   node scripts/retention-sweeper.js --section=tokens   # one section only
+ *   node scripts/retention-sweeper.js --section=communications # 90-day mail history
  *   node scripts/retention-sweeper.js --json             # machine-readable
  *
  * ══ WHY THIS IS A SCRIPT AND NOT TTL INDEXES ══════════════════════════════
@@ -27,9 +28,10 @@
  *     reference it. Reclamation has to delete record AND object, which is
  *     exactly what scripts/media-sweeper.js does.
  *
- * So: field-level cleanup and archival deletion are scripted and explicit,
- * and TTL indexes are reserved for collections that are wholly temporary
- * (there are none today — see docs/DATA-RETENTION.md §4).
+ * Communication history is swept explicitly after 90 days so its parent
+ * campaign and per-recipient delivery rows are removed together. These paired
+ * records do not use TTL; the only TTL elsewhere is the partial `seen`
+ * post-impression index documented in docs/DATA-RETENTION.md.
  *
  * ══ SAFETY PROPERTIES ════════════════════════════════════════════════════
  *   • DRY RUN BY DEFAULT. Writes require --apply.
@@ -167,7 +169,50 @@ async function sweepLiveArchives({ LiveMessage, QAQuestion }) {
   };
 }
 
-/* ══ Section 3 — retention inventory (read-only) ══════════════════════════
+/* ══ Section 3 — communication history (fixed 90-day window) ══════════════
+ * Campaign metadata and recipient email/status snapshots are operational
+ * history, not permanent user content. Delete delivery rows first, then their
+ * campaign rows, in bounded batches. This is deliberately not a TTL index:
+ * the parent and its recipient-level history must be cleaned together. */
+async function sweepCommunications({ Communication, CommunicationDelivery }) {
+  const windowDays = 90;
+  const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  const filter = { createdAt: { $lt: cutoff } };
+  const [eligible, campaignRows] = await Promise.all([
+    Communication.countDocuments(filter),
+    Communication.find(filter).select("_id").sort({ createdAt: 1 }).limit(MAX).lean(),
+  ]);
+  const campaignIds = campaignRows.map((row) => row._id);
+  if (!campaignIds.length) {
+    return { windowDays, cutoff: cutoff.toISOString(), eligible, examined: 0, deliveries: 0, deletedCampaigns: 0, deletedDeliveries: 0 };
+  }
+
+  const deliveryFilter = { communicationId: { $in: campaignIds } };
+  const deliveryCount = await CommunicationDelivery.countDocuments(deliveryFilter);
+  let deletedCampaigns = 0;
+  let deletedDeliveries = 0;
+  if (APPLY) {
+    const deliveryResult = await CommunicationDelivery.deleteMany(deliveryFilter);
+    deletedDeliveries = deliveryResult.deletedCount || 0;
+    const campaignResult = await Communication.deleteMany({ _id: { $in: campaignIds } });
+    deletedCampaigns = campaignResult.deletedCount || 0;
+  } else {
+    deletedCampaigns = campaignIds.length;
+    deletedDeliveries = deliveryCount;
+  }
+
+  return {
+    windowDays,
+    cutoff: cutoff.toISOString(),
+    eligible,
+    examined: campaignIds.length,
+    deliveries: deliveryCount,
+    deletedCampaigns,
+    deletedDeliveries,
+  };
+}
+
+/* ══ Section 4 — retention inventory (read-only) ══════════════════════════
  * Sizes of the collections the policy classifies, so the doc's claims can be
  * checked against reality and growth can be spotted early. Purely a COUNT —
  * it never mutates, even with --apply. */
@@ -198,6 +243,8 @@ async function inventory(db, collections) {
   const LiveMessage = require("../models/liveMessage.model");
   const QAQuestion = require("../models/qaQuestion.model");
   const MediaAsset = require("../models/mediaAsset.model");
+  const Communication = require("../models/communication.model");
+  const CommunicationDelivery = require("../models/communicationDelivery.model");
 
   const startedAt = Date.now();
   const db = mongoose.connection.db;
@@ -235,11 +282,21 @@ async function inventory(db, collections) {
     log("   → reclaim with: npm run media:sweep -- --apply");
   }
 
+  if (!ONLY || ONLY === "communications") {
+    log("\n── Communication history (90-day retention) ───");
+    results.communications = await sweepCommunications({ Communication, CommunicationDelivery });
+    log(`   older than ${results.communications.windowDays}d : ${results.communications.eligible} campaigns`);
+    log(`   selected for this run        : ${results.communications.examined} campaigns`);
+    log(`   associated delivery rows     : ${results.communications.deliveries}`);
+    log(`   would remove                 : ${results.communications.deletedCampaigns} campaigns, ${results.communications.deletedDeliveries} deliveries`);
+  }
+
   if (!ONLY || ONLY === "inventory") {
     results.inventory = await inventory(db, [
       "users", "events", "posts", "comments", "registrationresponses",
       "tickets", "eventresults", "certificates", "notifications",
       "livemessages", "qaquestions", "mediaassets", "auditlogs",
+      "communications", "communicationdeliveries",
     ]);
     if (!JSON_OUT) {
       log("\n── Retention inventory ────────────────────────");

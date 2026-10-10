@@ -6,12 +6,16 @@ import { api } from "@/utils/api";
 
 export interface SessionUser {
   _id?: string;
+  id?: string;
   firstName?: string;
   lastName?: string;
   email?: string;
   username?: string;
   verified?: boolean;
+  emailVerified?: boolean;
   role?: string;
+  /** Computed by /auth/me from the backend's centralized email rule. UI hint only. */
+  isSuperAdmin?: boolean;
   profile?: {
     avatar?: string;
     coverImage?: string;
@@ -95,34 +99,43 @@ export function updateSessionUser(patch: Partial<SessionUser> | null | undefined
 }
 
 /**
- * One identity refresh per page load, for sessions stored without a profile.
- *
- * The session is the ONLY identity the shell reads, and it is written from
- * whichever endpoint signed the user in. A payload without `profile` therefore
- * means initials in the header for someone who has a photo — and since nothing
- * ever refetched it, that lasted the entire session (and every new session
- * signed in through the same path).
- *
- * Two guards keep this cheap: it runs at most once per page load, and only
- * when the stored copy has no profile at all (a healed session stops asking).
- * It is fired after the first paint, so it adds no wait before the page's own
- * requests (Part 11 §2) — the stored identity renders immediately, and this
- * only corrects it.
+ * One canonical identity refresh per session token when the cached profile or
+ * backend-derived Super Admin UI hint is missing. The server remains the
+ * authority; local storage is only a fast first paint. The refresh is
+ * non-blocking and a changed token gets its own request.
  */
+let profileSyncToken: string | null = null;
 let profileSync: Promise<void> | null = null;
 
-function syncMissingProfile() {
-  if (profileSync) return profileSync;
+function syncCanonicalUser() {
+  const token = localStorage.getItem("token");
+  if (!token) return Promise.resolve();
+  if (profileSync && profileSyncToken === token) return profileSync;
+
+  profileSyncToken = token;
   profileSync = (async () => {
     try {
-      const token = localStorage.getItem("token");
-      if (!token) return;
       const res = await api.get("/auth/me");
       const fresh = res?.data?.user || res?.data;
-      if (fresh?.profile) updateSessionUser({ profile: fresh.profile, verified: fresh.verified });
+      // A sign-out/sign-in can happen while the request is in flight. Never
+      // copy the previous account's server hint into the new session.
+      if (!fresh || localStorage.getItem("token") !== token) return;
+      updateSessionUser({
+        _id: fresh._id || fresh.id,
+        id: fresh.id || fresh._id,
+        firstName: fresh.firstName,
+        lastName: fresh.lastName,
+        email: fresh.email,
+        username: fresh.username,
+        role: fresh.role,
+        profile: fresh.profile,
+        verified: fresh.verified,
+        emailVerified: fresh.emailVerified,
+        isSuperAdmin: fresh.isSuperAdmin === true,
+      });
     } catch {
-      /* offline, expired token, or an old backend — the stored copy still
-         renders, and the next real login carries the profile itself */
+      /* offline, expired token, or an old backend — cached identity still
+         renders; the backend remains the authorization boundary */
     }
   })();
   return profileSync;
@@ -142,9 +155,11 @@ export function useSessionUser() {
         const raw = localStorage.getItem("user");
         const stored = token && raw ? normalizeUser(JSON.parse(raw)) : null;
         setUser(stored);
-        /* Stored identity is incomplete → ask the server once, in the
-           background. Never awaited: the shell renders from storage first. */
-        if (stored && !stored.profile) void syncMissingProfile();
+        /* Cached identity renders first; /auth/me supplies the canonical
+           profile and Super Admin UI hint when either is absent. */
+        if (stored && (!stored.profile || typeof stored.isSuperAdmin !== "boolean")) {
+          void syncCanonicalUser();
+        }
         setRole(token ? storedRole : null);
       } catch {
         setUser(null);

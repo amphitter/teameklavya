@@ -17,9 +17,9 @@
  *         instead of O(offset) — the difference matters on free-tier DBs.
  *   • Cursors are opaque base64url blobs. Clients must not parse them.
  *
- * Sort contract: descending on `createdAt` with `_id` as the tiebreaker,
- * which is what nearly every EventHub list uses. `keysetFilter()` builds
- * the corresponding "strictly after this position" Mongo predicate.
+ * Sort contract: descending on `createdAt` with `_id` as the tiebreaker by
+ * default. Callers may specify another date field and ascending direction
+ * (for example, public Event discovery ordered by `startDate`).
  */
 
 const mongoose = require("mongoose");
@@ -44,6 +44,11 @@ function parseLimit(raw, { def = DEFAULT_LIMIT, max = MAX_LIMIT } = {}) {
   return Math.min(n, ceiling);
 }
 
+/** New callers omit `page`; explicit page requests stay on the legacy contract. */
+function isCursorRequest(query = {}) {
+  return query.cursor !== undefined || query.page === undefined;
+}
+
 /** Encode an opaque cursor. Never hand a client a raw Mongo value. */
 function encodeCursor(payload) {
   return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
@@ -60,9 +65,17 @@ function decodeCursor(raw) {
   }
 }
 
+/** Cursor for a (dateField, _id) ordered list; direction is applied when decoding. */
+function cursorFor(item, sortField = "createdAt") {
+  const value = item?.[sortField];
+  const at = value instanceof Date ? value : new Date(value);
+  if (!item?._id || Number.isNaN(at.getTime())) return null;
+  return encodeCursor({ at: at.toISOString(), id: String(item._id) });
+}
+
 /** Default cursor shape for a (createdAt desc, _id desc) ordered list. */
 function defaultCursor(item) {
-  return encodeCursor({ at: new Date(item.createdAt).toISOString(), id: String(item._id) });
+  return cursorFor(item, "createdAt");
 }
 
 /**
@@ -73,19 +86,20 @@ function defaultCursor(item) {
  * @param {string|null} rawCursor
  * @param {object} opts
  * @param {string} opts.sortField  ordering field (default createdAt)
+ * @param {string|number} opts.direction `desc`/`-1` by default; `asc`/`1` for ascending lists
  */
-function keysetFilter(rawCursor, { sortField = "createdAt" } = {}) {
+function keysetFilter(rawCursor, { sortField = "createdAt", direction = "desc" } = {}) {
   const cursor = decodeCursor(rawCursor);
   if (!cursor) return null;
   const at = cursor.at ? new Date(cursor.at) : null;
   const id = cursor.id;
-  if (!at || Number.isNaN(at.getTime()) || !id) return null;
+  if (!at || Number.isNaN(at.getTime()) || typeof id !== "string" || !mongoose.Types.ObjectId.isValid(id)) return null;
 
-  let idValue = id;
-  if (mongoose.Types.ObjectId.isValid(id)) idValue = new mongoose.Types.ObjectId(id);
+  const idValue = new mongoose.Types.ObjectId(id);
+  const operator = direction === "asc" || direction === 1 ? "$gt" : "$lt";
 
   return {
-    $or: [{ [sortField]: { $lt: at } }, { [sortField]: at, _id: { $lt: idValue } }],
+    $or: [{ [sortField]: { [operator]: at } }, { [sortField]: at, _id: { [operator]: idValue } }],
   };
 }
 
@@ -128,8 +142,10 @@ module.exports = {
   MAX_LIMIT,
   DEFAULT_LIMIT,
   parseLimit,
+  isCursorRequest,
   encodeCursor,
   decodeCursor,
+  cursorFor,
   defaultCursor,
   keysetFilter,
   buildPage,

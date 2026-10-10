@@ -155,6 +155,9 @@ export default function SettingsPage() {
   const [mutes, setMutes] = useState<Record<string, boolean>>({});
   const [error, setError] = useState(false);
   const [savingPrivacy, setSavingPrivacy] = useState(false);
+  const [savingDiscoveryPrivacy, setSavingDiscoveryPrivacy] = useState(false);
+  const [hideFromDiscovery, setHideFromDiscovery] = useState(false);
+  const [canHideFromDiscovery, setCanHideFromDiscovery] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
 
@@ -163,8 +166,11 @@ export default function SettingsPage() {
     api
       .get("/users/me/social")
       .then((r) => {
-        setIdentity(r.data?.user || null);
-        setSocial(r.data?.user?.socialSettings || {});
+        const u = r.data?.user || null;
+        setIdentity(u);
+        setSocial(u?.socialSettings || {});
+        setHideFromDiscovery(Boolean(u?.hidePersonalProfileFromDiscovery));
+        setCanHideFromDiscovery(Boolean(u?.canHidePersonalProfile));
       })
       .catch(() => setError(true));
     api
@@ -216,6 +222,31 @@ export default function SettingsPage() {
         setMutes(mutes); // roll back
         toast.error("Couldn't save that notification preference");
       });
+  };
+
+  const saveDiscoveryPrivacy = async (nextValue: boolean) => {
+    const prev = hideFromDiscovery;
+    setHideFromDiscovery(nextValue);
+    setSavingDiscoveryPrivacy(true);
+    try {
+      const r = await api.put("/users/me/discovery-privacy", {
+        hidePersonalProfileFromDiscovery: nextValue,
+      });
+      const stored = r.data?.user?.hidePersonalProfileFromDiscovery;
+      if (typeof stored === "boolean") setHideFromDiscovery(stored);
+      setSavedAt(Date.now());
+      toast.success(
+        stored
+          ? "Your personal profile is now hidden from people discovery"
+          : "Your personal profile is now visible in people discovery"
+      );
+    } catch (e: any) {
+      setHideFromDiscovery(prev);
+      const msg = e?.response?.data?.message || "Couldn't save that setting";
+      toast.error(msg);
+    } finally {
+      setSavingDiscoveryPrivacy(false);
+    }
   };
 
   if (!ready || (!social && !error)) return <PageLoader label="Loading settings…" />;
@@ -323,6 +354,41 @@ export default function SettingsPage() {
             aria-label="Show my achievements"
           />
         </Row>
+        <div className="rounded-xl border border-border bg-muted/20 px-3 py-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-[13.5px] font-semibold text-foreground">Hide my personal profile from people discovery</p>
+              <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
+                {canHideFromDiscovery
+                  ? hideFromDiscovery
+                    ? "Your personal profile is hidden from people search, suggested users, and discovery lists. Your organization stays searchable and your events remain visible. You can still sign in and manage your organization. This applies to your entire account."
+                    : "Your personal profile appears in people search and discovery. Enable to hide it while keeping your organization searchable. Applies to your entire account; organization profile, events, memberships, and management continue."
+                  : "Only owners and managers of approved organizations can hide their personal profile from people discovery. Your organization must be approved and active."}
+              </p>
+              <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                <span className="font-medium">Does not hide:</span> direct profile links if someone knows your username, posts, comments, event participation, messages, or historical activity — those follow existing privacy rules. Organization search and org profile remain unaffected.
+              </p>
+            </div>
+            <div className="shrink-0">
+              <Switch
+                checked={hideFromDiscovery}
+                disabled={!canHideFromDiscovery || savingDiscoveryPrivacy}
+                onCheckedChange={(v) => saveDiscoveryPrivacy(v)}
+                aria-label="Hide my personal profile from people discovery"
+              />
+            </div>
+          </div>
+          {!canHideFromDiscovery && (
+            <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+              You need an approved organization where you are owner, admin, or event manager to use this setting.
+            </p>
+          )}
+          {savingDiscoveryPrivacy && (
+            <p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" /> Saving…
+            </p>
+          )}
+        </div>
       </Section>
 
       {/* ── Notifications ────────────────────────────────────────── */}
@@ -365,6 +431,11 @@ export default function SettingsPage() {
           <Button variant="outline" size="sm" asChild className="gap-1.5">
             <Link href="/user/registrations">
               <Globe2 className="h-3.5 w-3.5" /> My registrations
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild className="gap-1.5">
+            <Link href="/user/organizations">
+              <Shield className="h-3.5 w-3.5" /> Organization requests
             </Link>
           </Button>
           <Button variant="outline" size="sm" onClick={logout} className="gap-1.5 text-destructive hover:text-destructive">

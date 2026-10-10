@@ -3,27 +3,28 @@
 /**
  * Full search page — ?q= deep-linkable, trending-first.
  *
- * Part 14 §5–§8. Three things changed here and nothing else:
+ * Part 14 §5–§8 baseline with the Phase 3 Organization-search extension:
  *
  *   1. The screen no longer opens empty. `q < 2 chars` used to print "Type at
  *      least 2 characters" over a blank page — the single worst landing spot in
  *      the app, because Search is a bottom-nav tab a user taps with no query in
  *      mind. It now opens on TRENDING: a visual grid of real posts and real
  *      events (server-ranked, §41 — no invented content).
- *   2. The filter row is All / Events / People. Communities and Posts are gone
- *      as chips because the brief names the filters explicitly; they are not
- *      lost, they appear inside All, which is the union of everything the
- *      existing search endpoint returns.
+ *   2. The filter row is All / Events / People / Organizations. Communities
+ *      and Posts remain in All; Organizations also gets a focused global-search
+ *      surface while the dedicated directory retains its richer filters.
  *   3. Results are a list of real rows; a POST opens the viewer sheet rather
  *      than navigating, so the query and scroll position survive.
+ *   4. Organizations are searchable as a dedicated, cursor-paginated tab and
+ *      are also included in All; the Organization directory keeps its richer filters.
  *
  * Nothing about /explore was touched: Explore is events discovery, Search is
  * people/events/content search, and §29 forbids merging them.
  */
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, Search, UserRoundSearch, Users } from "lucide-react";
+import { BadgeCheck, Building2, CalendarDays, Search, UserRoundSearch, Users } from "lucide-react";
 import { api } from "@/utils/api";
 import { EmptyState, ErrorState, Skeleton } from "@/components/states";
 import { TrendingSection } from "@/components/search/trending-grid";
@@ -33,16 +34,15 @@ import { PersonRow } from "@/components/people/person-row";
 import { FollowAuthorButton } from "@/components/feed/follow-author-button";
 import { cn } from "@/lib/utils";
 
-/* §8 — All / Events / People, in that order, three compact pills that fit a
-   320px screen without scrolling. `all` is the server's own default group set
-   (events + communities + people + posts), so All genuinely is everything the
-   search endpoint can return rather than a third curated list. */
-type Tab = "all" | "events" | "people";
+/* Search tabs remain shareable URL state. All includes every entity; the
+   dedicated Organizations tab complements the separately-filterable directory. */
+type Tab = "all" | "events" | "people" | "organizations";
 
 const TABS: { id: Tab; label: string; icon: any }[] = [
   { id: "all", label: "All", icon: Search },
   { id: "events", label: "Events", icon: CalendarDays },
   { id: "people", label: "People", icon: UserRoundSearch },
+  { id: "organizations", label: "Organizations", icon: Building2 },
 ];
 
 interface EventR {
@@ -62,6 +62,19 @@ interface CommunityR {
   description?: string;
   avatarUrl?: string;
   category?: string;
+}
+interface OrganizationR {
+  _id: string;
+  name: string;
+  handle?: string;
+  slug: string;
+  category?: string;
+  description?: string;
+  logo?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  isVerified?: boolean;
 }
 interface PersonR {
   _id: string;
@@ -116,6 +129,13 @@ function SearchView() {
 
   const [events, setEvents] = useState<EventR[]>([]);
   const [communities, setCommunities] = useState<CommunityR[]>([]);
+  const [organizations, setOrganizations] = useState<OrganizationR[]>([]);
+  const [organizationCursor, setOrganizationCursor] = useState<string | null>(null);
+  const [organizationHasMore, setOrganizationHasMore] = useState(false);
+  const [organizationMoreLoading, setOrganizationMoreLoading] = useState(false);
+  const [organizationMoreError, setOrganizationMoreError] = useState(false);
+  const searchVersion = useRef(0);
+  const organizationMoreVersion = useRef(0);
   const [people, setPeople] = useState<PersonR[]>([]);
   const [posts, setPosts] = useState<PostR[]>([]);
   const [loading, setLoading] = useState(false);
@@ -155,11 +175,19 @@ function SearchView() {
   };
 
   const run = useCallback(() => {
+    const version = ++searchVersion.current;
+    organizationMoreVersion.current += 1;
+    setOrganizationCursor(null);
+    setOrganizationHasMore(false);
+    setOrganizationMoreLoading(false);
+    setOrganizationMoreError(false);
     if (q.length < 2) {
       setEvents([]);
       setCommunities([]);
+      setOrganizations([]);
       setPeople([]);
       setPosts([]);
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -170,25 +198,67 @@ function SearchView() {
     api
       .get("/search", { params: { q, type: tab }, signal: controller.signal })
       .then((r) => {
+        if (version !== searchVersion.current) return;
         setEvents(r.data?.events || []);
         setCommunities(r.data?.communities || []);
+        setOrganizations(r.data?.organizations || []);
         setPeople(r.data?.people || []);
         setPosts(r.data?.posts || []);
+        setOrganizationCursor(tab === "organizations" ? r.data?.nextCursor || null : null);
+        setOrganizationHasMore(tab === "organizations" && Boolean(r.data?.hasMore));
       })
       .catch((e: any) => {
-        if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
+        if (version !== searchVersion.current || e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
         setError(true);
       })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
+      .finally(() => {
+        if (version === searchVersion.current) setLoading(false);
+      });
+    return () => {
+      controller.abort();
+      if (version === searchVersion.current) {
+        searchVersion.current += 1;
+        organizationMoreVersion.current += 1;
+      }
+    };
   }, [q, tab]);
 
   useEffect(() => run(), [run]);
 
+  const loadMoreOrganizations = useCallback(async () => {
+    if (!organizationCursor || !organizationHasMore || organizationMoreLoading || tab !== "organizations") return;
+    const searchRequestVersion = searchVersion.current;
+    const pageRequestVersion = ++organizationMoreVersion.current;
+    setOrganizationMoreLoading(true);
+    setOrganizationMoreError(false);
+    try {
+      const response = await api.get("/search", {
+        params: { q, type: "organizations", limit: 20, cursor: organizationCursor },
+      });
+      if (searchRequestVersion !== searchVersion.current || pageRequestVersion !== organizationMoreVersion.current) return;
+      const nextOrganizations: OrganizationR[] = response.data?.organizations || [];
+      setOrganizations((current) => {
+        const ids = new Set(current.map((organization) => organization._id));
+        return [...current, ...nextOrganizations.filter((organization) => !ids.has(organization._id))];
+      });
+      setOrganizationCursor(response.data?.nextCursor || null);
+      setOrganizationHasMore(Boolean(response.data?.hasMore));
+    } catch {
+      if (searchRequestVersion === searchVersion.current && pageRequestVersion === organizationMoreVersion.current) {
+        setOrganizationMoreError(true);
+      }
+    } finally {
+      if (searchRequestVersion === searchVersion.current && pageRequestVersion === organizationMoreVersion.current) {
+        setOrganizationMoreLoading(false);
+      }
+    }
+  }, [q, tab, organizationCursor, organizationHasMore, organizationMoreLoading]);
+
   const counts: Record<Tab, number> = {
-    all: events.length + communities.length + people.length + posts.length,
+    all: events.length + communities.length + organizations.length + people.length + posts.length,
     events: events.length,
     people: people.length,
+    organizations: organizations.length,
   };
   const emptyForTab = q.length >= 2 && !loading && !error && counts[tab] === 0;
   /* Results open in the same viewer sheet the Trending grid uses, so tapping a
@@ -198,39 +268,44 @@ function SearchView() {
   const [openPostId, setOpenPostId] = useState<string | null>(null);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-3 py-5 sm:px-6 sm:py-7">
-      <h1 className="flex items-center gap-2 text-xl font-extrabold tracking-tight text-foreground sm:text-2xl">
-        <Search className="h-6 w-6 text-primary" /> Search
-      </h1>
+    <div className="min-h-screen bg-[#0a0a0c]">
+      <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
+        <h1 className="flex items-center gap-2 text-[20px] font-semibold tracking-tight text-white">
+          <Search className="h-5 w-5 text-[#3b82f6]" /> Search
+        </h1>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const value = input.trim();
-          router.push(value ? `/search?q=${encodeURIComponent(value)}` : "/search");
-        }}
-        className="mt-4"
-      >
-        <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Search people, events, posts…"
-            aria-label="Search"
-            className="h-11 w-full rounded-full border border-input bg-muted/60 pl-10 pr-4 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:bg-background focus:ring-4 focus:ring-primary/10"
-          />
-        </div>
-      </form>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const value = input.trim();
+            const nextParams = new URLSearchParams(params.toString());
+            if (value) nextParams.set("q", value);
+            else nextParams.delete("q");
+            const queryString = nextParams.toString();
+            router.push(queryString ? `/search?${queryString}` : "/search");
+          }}
+          className="mt-4"
+        >
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#71717a]" />
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Search people, events, organizations, posts…"
+              aria-label="Search"
+              className="h-11 w-full rounded-[12px] border border-[#232326] bg-[#121214] pl-10 pr-4 text-[13px] text-white placeholder:text-[#71717a] outline-none focus:border-[#3b82f6]/50"
+            />
+          </div>
+        </form>
 
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+      <div className="mt-4 flex flex-wrap gap-2">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => selectTab(t.id)}
             className={cn(
-              "flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors",
-              tab === t.id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"
+              "flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12px] font-medium transition-colors",
+              tab === t.id ? "border-[#3b82f6] bg-[#3b82f6] text-white" : "border-[#232326] bg-[#121214] text-[#a1a1aa] hover:border-[#2a2a30] hover:text-white"
             )}
           >
             <t.icon className="h-3.5 w-3.5" /> {t.label}
@@ -242,10 +317,22 @@ function SearchView() {
         {q.length < 2 ? (
           tab === "people" ? (
             /* §5 says Search must never open on a blank page. The default tab
-               is All (→ Trending), but if someone deliberately taps the People
-               chip before typing, the useful answer is real accounts to look
-               at, not an instruction to type. */
+               is All (→ Trending), but if someone deliberately taps People
+               before typing, show real suggested accounts instead. */
             <SuggestedPeople />
+          ) : tab === "organizations" ? (
+            <section className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+              <div className="flex items-start gap-3">
+                <span className="rounded-xl bg-brand-light p-2 text-primary"><Building2 className="h-5 w-5" /></span>
+                <div>
+                  <h2 className="text-sm font-bold text-foreground">Search organizations</h2>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">Type at least two characters, or browse the directory and its filters.</p>
+                </div>
+              </div>
+              <Link href="/organizations" className="inline-flex min-h-10 items-center justify-center rounded-full bg-primary px-4 text-xs font-bold text-primary-foreground">
+                Browse organizations
+              </Link>
+            </section>
           ) : (
             <TrendingSection />
           )
@@ -272,6 +359,11 @@ function SearchView() {
                 <EventRow key={e._id} event={e} />
               ))}
             </ResultGroup>
+            <ResultGroup label="Organizations" count={organizations.length}>
+              {organizations.map((organization) => (
+                <OrganizationRow key={organization._id} organization={organization} />
+              ))}
+            </ResultGroup>
             <ResultGroup label="People" count={people.length}>
               {people.map((p) => (
                 <PersonResultRow key={p._id} person={p} />
@@ -292,12 +384,29 @@ function SearchView() {
           <>
             {tab === "events" && events.map((e) => <EventRow key={e._id} event={e} />)}
             {tab === "people" && people.map((p) => <PersonResultRow key={p._id} person={p} />)}
+            {tab === "organizations" && organizations.map((organization) => (
+              <OrganizationRow key={organization._id} organization={organization} />
+            ))}
           </>
         )}
       </div>
 
-      <PostViewerSheet postId={openPostId} onClose={() => setOpenPostId(null)} />
+      {tab === "organizations" && (organizationHasMore || organizationMoreError) && (
+        <div className="mt-4 flex flex-col items-center gap-2">
+          {organizationMoreError && <p className="text-xs text-destructive" role="alert">Couldn't load the next organization page.</p>}
+          <button
+            type="button"
+            onClick={loadMoreOrganizations}
+            disabled={organizationMoreLoading || loading}
+            className="min-h-11 rounded-full border border-border bg-card px-5 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {organizationMoreLoading ? "Loading organizations…" : organizationMoreError ? "Retry" : "Load more organizations"}
+          </button>
+        </div>
+      )}
 
+      <PostViewerSheet postId={openPostId} onClose={() => setOpenPostId(null)} />
+      </div>
     </div>
   );
 }
@@ -367,6 +476,30 @@ function CommunityRow({ community: c }: { community: CommunityR }) {
         {c.description ? (
           <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">{c.description}</span>
         ) : null}
+      </span>
+    </Link>
+  );
+}
+
+function OrganizationRow({ organization }: { organization: OrganizationR }) {
+  const location = [organization.city, organization.state, organization.country].filter(Boolean).join(", ");
+  const category = organization.category?.toLowerCase().replaceAll("_", " ");
+  const identifier = organization.handle || organization.slug;
+  return (
+    <Link
+      href={`/organizations/${encodeURIComponent(identifier)}`}
+      className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/40"
+    >
+      <span className="rounded-xl bg-brand-light p-2 text-primary"><Building2 className="h-5 w-5" /></span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5 truncate font-bold text-foreground">
+          {organization.name}
+          {organization.isVerified && <BadgeCheck className="h-4 w-4 shrink-0 text-success" />}
+        </span>
+        <span className="mt-0.5 block truncate text-xs capitalize text-muted-foreground">
+          {[category, location].filter(Boolean).join(" · ")}
+        </span>
+        {organization.description ? <span className="mt-1 block truncate text-xs text-muted-foreground">{organization.description}</span> : null}
       </span>
     </Link>
   );

@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Compass, Search, SlidersHorizontal, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, SlidersHorizontal, X, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EventCard, type EventCardData } from "@/components/event-card";
 import { EmptyState, ErrorState, EventCardSkeleton, PageLoader } from "@/components/states";
@@ -35,31 +35,39 @@ function DiscoverContent() {
 
   const [events, setEvents] = useState<EventCardData[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  const [pagination, setPagination] = useState<{ page: number; pages: number }>({ page: 1, pages: 1 });
+  const [pagination, setPagination] = useState<{ page: number; hasMore: boolean }>({ page: 1, hasMore: false });
   const [page, setPage] = useState(1);
+  const pageCursors = useRef<Record<number, string | null>>({ 1: null });
+  const requestId = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
 
   const load = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setError(false);
     try {
-      const { events, pagination } = await fetchEventsWithCounts({
+      const cursor = page === 1 ? undefined : pageCursors.current[page] || undefined;
+      if (page > 1 && !cursor) return;
+      const result = await fetchEventsWithCounts({
         q: query,
         category,
         eventType: eventType === "all" ? undefined : eventType,
         type: when,
         ...(featuredOnly ? { featured: "true" } : {}),
         limit: 12,
-        page,
+        cursor,
       });
-      setEvents(events);
-      setPagination({ page: pagination?.page ?? 1, pages: pagination?.pages ?? 1 });
+      if (currentRequest !== requestId.current) return;
+      setEvents(result.events);
+      setPagination({ page, hasMore: result.hasMore });
+      if (result.nextCursor) pageCursors.current[page + 1] = result.nextCursor;
+      else delete pageCursors.current[page + 1];
     } catch {
-      setError(true);
+      if (currentRequest === requestId.current) setError(true);
     } finally {
-      setLoading(false);
+      if (currentRequest === requestId.current) setLoading(false);
     }
   }, [query, category, eventType, when, featuredOnly, page]);
 
@@ -67,25 +75,19 @@ function DiscoverContent() {
     load();
   }, [load]);
 
-  // Real categories from the backend (no hard-coded lists).
-  // §15 — this barely ever changes, so it is cached for 5 minutes and shared
-  // with any other surface that asks for the same key.
-  const { data: meta } = useQuery<{ categories?: string[] }>(
-    ["event-categories"],
-    "/events/meta/categories",
-    { staleTime: 5 * 60_000 }
-  );
+  const { data: meta } = useQuery<{ categories?: string[] }>(["event-categories"], "/events/meta/categories", {
+    staleTime: 5 * 60_000,
+  });
   useEffect(() => {
     if (meta?.categories) setCategories(meta.categories);
   }, [meta]);
 
-  // Reset page when filters change
   useEffect(() => {
+    pageCursors.current = { 1: null };
     setPage(1);
   }, [query, category, eventType, when, featuredOnly]);
 
-  const hasActiveFilters =
-    query !== "" || category !== "all" || eventType !== "all" || when !== "upcoming" || featuredOnly;
+  const hasActiveFilters = query !== "" || category !== "all" || eventType !== "all" || when !== "upcoming" || featuredOnly;
 
   const clearFilters = () => {
     setQuery("");
@@ -96,204 +98,185 @@ function DiscoverContent() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-      {/* Header */}
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-          Discover events
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Find hackathons, workshops, meetups and more
-        </p>
-      </div>
+    <div className="min-h-screen bg-background dark:bg-[#0a0a0c]">
+      <div className="mx-auto max-w-[1280px] px-4 py-6 sm:px-6">
+        {/* Header */}
+        <div className="flex flex-col gap-1">
+          <h1 className="text-[24px] font-semibold tracking-tight text-foreground dark:text-white">Discover events</h1>
+          <p className="text-[13px] text-muted-foreground dark:text-[#a1a1aa]">Find hackathons, workshops, meetups and more</p>
+        </div>
 
-      {/* Search + filter toggle */}
-      <div className="mt-6 flex gap-2">
-        <form
-          className="relative flex-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setPage(1);
-            load();
-          }}
-        >
-          <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search events…"
-            className="h-11 w-full rounded-full border border-input bg-card pl-11 pr-10 text-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-          />
-          {query && (
-            <button
-              type="button"
-              onClick={() => setQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              aria-label="Clear search"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </form>
-        <Button
-          variant="outline"
-          className="h-11 shrink-0 rounded-full px-4"
-          onClick={() => setShowFilters((s) => !s)}
-        >
-          <SlidersHorizontal className="mr-1.5 h-4 w-4" />
-          Filters
-        </Button>
-      </div>
-
-      {/* Filters */}
-      {showFilters && (
-        <div className="mt-4 grid gap-4 rounded-xl border border-border bg-card p-4 sm:grid-cols-3">
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-              Format
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {EVENT_TYPES.map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => setEventType(t.value)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                    eventType === t.value
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
-                  )}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-              When
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {WHEN.map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => setWhen(t.value)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                    when === t.value
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
-                  )}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-              Category
-            </label>
-            <div className="flex flex-wrap gap-1.5">
+        {/* Search + filter */}
+        <div className="mt-6 flex gap-2">
+          <form
+            className="relative flex-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              pageCursors.current = { 1: null };
+              setPage(1);
+            }}
+          >
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground dark:text-[#71717a]" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search events…"
+              className="h-10 w-full rounded-[12px] border border-border dark:border-[#232326] bg-card dark:bg-[#121214] pl-10 pr-10 text-[13px] text-foreground dark:text-white placeholder:text-muted-foreground dark:text-[#71717a] focus:border-[#3b82f6]/50 focus:outline-none"
+            />
+            {query && (
               <button
-                onClick={() => setCategory("all")}
-                className={cn(
-                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                  category === "all"
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
-                )}
+                type="button"
+                onClick={() => setQuery("")}
+                className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[8px] text-muted-foreground dark:text-[#71717a] hover:bg-secondary dark:bg-[#1f1f23] hover:text-foreground dark:text-white"
               >
-                All
+                <X className="h-4 w-4" />
               </button>
-              {categories.map((c) => (
+            )}
+          </form>
+          <Button
+            variant="outline"
+            className="h-10 shrink-0 rounded-[10px] border-border dark:border-[#232326] bg-card dark:bg-[#121214] px-4 text-[13px] text-foreground dark:text-[#e4e4e7] hover:bg-secondary dark:bg-[#1f1f23]"
+            onClick={() => setShowFilters((s) => !s)}
+          >
+            <SlidersHorizontal className="mr-1.5 h-4 w-4" />
+            Filters
+          </Button>
+        </div>
+
+        {/* Filters panel */}
+        {showFilters && (
+          <div className="mt-4 grid gap-5 rounded-[12px] border border-border dark:border-[#1f1f23] bg-card dark:bg-[#121214] p-5 sm:grid-cols-3">
+            <div>
+              <label className="mb-2 block text-[11px] font-medium uppercase tracking-widest text-muted-foreground dark:text-[#71717a]">Format</label>
+              <div className="flex flex-wrap gap-1.5">
+                {EVENT_TYPES.map((t) => (
+                  <button
+                    key={t.value}
+                    onClick={() => setEventType(t.value)}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors",
+                      eventType === t.value
+                        ? "border-[#3b82f6] bg-[#3b82f6] text-foreground dark:text-white"
+                        : "border-border dark:border-[#232326] bg-muted dark:bg-[#18181b] text-muted-foreground dark:text-[#a1a1aa] hover:border-[#2a2a30] hover:text-foreground dark:text-white"
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-medium uppercase tracking-widest text-muted-foreground dark:text-[#71717a]">When</label>
+              <div className="flex flex-wrap gap-1.5">
+                {WHEN.map((t) => (
+                  <button
+                    key={t.value}
+                    onClick={() => setWhen(t.value)}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors",
+                      when === t.value
+                        ? "border-[#3b82f6] bg-[#3b82f6] text-foreground dark:text-white"
+                        : "border-border dark:border-[#232326] bg-muted dark:bg-[#18181b] text-muted-foreground dark:text-[#a1a1aa] hover:border-[#2a2a30] hover:text-foreground dark:text-white"
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-medium uppercase tracking-widest text-muted-foreground dark:text-[#71717a]">Category</label>
+              <div className="flex flex-wrap gap-1.5">
                 <button
-                  key={c}
-                  onClick={() => setCategory(c)}
+                  onClick={() => setCategory("all")}
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                    category === c
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
+                    "rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors",
+                    category === "all"
+                      ? "border-[#3b82f6] bg-[#3b82f6] text-foreground dark:text-white"
+                      : "border-border dark:border-[#232326] bg-muted dark:bg-[#18181b] text-muted-foreground dark:text-[#a1a1aa] hover:border-[#2a2a30] hover:text-foreground dark:text-white"
                   )}
                 >
-                  {c}
+                  All
                 </button>
+                {categories.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setCategory(c)}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors",
+                      category === c
+                        ? "border-[#3b82f6] bg-[#3b82f6] text-foreground dark:text-white"
+                        : "border-border dark:border-[#232326] bg-muted dark:bg-[#18181b] text-muted-foreground dark:text-[#a1a1aa] hover:border-[#2a2a30] hover:text-foreground dark:text-white"
+                    )}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="text-[12px] font-medium text-[#3b82f6] hover:text-[#60a5fa] sm:col-span-3 sm:justify-self-end"
+              >
+                Clear all filters
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Results */}
+        <div className="mt-8">
+          {error ? (
+            <ErrorState title="Couldn't load events" description="Please check your connection and try again." onRetry={load} />
+          ) : loading ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <EventCardSkeleton key={i} />
               ))}
             </div>
-          </div>
-          {hasActiveFilters && (
-            <button
-              onClick={clearFilters}
-              className="text-xs font-semibold text-primary hover:underline sm:col-span-3 sm:justify-self-end"
-            >
-              Clear all filters
-            </button>
+          ) : events.length === 0 ? (
+            <EmptyState
+              icon={CalendarDays}
+              title="No events found"
+              description={hasActiveFilters ? "Try adjusting filters." : "New events are added regularly — check back soon!"}
+              actionLabel={hasActiveFilters ? "Clear filters" : "Explore all"}
+              onAction={hasActiveFilters ? clearFilters : undefined}
+            />
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {events.map((event) => (
+                  <EventCard key={event._id} event={event} />
+                ))}
+              </div>
+
+              {(page > 1 || pagination.hasMore) && (
+                <div className="mt-10 flex items-center justify-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 rounded-[10px] border-border dark:border-[#232326] bg-card dark:bg-[#121214]"
+                    disabled={page <= 1 || loading}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-4 w-4" /> Prev
+                  </Button>
+                  <span className="text-[12px] text-muted-foreground dark:text-[#71717a]">Page {pagination.page}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 rounded-[10px] border-border dark:border-[#232326] bg-card dark:bg-[#121214]"
+                    disabled={!pagination.hasMore || loading}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
-      )}
-
-      {/* Results */}
-      <div className="mt-8">
-        {error ? (
-          <ErrorState
-            title="Couldn't load events"
-            description="Please check your connection and try again."
-            onRetry={load}
-          />
-        ) : loading ? (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <EventCardSkeleton key={i} />
-            ))}
-          </div>
-        ) : events.length === 0 ? (
-          <EmptyState
-            icon={Compass}
-            title="No events found"
-            description={
-              hasActiveFilters
-                ? "Try adjusting or clearing your filters to see more events."
-                : "New events are added regularly — check back soon!"
-            }
-            actionLabel={hasActiveFilters ? "Clear filters" : "Explore all events"}
-            onAction={hasActiveFilters ? clearFilters : undefined}
-            action={!hasActiveFilters ? <Button size="sm" asChild><Link href="/events">Browse</Link></Button> : undefined}
-          />
-        ) : (
-          <>
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {events.map((event) => (
-                <EventCard key={event._id} event={event} />
-              ))}
-            </div>
-
-            {/* Pagination */}
-            {pagination.pages > 1 && (
-              <div className="mt-10 flex items-center justify-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  <ChevronLeft className="h-4 w-4" /> Prev
-                </Button>
-                <span className="text-sm text-muted-foreground">
-                  Page {pagination.page} of {pagination.pages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page >= pagination.pages}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-          </>
-        )}
       </div>
     </div>
   );

@@ -1,5 +1,12 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
+const Event = require("../models/event.model");
+const eventPermissions = require("../services/event-permissions.service");
+const { ERROR_CODES } = require("../utils/app-error");
+
+function errBody(code, message, extra = {}) {
+  return { success: false, message, error: { code, message }, ...extra };
+}
 
 /*
  * PERMANENT SUPER ADMIN (Ownership Verification system)
@@ -36,27 +43,41 @@ exports.requireAuth = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) {
-      return res.status(401).json({ success: false, message: "Authentication required" });
+      return res.status(401).json(errBody(ERROR_CODES.AUTH_REQUIRED, "Authentication required"));
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // Reject short-lived OAuth exchange codes being used as session tokens
     if (decoded.purpose && decoded.purpose !== "auth") {
-      return res.status(401).json({ success: false, message: "Invalid token type" });
+      return res.status(401).json(errBody(ERROR_CODES.AUTH_REQUIRED, "Invalid token type"));
     }
 
-    // Moderation (Part 3, Phase 10): suspended accounts are blocked from ALL
-    // authenticated actions server-side — an existing token is not a bypass.
-    const live = await User.findById(decoded.id).select("suspendedAt suspensionReason").lean();
-    if (live?.suspendedAt) {
-      return res.status(403).json({
-        success: false,
-        suspended: true,
-        message: live.suspensionReason
-          ? `Your account has been suspended: ${live.suspensionReason}`
-          : "Your account has been suspended.",
-      });
+    // Moderation (Part 3, Phase 10 + Trust & Safety): suspended/banned accounts blocked server-side
+    const live = await User.findById(decoded.id)
+      .select("suspendedAt suspensionReason suspensionExpiresAt bannedAt banReason tokenVersion")
+      .lean();
+    if (!live) {
+      return res.status(401).json(errBody(ERROR_CODES.AUTH_REQUIRED, "User not found"));
+    }
+    if (live.bannedAt) {
+      const msg = live.banReason ? `Your account has been permanently banned: ${live.banReason}` : "Your account has been permanently banned.";
+      return res.status(403).json(errBody(ERROR_CODES.FORBIDDEN, msg, { banned: true }));
+    }
+    if (live.suspendedAt) {
+      if (live.suspensionExpiresAt && new Date(live.suspensionExpiresAt).getTime() < Date.now()) {
+        // expired suspension - allow, background job will clear
+      } else {
+        const msg = live.suspensionReason ? `Your account has been suspended: ${live.suspensionReason}` : "Your account has been suspended.";
+        const extra = { suspended: true };
+        if (live.suspensionExpiresAt) extra.expiresAt = live.suspensionExpiresAt;
+        return res.status(403).json(errBody(ERROR_CODES.FORBIDDEN, msg, extra));
+      }
+    }
+    if (decoded.tokenVersion !== undefined && live.tokenVersion !== undefined) {
+      if (decoded.tokenVersion !== live.tokenVersion) {
+        return res.status(401).json(errBody(ERROR_CODES.AUTH_REQUIRED, "Session revoked, please log in again"));
+      }
     }
 
     req.user = decoded;
@@ -64,7 +85,7 @@ exports.requireAuth = async (req, res, next) => {
   } catch (error) {
     const message =
       error.name === "TokenExpiredError" ? "Session expired, please log in again" : "Invalid token";
-    res.status(401).json({ success: false, message });
+    res.status(401).json(errBody(ERROR_CODES.AUTH_REQUIRED, message));
   }
 };
 
@@ -77,11 +98,11 @@ exports.requireAdmin = async (req, res, next) => {
     const user = await User.findById(req.user.id);
     // The permanent super admin always has full platform-level control
     if ((!user || user.role !== "admin") && !isSuperAdminEmail(user?.email)) {
-      return res.status(403).json({ success: false, message: "Admin access required" });
+      return res.status(403).json(errBody(ERROR_CODES.FORBIDDEN, "Admin access required"));
     }
     next();
   } catch (error) {
-    res.status(500).json({ success: false, message: "Authorization check failed" });
+    res.status(500).json(errBody(ERROR_CODES.INTERNAL_ERROR, "Authorization check failed"));
   }
 };
 
@@ -103,14 +124,34 @@ exports.optionalUser = async (req, _res, next) => {
   next();
 };
 
+/** Central owner-aware Event authorization shared by REST and Socket.IO. */
+exports.canManageEvent = eventPermissions.canManageEvent;
+
 /**
- * True if the request user is an admin or the creator of the given event.
+ * Route guard for an Event-scoped management action. Resolves the event id
+ * from the standard REST path or body; controllers must still authorize any
+ * secondary event loaded from a record/token (e.g. a ticket scan).
  */
-exports.canManageEvent = async (user, event) => {
-  if (!user) return false;
-  const dbUser = await User.findById(user.id);
-  if (dbUser?.role === "admin") return true;
-  return String(event.createdBy) === String(user.id);
+exports.requireEventManager = async (req, res, next) => {
+  try {
+    const eventId = req.params?.eventId || req.params?.id || req.body?.eventId;
+    if (!eventId) {
+      return res.status(400).json(errBody(ERROR_CODES.VALIDATION_ERROR, "Event id is required"));
+    }
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json(errBody(ERROR_CODES.NOT_FOUND, "Event not found"));
+    if (!(await eventPermissions.canManageEvent(req.user, event))) {
+      return res.status(403).json(errBody(ERROR_CODES.FORBIDDEN, "You can't manage this event"));
+    }
+    req.managedEvent = event;
+    next();
+  } catch (error) {
+    if (error.name === "CastError") {
+      return res.status(400).json(errBody(ERROR_CODES.VALIDATION_ERROR, "Invalid event id"));
+    }
+    console.error("Event authorization error:", error.message);
+    res.status(500).json(errBody(ERROR_CODES.INTERNAL_ERROR, "Authorization check failed"));
+  }
 };
 
 /**
@@ -121,10 +162,10 @@ exports.requireSuperAdmin = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id).select("email").lean();
     if (!user || !isSuperAdminEmail(user.email)) {
-      return res.status(403).json({ success: false, message: "Super Admin access required" });
+      return res.status(403).json(errBody(ERROR_CODES.FORBIDDEN, "Super Admin access required"));
     }
     next();
   } catch (error) {
-    res.status(500).json({ success: false, message: "Authorization check failed" });
+    res.status(500).json(errBody(ERROR_CODES.INTERNAL_ERROR, "Authorization check failed"));
   }
 };

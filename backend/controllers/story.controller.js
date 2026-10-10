@@ -302,7 +302,7 @@ exports.feed = async (req, res) => {
     const stories = await Story.find(query)
       .sort({ createdAt: 1 })
       .populate("author", AUTHOR_SELECT)
-      .populate("event", "title slug bannerUrl startAt")
+      .populate("event", "title slug bannerUrl logoUrl startAt")
       .lean();
 
     // Group by author, preserving each author's chronological order.
@@ -375,7 +375,7 @@ exports.byCategory = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(60)
       .populate("author", AUTHOR_SELECT)
-      .populate("event", "title slug bannerUrl startAt")
+      .populate("event", "title slug bannerUrl logoUrl startAt")
       .lean();
     res.json({ success: true, category: key, icon: iconFor(key), label: labelFor(key), stories: stories.map((s) => shape(s, { viewerId })) });
   } catch (err) {
@@ -475,7 +475,7 @@ exports.getOne = async (req, res) => {
   try {
     const story = await Story.findById(req.params.id)
       .populate("author", AUTHOR_SELECT)
-      .populate("event", "title slug bannerUrl startAt")
+      .populate("event", "title slug bannerUrl logoUrl startAt")
       .lean();
     if (!story || story.deletedAt) return res.status(404).json({ message: "Story not found" });
 

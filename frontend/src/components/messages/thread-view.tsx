@@ -311,7 +311,7 @@ export function ThreadView({
           <button
             type="button"
             onClick={onRetryLoad}
-            className="mt-1 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white"
+            className="mt-1 min-h-11 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white"
           >
             Try again
           </button>
@@ -366,7 +366,7 @@ export function ThreadView({
             <button
               type="button"
               onClick={onLoadOlder}
-              className="rounded-full px-3 py-1 text-[11px] font-semibold text-primary hover:bg-surface-container"
+              className="min-h-11 touch-manipulation rounded-full px-3 py-1 text-[11px] font-semibold text-primary hover:bg-surface-container"
             >
               Load older messages
             </button>

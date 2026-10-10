@@ -1,5 +1,6 @@
 const Event = require("../models/event.model");
 const Organization = require("../models/organization.model");
+const Community = require("../models/community.model");
 const User = require("../models/user.model");
 const RegistrationResponse = require("../models/registrationResponse.model");
 const EventInterest = require("../models/eventInterest.model");
@@ -7,15 +8,63 @@ const OrgFollow = require("../models/orgFollow.model");
 const Ticket = require("../models/ticket.model");
 const mongoose = require('mongoose');
 const crypto = require('crypto');
-const emailService = require("../services/email.service");
 const { notifyMany } = require("../services/notification.service");
+const { sendTrackedCommunication } = require("../services/communication.service");
 const templates = require("../services/emailTemplates");
 const { canManageEvent } = require("../middleware/auth.middleware");
+const { canCreateOrganizationEvent, isPlatformEventAdmin } = require("../services/event-permissions.service");
+const { canManageOrganizationEvents } = require("../services/organization-permissions.service");
 const Post = require("../models/post.model");
 const Reaction = require("../models/reaction.model");
 const Comment = require("../models/comment.model");
-const { EventRepository, PostRepository } = require("../repositories");
+const { EventRepository, PostRepository, cursor } = require("../repositories");
+const { parseLimit, buildPage, withCursor, isCursorRequest } = cursor;
 const urlSafety = require("../services/url-safety.service");
+const media = require("../services/media.service");
+
+const MAX_DIRECT_EMAIL_RECIPIENTS = 500;
+
+function recipientIdsOrRespond(req, res) {
+  const userIds = req.body?.userIds;
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    res.status(400).json({ success: false, message: "Select at least one recipient" });
+    return null;
+  }
+  if (userIds.length > MAX_DIRECT_EMAIL_RECIPIENTS) {
+    res.status(400).json({
+      success: false,
+      message: `A single Event email send is limited to ${MAX_DIRECT_EMAIL_RECIPIENTS} recipients`,
+    });
+    return null;
+  }
+
+  const ids = [...new Set(userIds.map((id) => String(id)))];
+  if (ids.some((id) => !mongoose.Types.ObjectId.isValid(id))) {
+    res.status(400).json({ success: false, message: "Recipient ids must be valid user ids" });
+    return null;
+  }
+  return ids;
+}
+
+async function managedCommunicationEventOrRespond(req, res, eventId) {
+  if (!eventId || !mongoose.Types.ObjectId.isValid(String(eventId))) {
+    res.status(400).json({ success: false, message: "A valid Event id is required" });
+    return null;
+  }
+
+  const event = req.managedEvent && String(req.managedEvent._id) === String(eventId)
+    ? req.managedEvent
+    : await Event.findById(eventId);
+  if (!event) {
+    res.status(404).json({ success: false, message: "Event not found" });
+    return null;
+  }
+  if (!(await canManageEvent(req.user, event))) {
+    res.status(403).json({ success: false, message: "You can't manage this event" });
+    return null;
+  }
+  return event;
+}
 
 // ─── Visibility helpers ─────────────────────────────────────
 const VISIBILITY_LEVELS = ["public", "unlisted", "private"];
@@ -30,6 +79,17 @@ const VISIBILITY_LEVELS = ["public", "unlisted", "private"];
  * diverge in what they expose.
  */
 const toPublicEvent = EventRepository.toPublicEvent;
+
+async function retireEventMediaAsset(publicId) {
+  if (!publicId) return;
+  try {
+    const result = await media.deleteImage(publicId);
+    if (!result?.ok) await media.markCleanupPending(publicId, "event_deleted_remove_failed");
+  } catch (error) {
+    console.warn("Event media cleanup failed:", error?.message || error);
+    await media.markCleanupPending(publicId, "event_deleted_remove_failed");
+  }
+}
 
 const getEventLocationHTML = (event) => {
   switch (event.eventType) {
@@ -48,17 +108,44 @@ const getEventLocationHTML = (event) => {
 
 exports.createEvent = async (req, res, next) => {
   try {
-    const body = req.body || {};
-    
-    // Validate organization attachment (if any)
-    if (body.organization) {
-      const org = await Organization.findById(body.organization);
-      if (!org) {
-        return res.status(400).json({ success: false, message: "Organization not found" });
-      }
+    const body = { ...(req.body || {}) };
+    const requestedOwnerType = String(body.organizerType || "USER").trim().toUpperCase();
+    for (const field of [
+      "organizerType", "organizerId", "createdBy", "removedAt", "removedBy",
+      "archivedAt", "archivedBy", "checkIns", "bannerPublicId", "logoUrl", "logoPublicId", "joinCode", "reminderSent",
+      "approvalStatus", "proposingOrganizationId", "parentInstitutionId", "approvedBy", "approvedAt", "rejectedAt",
+      "rejectionReason", "changeRequestMessage", "submittedAt", "lastResubmittedAt", "version", "requiresReapproval",
+      "lastMaterialChangeAt", "approvalHistory", "previousApprovedSnapshot",
+    ]) delete body[field];
+    if (requestedOwnerType !== "USER" && requestedOwnerType !== "ORGANIZATION") {
+      return res.status(400).json({ success: false, message: "Event owner must be USER or ORGANIZATION" });
     }
 
-    // Validate community attachment (Phase 6) — must exist and not be deleted
+    let ownerOrganization = null;
+    let ownerOrganizationFull = null;
+    if (requestedOwnerType === "ORGANIZATION") {
+      if (!body.organization) {
+        return res.status(400).json({ success: false, message: "An organization is required for an organization-owned event" });
+      }
+      ownerOrganizationFull = await Organization.findById(body.organization).select("_id createdBy managers category parentOrganizationId affiliationStatus status name slug").lean();
+      if (!ownerOrganizationFull) {
+        return res.status(400).json({ success: false, message: "Organization not found" });
+      }
+      ownerOrganization = ownerOrganizationFull;
+      if (!(await canCreateOrganizationEvent(req.user, ownerOrganizationFull))) {
+        return res.status(403).json({ success: false, message: "You can't create events for this organization" });
+      }
+      body.organization = ownerOrganizationFull._id;
+    } else if (!(await isPlatformEventAdmin(req.user))) {
+      return res.status(403).json({ success: false, message: "Organization-owned event creation required" });
+    } else if (body.organization) {
+      const org = await Organization.findById(body.organization).select("_id").lean();
+      if (!org) return res.status(400).json({ success: false, message: "Organization not found" });
+      body.organization = org._id;
+    }
+
+    if (requestedOwnerType === "ORGANIZATION") delete body.isFeatured;
+
     if (body.community) {
       const community = await Community.findById(body.community).select("deletedAt").lean();
       if (!community || community.deletedAt) {
@@ -66,66 +153,32 @@ exports.createEvent = async (req, res, next) => {
       }
     }
 
-    // Validate visibility
     if (body.visibility && !VISIBILITY_LEVELS.includes(body.visibility)) {
-      return res.status(400).json({
-        success: false,
-        message: "Visibility must be 'public', 'unlisted', or 'private'",
-      });
+      return res.status(400).json({ success: false, message: "Visibility must be 'public', 'unlisted', or 'private'" });
     }
 
-    // Validate event type and related fields
     if (!body.eventType || !['online', 'offline', 'hybrid'].includes(body.eventType)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Event type must be 'online', 'offline', or 'hybrid'" 
-      });
+      return res.status(400).json({ success: false, message: "Event type must be 'online', 'offline', or 'hybrid'" });
     }
 
-    // Validate required fields based on event type
     if ((body.eventType === 'offline' || body.eventType === 'hybrid') && !body.venue) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Venue is required for offline and hybrid events" 
-      });
+      return res.status(400).json({ success: false, message: "Venue is required for offline and hybrid events" });
     }
 
-    // §27 — reject javascript:/data: URLs at write time. This value is rendered
-    // as an href on the frontend and interpolated into emails; storing a
-    // javascript: URL would be a stored XSS.
     if (urlSafety.rejectUnsafeUrls(req, res, ["onlineEventLink"])) return;
 
     if ((body.eventType === 'online' || body.eventType === 'hybrid') && !body.onlineEventLink) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Online event link is required for online and hybrid events" 
-      });
+      return res.status(400).json({ success: false, message: "Online event link is required for online and hybrid events" });
     }
 
-    // Set default ticket settings if not provided
     if (!body.ticketSettings) {
-      body.ticketSettings = {
-        autoGenerate: false,
-        sendEmail: true,
-        manualApproval: false,
-      };
+      body.ticketSettings = { autoGenerate: false, sendEmail: true, manualApproval: false };
     }
-
-    // Set default required profile fields if not provided
     if (!body.requiredProfileFields) {
-      body.requiredProfileFields = {
-        institution: false,
-        course: false,
-        year: false,
-      };
+      body.requiredProfileFields = { institution: false, course: false, year: false };
     }
+    if (!body.registrationForm) body.registrationForm = [];
 
-    // Set default registration form if not provided
-    if (!body.registrationForm) {
-      body.registrationForm = [];
-    }
-
-    // Validate and sanitize registration form fields
     if (body.registrationForm && Array.isArray(body.registrationForm)) {
       body.registrationForm = body.registrationForm.map(field => ({
         label: field.label || '',
@@ -136,22 +189,75 @@ exports.createEvent = async (req, res, next) => {
       }));
     }
 
-    // Generate slug if not provided
+    try {
+      const moderationService = require("../services/moderation.service");
+      const textToCheck = [body.title, body.description].filter(Boolean).join(" ");
+      const modResult = await moderationService.moderateText({ text: textToCheck, contentType: "event", authorId: req.user.id });
+      if (modResult.status === "quarantined" || (modResult.confidence >= 0.85 && modResult.categories.length)) {
+        return res.status(400).json({ success: false, message: "Event contains prohibited content: " + (modResult.categories.join(", ") || modResult.reason), error: { code: "VALIDATION_ERROR" } });
+      }
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ success: false, message: err.message });
+      console.warn("Event moderation check failed:", err.message);
+    }
+
+    try {
+      const enforcementService = require("../services/enforcement.service");
+      const check = await enforcementService.checkFeatureRestriction(req.user.id, "eventCreation");
+      if (check.restricted) {
+        return res.status(403).json({ success: false, message: check.reason || "Event creation restricted" });
+      }
+    } catch (_) {}
+
     if (!body.slug && body.title) {
       body.slug = body.title.toLowerCase().replace(/\s+/g, "-").replace(/[^\w-]+/g, "");
     }
-    
-    const event = await Event.create({ 
-      ...body, 
-      createdBy: req.user.id 
-    });
 
-    // Achievements: event_host (first real event created)
+    const { isClubCategory } = require("../config/organization");
+    let event;
+    // Master refactor: only affiliated clubs (with parentOrganizationId) require approval. Non-affiliated clubs/institutions auto-approved for backward compat.
+    const requiresApproval = requestedOwnerType === "ORGANIZATION" && ownerOrganizationFull && ownerOrganizationFull.parentOrganizationId;
+    if (requiresApproval) {
+      const approvalService = require("../services/event-approval.service");
+      try {
+        const clubDoc = await Organization.findById(ownerOrganizationFull._id);
+        event = await approvalService.createProposal({ eventData: body, clubOrg: clubDoc, creator: req.user });
+      } catch (e) {
+        const status = e.status || 400;
+        return res.status(status).json({ success: false, message: e.message });
+      }
+    } else {
+      event = await Event.create({
+        ...body,
+        createdBy: req.user.id,
+        organizerType: requestedOwnerType,
+        organizerId: requestedOwnerType === "USER" ? req.user.id : ownerOrganization._id,
+        archivedAt: null,
+        archivedBy: null,
+        approvalStatus: "APPROVED",
+        approvedAt: new Date(),
+        approvedBy: req.user.id,
+        proposingOrganizationId: requestedOwnerType === "ORGANIZATION" ? ownerOrganization._id : null,
+        parentInstitutionId: null,
+        version: 1,
+        approvalHistory: [
+          {
+            action: "APPROVED",
+            actor: req.user.id,
+            actorRole: requestedOwnerType === "USER" ? "SUPER_ADMIN" : "INSTITUTION_ADMIN",
+            fromStatus: "",
+            toStatus: "APPROVED",
+            reason: "Auto-approved institution/platform event",
+            message: "Event auto-approved",
+            createdAt: new Date(),
+          },
+        ],
+      });
+    }
+
     require("../services/achievement.service").checkAchievements(req.user.id);
 
-    // Organizations v2: notify the org's followers about the new event
-    // (in-app only, create-time only — deterministic, no spam on edits)
-    if (event.organization) {
+    if (event.organization && event.approvalStatus === "APPROVED") {
       try {
         const followers = await OrgFollow.find({ organization: event.organization }).select("user").lean();
         const docs = followers
@@ -160,7 +266,7 @@ exports.createEvent = async (req, res, next) => {
           .map((user) => ({ user, actor: req.user.id, type: "announcement", event: event._id }));
         if (docs.length) await notifyMany(docs);
       } catch (notifyErr) {
-        console.error("Org followers notify error:", notifyErr.message); // never fail creation
+        console.error("Org followers notify error:", notifyErr.message);
       }
     }
     
@@ -171,23 +277,22 @@ exports.createEvent = async (req, res, next) => {
   }
 };
 
-// Public: Get all events (paginated optional)
+// Public: Get events with cursor pagination; explicit `page` stays compatible.
 exports.getEvents = async (req, res, next) => {
   try {
-    const { 
-      page = 1, 
-      limit = 12, 
-      category, 
-      featured, 
+    const {
+      category,
+      featured,
       type = 'all',
-      q,          // free-text search
-      eventType,  // filter for event type
-      price       // 'free' | 'paid' (Explore filter)
+      q,
+      eventType,
+      price,
     } = req.query;
-    
-    let query = {};
+    const limit = parseLimit(req.query.limit, { def: 12, max: 50 });
 
-    // Free-text search across title, description, venue and organizer
+    const query = {};
+
+    // Free-text search semantics are intentionally unchanged.
     if (q && String(q).trim()) {
       const escaped = String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.$or = [
@@ -198,72 +303,79 @@ exports.getEvents = async (req, res, next) => {
         { category: { $regex: escaped, $options: "i" } },
       ];
     }
-    
-    // Category filter
-    if (category && category !== 'all') {
-      query.category = category;
-    }
-    
-    // Featured filter
-    if (featured === 'true') {
-      query.isFeatured = true;
-    }
-    
-    // Event type filter
-    if (eventType && eventType !== 'all') {
-      query.eventType = eventType;
-    }
-    
-    // Event type filter - FIXED: Include all events by default
+
+    if (category && category !== 'all') query.category = category;
+    if (featured === 'true') query.isFeatured = true;
+    if (eventType && eventType !== 'all') query.eventType = eventType;
+
     const now = new Date();
     if (type === 'upcoming') {
       query.endDate = { $gte: now };
     } else if (type === 'ongoing') {
-      // Live right now: started but not ended
       query.startDate = { $lte: now };
       query.endDate = { $gte: now };
     } else if (type === 'past') {
       query.endDate = { $lt: now };
     }
-    // If type is 'all' or not provided, don't filter by date
 
-    // Price filter (Explore)
-    if (price === 'free') {
-      query.price = { $lte: 0 };
-    } else if (price === 'paid') {
-      query.price = { $gt: 0 };
+    if (price === 'free') query.price = { $lte: 0 };
+    else if (price === 'paid') query.price = { $gt: 0 };
+
+    // Discovery only ever shows PUBLIC + APPROVED events. Pending approval proposals are private until approved.
+    query.visibility = 'public';
+    query.removedAt = null;
+    query.archivedAt = null;
+    query.approvalStatus = 'APPROVED';
+
+    const sort = { startDate: 1, _id: 1 };
+    let events;
+    let legacyPagination = null;
+    let cursorPage = null;
+
+    if (isCursorRequest(req.query)) {
+      const rows = await Event.find(withCursor(query, req.query.cursor, {
+        sortField: "startDate",
+        direction: "asc",
+      }))
+        .select('title slug description category venue venueIframeLink eventType startDate endDate startTime endTime bannerUrl logoUrl organizer price theme isFeatured visibility maxAttendees')
+        .sort(sort)
+        .limit(limit + 1)
+        .lean();
+      cursorPage = buildPage(rows, limit, (row) => cursor.cursorFor(row, "startDate"));
+      events = cursorPage.items;
+    } else {
+      const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+      const [rows, total] = await Promise.all([
+        Event.find(query)
+          .select('title slug description category venue venueIframeLink eventType startDate endDate startTime endTime bannerUrl logoUrl organizer price theme isFeatured visibility maxAttendees')
+          .sort(sort)
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean(),
+        Event.countDocuments(query),
+      ]);
+      events = rows;
+      legacyPagination = {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      };
     }
 
-    // Discovery only ever shows PUBLIC events.
-    // Unlisted events are reachable via direct link; private via invitation.
-    query.visibility = 'public';
-    // Moderation takedowns (Part 3, Phase 10) are hidden from discovery
-    query.removedAt = null;
-
-    const events = await Event.find(query)
-      .select('title slug description category venue venueIframeLink eventType startDate endDate startTime endTime bannerUrl organizer price theme isFeatured visibility maxAttendees')
-      .sort({ startDate: 1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
-    
-    const total = await Event.countDocuments(query);
-    
-    // Add event status for frontend
-    const eventsWithStatus = events.map(event => ({
-      ...event.toObject(),
-      status: new Date(event.endDate) < now ? 'past' : 
-             new Date(event.startDate) <= now ? 'ongoing' : 'upcoming'
+    const eventsWithStatus = events.map((event) => ({
+      ...event,
+      status: new Date(event.endDate) < now
+        ? 'past'
+        : new Date(event.startDate) <= now ? 'ongoing' : 'upcoming',
     }));
-    
-    res.json({ 
-      success: true, 
+
+    return res.json({
+      success: true,
       events: eventsWithStatus,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
+      ...(legacyPagination
+        ? { pagination: legacyPagination }
+        : { limit, nextCursor: cursorPage.nextCursor, hasMore: cursorPage.hasMore }),
     });
   } catch (error) {
     console.error("Get Events Error:", error);
@@ -274,7 +386,7 @@ exports.getEvents = async (req, res, next) => {
 // Public: distinct categories (discovery filters)
 exports.getEventCategories = async (_req, res) => {
   try {
-    const categories = await Event.distinct("category", { visibility: "public" });
+    const categories = await Event.distinct("category", { visibility: "public", removedAt: null, archivedAt: null });
     res.json({ success: true, categories: categories.filter(Boolean).sort() });
   } catch (error) {
     console.error("Get categories error:", error);
@@ -282,7 +394,7 @@ exports.getEventCategories = async (_req, res) => {
   }
 };
 
-// Public: get by slug (unlisted reachable by link; private needs organizer/admin rights)
+// Public: get by slug (unlisted reachable by link; private needs this Event's owner/manager)
 exports.getEventBySlug = async (req, res, next) => {
   try {
     // Cache-first public lookup (Part 5, Phase 3 — §9, §14).
@@ -298,7 +410,7 @@ exports.getEventBySlug = async (req, res, next) => {
         // Do not reveal that a private event exists
         return res.status(404).json({ success: false, message: "Event not found" });
       }
-      return res.json({ success: true, event }); // full document for the organizer
+      return res.json({ success: true, event }); // full document only for an authorized Event manager
     }
 
     // Already the redacted public projection — do not re-strip.
@@ -309,11 +421,14 @@ exports.getEventBySlug = async (req, res, next) => {
   }
 };
 
-// Admin: get by id
+// Owner-aware Event detail read (authorization is for this exact Event)
 exports.getEventById = async (req, res, next) => {
   try {
-    const event = await Event.findById(req.params.id).populate("organization", "name slug logoUrl");
+    const event = await Event.findById(req.params.id).populate("organization", "name slug handle logoUrl");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    if (!(await canManageEvent(req.user, event))) {
+      return res.status(403).json({ success: false, message: "You can't manage this event" });
+    }
     res.json({ success: true, event });
   } catch (error) {
     console.error("Get event by id error:", error);
@@ -321,54 +436,100 @@ exports.getEventById = async (req, res, next) => {
   }
 };
 
-// Update event (Admin)
+// Update event (owner-aware; the writable-field allowlist excludes owner/provenance)
 exports.updateEvent = async (req, res, next) => {
   try {
-    const body = req.body || {};
-    
-    // Validate visibility if being updated
-    if (body.visibility && !VISIBILITY_LEVELS.includes(body.visibility)) {
+    const body = { ...(req.body || {}) };
+    const eventBefore = await Event.findById(req.params.id);
+    if (!eventBefore) return res.status(404).json({ success: false, message: "Event not found" });
+    if (!(await canManageEvent(req.user, eventBefore))) {
+      return res.status(403).json({ success: false, message: "You can't manage this event" });
+    }
+
+    // Explicit writable fields only. Owner/provenance, moderation, archive,
+    // check-in and live-engine state are never client mass-assignable.
+    const writable = [
+      "title", "description", "category", "eventType", "venue", "venueIframeLink",
+      "onlineEventLink", "platform", "meetingId", "passcode", "startDate", "endDate",
+      "startTime", "endTime", "bannerUrl", "organizer", "maxAttendees", "minAttendees",
+      "price", "theme", "visibility", "registrationLink", "whatsappGroup", "ticketSettings",
+      "requiredProfileFields", "registrationForm", "schedule", "speakers", "benefits", "partners",
+      "organization", "community",
+    ];
+    const patch = {};
+    for (const field of writable) {
+      if (Object.prototype.hasOwnProperty.call(body, field)) patch[field] = body[field];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "visibility") && !VISIBILITY_LEVELS.includes(patch.visibility)) {
       return res.status(400).json({
         success: false,
         message: "Visibility must be 'public', 'unlisted', or 'private'",
       });
     }
 
-    // Never allow these sensitive fields to be mass-assigned from the client
-    delete body.checkIns;
-    delete body.bannerPublicId;
+    if (patch.eventType && !["online", "offline", "hybrid"].includes(patch.eventType)) {
+      return res.status(400).json({ success: false, message: "Invalid event type" });
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "onlineEventLink") && urlSafety.rejectUnsafeUrls(req, res, ["onlineEventLink"])) return;
 
-    // Validate community attachment (Phase 6)
-    if (body.community) {
-      const community = await Community.findById(body.community).select("deletedAt").lean();
+    if (Object.prototype.hasOwnProperty.call(patch, "community") && patch.community) {
+      if (!mongoose.Types.ObjectId.isValid(String(patch.community))) {
+        return res.status(400).json({ success: false, message: "Invalid community" });
+      }
+      const community = await Community.findById(patch.community).select("deletedAt").lean();
       if (!community || community.deletedAt) {
         return res.status(400).json({ success: false, message: "Community not found" });
       }
     }
 
-    // Validate event type if being updated
-    if (body.eventType && !['online', 'offline', 'hybrid'].includes(body.eventType)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Event type must be 'online', 'offline', or 'hybrid'" 
-      });
+    if (Object.prototype.hasOwnProperty.call(patch, "organization")) {
+      if (patch.organization) {
+        if (!mongoose.Types.ObjectId.isValid(String(patch.organization))) {
+          return res.status(400).json({ success: false, message: "Invalid organization" });
+        }
+        const organization = await Organization.findById(patch.organization).select("_id createdBy managers").lean();
+        if (!organization) return res.status(400).json({ success: false, message: "Organization not found" });
+        const unchanged = String(eventBefore.organization || "") === String(organization._id);
+        if (!unchanged && !(await canCreateOrganizationEvent(req.user, organization))) {
+          return res.status(403).json({ success: false, message: "You can't associate this event with that organization" });
+        }
+        patch.organization = organization._id;
+      } else {
+        patch.organization = null;
+      }
     }
 
-    // Update slug if title changed
-    if (body.title) {
-      body.slug = body.title.toLowerCase().replace(/\s+/g, "-").replace(/[^\w-]+/g, "");
+    // Only platform administrators can promote an Event on the global
+    // discovery surface; Event Managers cannot mass-assign isFeatured.
+    if (Object.prototype.hasOwnProperty.call(body, "isFeatured") && await isPlatformEventAdmin(req.user)) {
+      patch.isFeatured = Boolean(body.isFeatured);
     }
-    
-    // Ensure ticketSettings structure
-    if (body.ticketSettings && typeof body.ticketSettings === 'object') {
-      body.ticketSettings = {
-        autoGenerate: body.ticketSettings.autoGenerate || false,
-        sendEmail: body.ticketSettings.sendEmail !== undefined ? body.ticketSettings.sendEmail : true,
-        manualApproval: body.ticketSettings.manualApproval || false,
+
+    // Preserve established title→slug behavior; the ownership transition and
+    // backfill never rewrite either field or the existing public URL.
+    if (patch.title) {
+      patch.slug = String(patch.title).toLowerCase().replace(/\s+/g, "-").replace(/[^\w-]+/g, "");
+    }
+
+    if (patch.ticketSettings && typeof patch.ticketSettings === "object") {
+      patch.ticketSettings = {
+        autoGenerate: Boolean(patch.ticketSettings.autoGenerate),
+        sendEmail: patch.ticketSettings.sendEmail !== undefined ? Boolean(patch.ticketSettings.sendEmail) : true,
+        manualApproval: Boolean(patch.ticketSettings.manualApproval),
       };
     }
-    
-    const event = await Event.findByIdAndUpdate(req.params.id, body, { new: true });
+    if (Array.isArray(patch.registrationForm)) {
+      patch.registrationForm = patch.registrationForm.map((field) => ({
+        label: String(field.label || ""),
+        type: field.type || "text",
+        required: Boolean(field.required),
+        options: Array.isArray(field.options) ? field.options : [],
+        autoFillFromProfile: field.autoFillFromProfile || null,
+      }));
+    }
+
+    const event = await Event.findByIdAndUpdate(req.params.id, patch, { new: true, runValidators: true });
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
 
     // Event update → notify registered participants + interested users (soft-follow),
@@ -391,13 +552,10 @@ exports.updateEvent = async (req, res, next) => {
         );
       }
     } catch (notifyErr) {
-      console.error("Event update notify error:", notifyErr.message); // never fail the update itself
+      console.error("Event update notify error:", notifyErr.message);
     }
 
-    // §13 — drop every cached view of this event, or visitors keep being
-    // served the pre-edit page until the TTL expires.
-    EventRepository.invalidate(event);
-
+    await EventRepository.invalidate(event);
     res.json({ success: true, event });
   } catch (error) {
     console.error("Update event error:", error);
@@ -405,37 +563,55 @@ exports.updateEvent = async (req, res, next) => {
   }
 };
 
-// Get admin events with advanced filtering
+// Reversible soft archive. This is deliberately separate from moderation
+// removedAt and from the platform-admin hard-delete endpoint.
+exports.setEventArchived = async (req, res, next) => {
+  try {
+    if (typeof req.body?.archived !== "boolean") {
+      return res.status(400).json({ success: false, message: "archived must be true or false" });
+    }
+    const event = await Event.findById(req.params.id);
+    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    if (!(await canManageEvent(req.user, event))) {
+      return res.status(403).json({ success: false, message: "You can't manage this event" });
+    }
+    event.archivedAt = req.body.archived ? (event.archivedAt || new Date()) : null;
+    event.archivedBy = req.body.archived ? (event.archivedBy || req.user.id) : null;
+    await event.save();
+    await EventRepository.invalidate(event);
+    res.json({ success: true, event: { _id: event._id, archivedAt: event.archivedAt } });
+  } catch (error) {
+    console.error("Archive event error:", error.message);
+    return next(error);
+  }
+};
+
+// Get admin events with advanced filtering; old page-based clients remain supported.
 exports.getAdminEvents = async (req, res, next) => {
   try {
-    const { search, category, page = 1, limit = 50, status, eventType } = req.query;
-    
-    let query = {};
-    
-    // Search filter
-    if (search && search.trim() !== '') {
+    const { search, category, status, eventType } = req.query;
+    const limit = parseLimit(req.query.limit, { def: 50, max: 100 });
+    const query = {};
+
+    if (search && String(search).trim() !== '') {
       query.$or = [
         { title: { $regex: search, $options: 'i' } },
         { venue: { $regex: search, $options: 'i' } },
         { organizer: { $regex: search, $options: 'i' } },
-        { slug: { $regex: search, $options: 'i' } }
+        { slug: { $regex: search, $options: 'i' } },
       ];
     }
-    
-    // Category filter
-    if (category && category !== 'all') {
-      query.category = category;
-    }
+    if (category && category !== 'all') query.category = category;
+    if (eventType && eventType !== 'all') query.eventType = eventType;
 
-    // Event type filter
-    if (eventType && eventType !== 'all') {
-      query.eventType = eventType;
-    }
-    
-    // Status filter
+    // Admin's default list hides archived Events; request status=archived to restore one.
+    query.archivedAt = status === "archived" ? { $ne: null } : null;
+
     if (status && status !== 'all') {
       const now = new Date();
       switch (status) {
+        case 'archived':
+          break;
         case 'upcoming':
           query.startDate = { $gt: now };
           break;
@@ -451,29 +627,126 @@ exports.getAdminEvents = async (req, res, next) => {
           break;
       }
     }
-    
-    // Moderation takedowns (Part 3, Phase 10) are hidden from event lists
+
     query.removedAt = null;
-    const events = await Event.find(query)
-      .select('-description -schedule -speakers -benefits -partners -checkIns') // Exclude heavy fields
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
-    
-    const total = await Event.countDocuments(query);
-    
-    res.json({ 
-      success: true, 
+    const sort = { createdAt: -1, _id: -1 };
+    const projection = '-description -schedule -speakers -benefits -partners -checkIns -bannerPublicId -logoPublicId';
+    let events;
+    let legacyPagination = null;
+    let cursorPage = null;
+
+    if (isCursorRequest(req.query)) {
+      const rows = await Event.find(withCursor(query, req.query.cursor))
+        .select(projection)
+        .sort(sort)
+        .limit(limit + 1)
+        .lean();
+      cursorPage = buildPage(rows, limit);
+      events = cursorPage.items;
+    } else {
+      const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+      const [rows, total] = await Promise.all([
+        Event.find(query)
+          .select(projection)
+          .sort(sort)
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean(),
+        Event.countDocuments(query),
+      ]);
+      events = rows;
+      legacyPagination = { page, limit, total, pages: Math.ceil(total / limit) };
+    }
+
+    return res.json({
+      success: true,
       events,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
+      ...(legacyPagination
+        ? { pagination: legacyPagination }
+        : { limit, nextCursor: cursorPage.nextCursor, hasMore: cursorPage.hasMore }),
     });
   } catch (error) {
     console.error("Get admin events error:", error);
+    return next(error);
+  }
+};
+
+// Organization Event Manager listing. Scope is the explicit owner pair, never
+// Event.organization association or Event.createdBy. Explicit `page` callers
+// keep the legacy page/total response; new clients use keyset cursors.
+exports.getOrganizationManagedEvents = async (req, res, next) => {
+  try {
+    const { organizationId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(String(organizationId || ""))) {
+      return res.status(400).json({ success: false, message: "Invalid organization id" });
+    }
+    const organization = await Organization.findById(organizationId).select("_id name slug handle createdBy managers").lean();
+    if (!organization) return res.status(404).json({ success: false, message: "Organization not found" });
+    if (!(await canManageOrganizationEvents(req.user, organization))) {
+      return res.status(403).json({ success: false, message: "You can't manage this organization's events" });
+    }
+
+    const limit = parseLimit(req.query.limit, { def: 20, max: 50 });
+    const query = { organizerType: "ORGANIZATION", organizerId: organization._id };
+    if (req.query.archived === "true") query.archivedAt = { $ne: null };
+    else query.archivedAt = null;
+
+    const status = String(req.query.status || "");
+    const now = new Date();
+    if (status === "upcoming") query.startDate = { $gt: now };
+    else if (status === "ongoing") {
+      query.startDate = { $lte: now };
+      query.endDate = { $gte: now };
+    } else if (status === "past") query.endDate = { $lt: now };
+
+    if (req.query.search && String(req.query.search).trim()) {
+      const escaped = String(req.query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      query.$or = [
+        { title: { $regex: escaped, $options: "i" } },
+        { venue: { $regex: escaped, $options: "i" } },
+        { slug: { $regex: escaped, $options: "i" } },
+      ];
+    }
+
+    const projection = "title slug category venue eventType startDate endDate bannerUrl logoUrl organizer price visibility archivedAt createdBy organizerType organizerId createdAt";
+    const sort = { createdAt: -1, _id: -1 };
+    let events;
+    let legacyPagination = null;
+    let cursorPage = null;
+
+    if (isCursorRequest(req.query)) {
+      const rows = await Event.find(withCursor(query, req.query.cursor))
+        .select(projection)
+        .sort(sort)
+        .limit(limit + 1)
+        .lean();
+      cursorPage = buildPage(rows, limit);
+      events = cursorPage.items;
+    } else {
+      const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+      const [rows, total] = await Promise.all([
+        Event.find(query)
+          .select(projection)
+          .sort(sort)
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean(),
+        Event.countDocuments(query),
+      ]);
+      events = rows;
+      legacyPagination = { page, limit, total, pages: Math.ceil(total / limit) };
+    }
+
+    return res.json({
+      success: true,
+      organization: { _id: organization._id, name: organization.name, slug: organization.handle || organization.slug },
+      events,
+      ...(legacyPagination
+        ? { pagination: legacyPagination }
+        : { limit, nextCursor: cursorPage.nextCursor, hasMore: cursorPage.hasMore }),
+    });
+  } catch (error) {
+    console.error("Get organization managed events error:", error.message);
     return next(error);
   }
 };
@@ -483,8 +756,12 @@ exports.deleteEvent = async (req, res, next) => {
   try {
     const event = await Event.findByIdAndDelete(req.params.id);
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
-    // §13 — a deleted event must vanish from discovery immediately.
-    EventRepository.invalidate(event);
+    // §13 — a deleted event must vanish from discovery immediately. Remove
+    // every tracked banner/logo asset through the provider abstraction too.
+    await EventRepository.invalidate(event);
+    for (const publicId of new Set([event.bannerPublicId, event.logoPublicId].filter(Boolean))) {
+      await retireEventMediaAsset(publicId);
+    }
     res.json({ success: true, message: "Event deleted" });
   } catch (error) {
     console.error("Delete event error:", error);
@@ -492,12 +769,20 @@ exports.deleteEvent = async (req, res, next) => {
   }
 };
 
-// Send RSVP to selected users (Admin)
+// Send RSVP to selected users for a managed Event
 exports.sendRSVP = async (req, res, next) => {
   try {
-    const { eventId, userIds, rsvpLink } = req.body;
-    const event = await Event.findById(eventId);
-    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    const { eventId, rsvpLink } = req.body || {};
+    const userIds = recipientIdsOrRespond(req, res);
+    if (!userIds) return;
+
+    const rsvpUrl = urlSafety.validateExternalUrl(rsvpLink, { field: "rsvpLink" });
+    if (!rsvpUrl.ok) {
+      return res.status(400).json({ success: false, message: rsvpUrl.reason });
+    }
+
+    const event = await managedCommunicationEventOrRespond(req, res, eventId);
+    if (!event) return;
 
     const users = await User.find({ _id: { $in: userIds } });
     if (!users.length) return res.status(404).json({ success: false, message: "No users found" });
@@ -505,22 +790,34 @@ exports.sendRSVP = async (req, res, next) => {
     const note = event.ticketSettings?.autoGenerate
       ? "Your ticket will be generated automatically after you register."
       : "Tickets are issued after registration approval.";
+    const subject = `Invitation: ${event.title}`;
+    const { communication, results = [] } = await sendTrackedCommunication({
+      senderId: req.user.id,
+      scope: "EVENT",
+      eventId: event._id,
+      kind: "EVENT_INVITATION",
+      subject,
+      recipients: users,
+      includeResults: true,
+      deliverRecipient: async (user, _email, emailService) => {
+        const { html, text } = templates.eventInvitation({ user, event, ctaUrl: rsvpUrl.url, note });
+        return emailService.send({ to: user.email, subject, html, text });
+      },
+    });
 
-    const results = [];
-    for (const user of users) {
-      try {
-        const { html, text } = templates.eventInvitation({ user, event, ctaUrl: rsvpLink, note });
-        await emailService.send({ to: user.email, subject: `Invitation: ${event.title}`, html, text });
-        results.push({ userId: user._id, email: user.email, status: "sent" });
-      } catch (err) {
-        console.error(`Failed to send RSVP to ${user.email}:`, err.message);
-        results.push({ userId: user._id, email: user.email, status: "failed", error: err.message });
-      }
-    }
-
-    const successful = results.filter((r) => r.status === "sent").length;
-    const failed = results.filter((r) => r.status === "failed").length;
-    res.json({ success: true, message: `RSVP process completed: ${successful} sent, ${failed} failed`, results });
+    const successful = communication.sentCount;
+    const failed = communication.failedCount;
+    res.json({
+      success: true,
+      message: `RSVP process completed: ${successful} sent, ${failed} failed`,
+      results: results.map((result) => ({
+        userId: result.recipientId,
+        email: result.email,
+        status: result.status,
+        ...(result.error ? { error: result.error } : {}),
+      })),
+      communicationId: communication._id,
+    });
   } catch (error) {
     console.error("sendRSVP error:", error);
     return next(error);
@@ -530,38 +827,35 @@ exports.sendRSVP = async (req, res, next) => {
 // Send event announcement to all users (batched)
 exports.sendEventNotificationToAllUsers = async (req, res, next) => {
   try {
+    // This audience is the entire platform, not this Event's participants.
+    // Keep a controller-level guard as well as the route middleware so a new
+    // route cannot accidentally expose the global broadcast operation.
+    if (!(await isPlatformEventAdmin(req.user))) {
+      return res.status(403).json({ success: false, message: "Platform admin access required" });
+    }
+
     const { id } = req.params;
     const event = await Event.findById(id);
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
 
-    const users = await User.find({}, "email firstName lastName");
+    const users = await User.find({}, "_id email firstName lastName");
     if (!users.length) return res.status(404).json({ success: false, message: "No users found" });
 
     const eventUrl = `${process.env.FRONTEND_URL}/events/${event.slug}`;
-    let sentCount = 0;
-    let failedCount = 0;
-
-    const batchSize = 50;
-    for (let i = 0; i < users.length; i += batchSize) {
-      const batch = users.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map(async (user) => {
-          try {
-            const { html, text } = templates.eventAnnouncement({ user, event, eventUrl });
-            await emailService.send({
-              to: user.email,
-              subject: `New event on EventHub: ${event.title}`,
-              html,
-              text,
-            });
-            sentCount++;
-          } catch (err) {
-            console.error(`Failed to notify ${user.email}:`, err.message);
-            failedCount++;
-          }
-        })
-      );
-    }
+    const subject = `New event on EventHub: ${event.title}`;
+    const { communication } = await sendTrackedCommunication({
+      senderId: req.user.id,
+      scope: "PLATFORM",
+      eventId: event._id,
+      kind: "EVENT_ANNOUNCEMENT",
+      subject,
+      recipients: users,
+      batchSize: 50,
+      deliverRecipient: async (user, _email, emailService) => {
+        const { html, text } = templates.eventAnnouncement({ user, event, eventUrl });
+        return emailService.send({ to: user.email, subject, html, text });
+      },
+    });
 
     // Mirror the email as an in-app notification (skip the sender themself)
     await notifyMany(
@@ -570,7 +864,13 @@ exports.sendEventNotificationToAllUsers = async (req, res, next) => {
         .map((u) => ({ user: u._id, actor: req.user.id, type: "announcement", event: event._id }))
     );
 
-    res.json({ success: true, message: `Notification sent: ${sentCount} sent, ${failedCount} failed`, sentCount, failedCount });
+    res.json({
+      success: true,
+      message: `Notification sent: ${communication.sentCount} sent, ${communication.failedCount} failed`,
+      sentCount: communication.sentCount,
+      failedCount: communication.failedCount,
+      communicationId: communication._id,
+    });
   } catch (error) {
     console.error("sendEventNotificationToAllUsers error:", error);
     return next(error);
@@ -585,17 +885,29 @@ const generateRSVPToken = () => {
 // Send RSVP to registered students with tickets
 exports.sendRSVPWithVerification = async (req, res, next) => {
   try {
-    const { eventId, userIds, customMessage } = req.body;
-    const event = await Event.findById(eventId);
-    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    const { eventId, customMessage } = req.body || {};
+    const userIds = recipientIdsOrRespond(req, res);
+    if (!userIds) return;
+    if (customMessage != null && String(customMessage).length > 2000) {
+      return res.status(400).json({ success: false, message: "Custom message must be 2,000 characters or fewer" });
+    }
+
+    const event = await managedCommunicationEventOrRespond(req, res, eventId);
+    if (!event) return;
 
     const users = await User.find({ _id: { $in: userIds } });
     if (!users.length) return res.status(404).json({ success: false, message: "No users found" });
 
-    const results = [];
-
-    for (const user of users) {
-      try {
+    const subject = `RSVP: ${event.title}`;
+    const { communication, results = [] } = await sendTrackedCommunication({
+      senderId: req.user.id,
+      scope: "EVENT",
+      eventId: event._id,
+      kind: "RSVP_VERIFICATION",
+      subject,
+      recipients: users,
+      includeResults: true,
+      deliverRecipient: async (user, _email, emailService) => {
         let registration = await RegistrationResponse.findOne({ eventId, userId: user._id });
 
         if (!registration) {
@@ -603,7 +915,7 @@ exports.sendRSVPWithVerification = async (req, res, next) => {
             eventId,
             userId: user._id,
             rsvpToken: generateRSVPToken(),
-            rsvpVerificationExpires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+            rsvpVerificationExpires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           });
         } else {
           registration.rsvpToken = generateRSVPToken();
@@ -615,28 +927,27 @@ exports.sendRSVPWithVerification = async (req, res, next) => {
 
         const verificationLink = `${process.env.FRONTEND_URL}/rsvp/verify/${registration.rsvpToken}`;
         const { html, text } = templates.rsvpVerification({ user, event, verificationLink, customMessage });
-
-        await emailService.send({
-          to: user.email,
-          subject: `RSVP: ${event.title}`,
-          html,
-          text,
-        });
-
+        const receipt = await emailService.send({ to: user.email, subject, html, text });
         registration.rsvpSent = true;
         registration.rsvpSentAt = new Date();
         await registration.save();
+        return receipt;
+      },
+    });
 
-        results.push({ userId: user._id, email: user.email, status: "sent" });
-      } catch (err) {
-        console.error(`Failed to send RSVP to ${user.email}:`, err.message);
-        results.push({ userId: user._id, email: user.email, status: "failed", error: err.message });
-      }
-    }
-
-    const successful = results.filter((r) => r.status === "sent").length;
-    const failed = results.filter((r) => r.status === "failed").length;
-    res.json({ success: true, message: `RSVP process completed: ${successful} sent, ${failed} failed`, results });
+    const successful = communication.sentCount;
+    const failed = communication.failedCount;
+    res.json({
+      success: true,
+      message: `RSVP process completed: ${successful} sent, ${failed} failed`,
+      results: results.map((result) => ({
+        userId: result.recipientId,
+        email: result.email,
+        status: result.status,
+        ...(result.error ? { error: result.error } : {}),
+      })),
+      communicationId: communication._id,
+    });
   } catch (error) {
     console.error("sendRSVPWithVerification error:", error);
     return next(error);
@@ -801,7 +1112,7 @@ const getRSVPTimelineData = async (eventId, days) => {
   return data;
 };
 
-// Get event statistics (Admin)
+// Get event statistics (owner-aware, including Organization Event Managers)
 exports.getEventStats = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -855,7 +1166,7 @@ exports.getEventStats = async (req, res, next) => {
   }
 };
 
-// Update event ticket settings (Admin)
+// Update event ticket settings (owner-aware)
 exports.updateTicketSettings = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -895,51 +1206,93 @@ exports.updateTicketSettings = async (req, res, next) => {
   }
 };
 
-// Get events with ticket generation stats (Admin)
+// Get events with ticket generation stats (Admin).
+// Counts are batched per page rather than four round trips per Event.
 exports.getEventsWithTicketStats = async (req, res, next) => {
   try {
-    const { page = 1, limit = 50 } = req.query;
-    
-    const events = await Event.find()
-      .select('title slug startDate endDate venue organizer maxAttendees ticketSettings createdAt eventType onlineEventLink platform')
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
-    
-    const eventsWithStats = await Promise.all(
-      events.map(async (event) => {
-        const [totalTickets, totalRegistrations, pendingTickets, rsvpSentCount] = await Promise.all([
-          Ticket.countDocuments({ eventId: event._id }),
-          RegistrationResponse.countDocuments({ eventId: event._id }),
-          Ticket.countDocuments({ eventId: event._id, status: 'pending' }),
-          RegistrationResponse.countDocuments({ eventId: event._id, rsvpSent: true })
-        ]);
-        
-        return {
-          ...event.toObject(),
-          stats: {
-            totalTickets,
-            totalRegistrations,
-            pendingTickets,
-            rsvpSentCount,
-            ticketCoverage: totalRegistrations > 0 ? (totalTickets / totalRegistrations) * 100 : 0,
-            rsvpRate: totalRegistrations > 0 ? (rsvpSentCount / totalRegistrations) * 100 : 0
-          }
-        };
-      })
-    );
-    
-    const total = await Event.countDocuments();
-    
-    res.json({ 
-      success: true, 
+    const limit = parseLimit(req.query.limit, { def: 50, max: 100 });
+    const sort = { createdAt: -1, _id: -1 };
+    const projection = 'title slug startDate endDate venue organizer maxAttendees ticketSettings createdAt eventType onlineEventLink platform';
+    let events;
+    let legacyPagination = null;
+    let cursorPage = null;
+
+    if (isCursorRequest(req.query)) {
+      const rows = await Event.find(withCursor({}, req.query.cursor))
+        .select(projection)
+        .sort(sort)
+        .limit(limit + 1)
+        .lean();
+      cursorPage = buildPage(rows, limit);
+      events = cursorPage.items;
+    } else {
+      const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+      const [rows, total] = await Promise.all([
+        Event.find({})
+          .select(projection)
+          .sort(sort)
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean(),
+        Event.countDocuments({}),
+      ]);
+      events = rows;
+      legacyPagination = { page, limit, total, pages: Math.ceil(total / limit) };
+    }
+
+    const eventIds = events.map((event) => event._id);
+    const [ticketRows, registrationRows] = eventIds.length
+      ? await Promise.all([
+          Ticket.aggregate([
+            { $match: { eventId: { $in: eventIds } } },
+            {
+              $group: {
+                _id: "$eventId",
+                totalTickets: { $sum: 1 },
+                pendingTickets: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
+              },
+            },
+          ]),
+          RegistrationResponse.aggregate([
+            { $match: { eventId: { $in: eventIds } } },
+            {
+              $group: {
+                _id: "$eventId",
+                totalRegistrations: { $sum: 1 },
+                rsvpSentCount: { $sum: { $cond: [{ $eq: ["$rsvpSent", true] }, 1, 0] } },
+              },
+            },
+          ]),
+        ])
+      : [[], []];
+
+    const ticketsByEvent = new Map(ticketRows.map((row) => [String(row._id), row]));
+    const registrationsByEvent = new Map(registrationRows.map((row) => [String(row._id), row]));
+    const eventsWithStats = events.map((event) => {
+      const tickets = ticketsByEvent.get(String(event._id));
+      const registrations = registrationsByEvent.get(String(event._id));
+      const totalTickets = tickets?.totalTickets || 0;
+      const totalRegistrations = registrations?.totalRegistrations || 0;
+      const rsvpSentCount = registrations?.rsvpSentCount || 0;
+      return {
+        ...event,
+        stats: {
+          totalTickets,
+          totalRegistrations,
+          pendingTickets: tickets?.pendingTickets || 0,
+          rsvpSentCount,
+          ticketCoverage: totalRegistrations > 0 ? (totalTickets / totalRegistrations) * 100 : 0,
+          rsvpRate: totalRegistrations > 0 ? (rsvpSentCount / totalRegistrations) * 100 : 0,
+        },
+      };
+    });
+
+    return res.json({
+      success: true,
       events: eventsWithStats,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
+      ...(legacyPagination
+        ? { pagination: legacyPagination }
+        : { limit, nextCursor: cursorPage.nextCursor, hasMore: cursorPage.hasMore }),
     });
   } catch (error) {
     console.error("Get events with ticket stats error:", error);
@@ -951,6 +1304,15 @@ exports.getEventsWithTicketStats = async (req, res, next) => {
 exports.getEventParticipants = async (req, res, next) => {
   try {
     const { id } = req.params;
+    const visibleEvent = await Event.findById(id)
+      .select("archivedAt removedAt visibility organizerType organizerId createdBy")
+      .lean();
+    if (!visibleEvent || visibleEvent.archivedAt || visibleEvent.removedAt) {
+      return res.status(404).json({ success: false, message: "Event not found" });
+    }
+    if (visibleEvent.visibility === "private" && !(await canManageEvent(req.user, visibleEvent))) {
+      return res.status(404).json({ success: false, message: "Event not found" });
+    }
     const responses = await RegistrationResponse.find({ eventId: id, status: 'confirmed' })
       .populate('userId', 'firstName lastName profile')
       .sort({ createdAt: 1 })
@@ -987,9 +1349,11 @@ exports.getTrendingEvents = async (req, res, next) => {
 
     const events = await Event.find({
       visibility: "public",
+      archivedAt: null,
+      removedAt: null,
       endDate: { $gte: new Date(Date.now() - 24 * 3600 * 1000) },
     })
-      .select("title slug bannerUrl category venue eventType startDate endDate price isFeatured")
+      .select("title slug bannerUrl logoUrl category venue eventType startDate endDate price isFeatured")
       .sort({ createdAt: -1 })
       .limit(80)
       .lean();
@@ -1043,8 +1407,8 @@ exports.getTrendingEvents = async (req, res, next) => {
 exports.getEventInterest = async (req, res, next) => {
   try {
     const eventId = req.params.id;
-    const event = await Event.findById(eventId).select("visibility createdBy").lean();
-    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    const event = await Event.findById(eventId).select("visibility createdBy archivedAt removedAt").lean();
+    if (!event || event.archivedAt || event.removedAt) return res.status(404).json({ success: false, message: "Event not found" });
 
     // Private events are invisible to non-managers — never reveal interest data
     if (event.visibility === "private") {
@@ -1078,8 +1442,8 @@ exports.getEventInterest = async (req, res, next) => {
 exports.toggleEventInterest = async (req, res, next) => {
   try {
     const eventId = req.params.id;
-    const event = await Event.findById(eventId).select("visibility removedAt");
-    if (!event || event.removedAt) return res.status(404).json({ success: false, message: "Event not found" });
+    const event = await Event.findById(eventId).select("visibility removedAt archivedAt");
+    if (!event || event.removedAt || event.archivedAt) return res.status(404).json({ success: false, message: "Event not found" });
 
     if (event.visibility === "private") {
       const authorized = await canManageEvent(req.user, event);
@@ -1143,12 +1507,14 @@ exports.getEventsForYou = async (req, res, next) => {
     // Candidate pool: public, not over, not already mine — latest 120
     const candidates = await Event.find({
       visibility: "public",
+      archivedAt: null,
+      removedAt: null,
       endDate: { $gte: new Date(Date.now() - 24 * 3600 * 1000) },
       ...(registeredIds.length ? { _id: { $nin: registeredIds } } : {}),
     })
       .sort({ createdAt: -1 })
       .limit(120)
-      .select("title slug bannerUrl description category eventType venue platform startDate endDate price maxAttendees isFeatured organization")
+      .select("title slug bannerUrl logoUrl description category eventType venue platform startDate endDate price maxAttendees isFeatured organization")
       .populate("organization", "name slug logoUrl")
       .lean();
 
@@ -1192,11 +1558,11 @@ exports.getEventsForYou = async (req, res, next) => {
 /* ── Event analytics for organizers (Part 3, Phase 11) ─────── */
 
 // GET /api/events/:id/analytics — registration timeline, interest,
-// check-in summary and top posts (organizer/admin only)
+// check-in summary and top posts (owner-aware; no association-based access)
 exports.getEventAnalytics = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const event = await Event.findById(id).select("_id title createdBy startDate registrationsCount");
+    const event = await Event.findById(id).select("_id title createdBy organizerType organizerId startDate registrationsCount");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
     if (!(await canManageEvent(req.user, event))) {
       return res.status(403).json({ success: false, message: "You can't view analytics for this event" });
@@ -1282,7 +1648,7 @@ exports.getEventAnalytics = async (req, res, next) => {
 // GET /api/events/:id/live-settings (organizer)
 exports.getLiveSettings = async (req, res, next) => {
   try {
-    const event = await Event.findById(req.params.id).select("liveSettings joinCode liveState");
+    const event = await Event.findById(req.params.id).select("liveSettings joinCode liveState organizerType organizerId createdBy");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
     if (!(await canManageEvent(req.user, event))) {
       return res.status(403).json({ success: false, message: "You can't manage this event" });
@@ -1297,7 +1663,7 @@ exports.getLiveSettings = async (req, res, next) => {
 // PUT /api/events/:id/live-settings — whitelisted fields only, server-validated
 exports.updateLiveSettings = async (req, res, next) => {
   try {
-    const event = await Event.findById(req.params.id).select("liveSettings joinCode");
+    const event = await Event.findById(req.params.id).select("liveSettings joinCode organizerType organizerId createdBy");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
     if (!(await canManageEvent(req.user, event))) {
       return res.status(403).json({ success: false, message: "You can't manage this event" });
@@ -1338,7 +1704,7 @@ exports.updateLiveSettings = async (req, res, next) => {
 // POST /api/events/:id/join-code/regenerate (organizer)
 exports.regenerateJoinCode = async (req, res, next) => {
   try {
-    const event = await Event.findById(req.params.id).select("joinCode");
+    const event = await Event.findById(req.params.id).select("joinCode organizerType organizerId createdBy");
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
     if (!(await canManageEvent(req.user, event))) {
       return res.status(403).json({ success: false, message: "You can't manage this event" });
@@ -1358,3 +1724,163 @@ exports.regenerateJoinCode = async (req, res, next) => {
     res.status(500).json({ success: false, message: "Failed to regenerate join code" });
   }
 };
+
+// ── Master Refactor: Institution–Club Event Approval Workflow ──────────
+exports.approveEventProposal = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+    const service = require("../services/event-approval.service");
+    const event = await service.approveEvent({ eventId: id, approver: req.user, reason });
+    await require("../repositories/event.repository").EventRepository.invalidate(event);
+    res.json({ success: true, event });
+  } catch (e) {
+    const status = e.status || 500;
+    if (status < 500) return res.status(status).json({ success: false, message: e.message });
+    console.error("Approve event error:", e);
+    return next(e);
+  }
+};
+
+exports.rejectEventProposal = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+    const service = require("../services/event-approval.service");
+    const event = await service.rejectEvent({ eventId: id, approver: req.user, reason });
+    await require("../repositories/event.repository").EventRepository.invalidate(event);
+    res.json({ success: true, event });
+  } catch (e) {
+    const status = e.status || 500;
+    if (status < 500) return res.status(status).json({ success: false, message: e.message });
+    console.error("Reject event error:", e);
+    return next(e);
+  }
+};
+
+exports.requestEventChanges = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { message } = req.body || {};
+    const service = require("../services/event-approval.service");
+    const event = await service.requestChanges({ eventId: id, approver: req.user, message });
+    await require("../repositories/event.repository").EventRepository.invalidate(event);
+    res.json({ success: true, event });
+  } catch (e) {
+    const status = e.status || 500;
+    if (status < 500) return res.status(status).json({ success: false, message: e.message });
+    console.error("Request changes error:", e);
+    return next(e);
+  }
+};
+
+exports.resubmitEventProposal = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body || {};
+    const service = require("../services/event-approval.service");
+    const event = await service.resubmitEvent({ eventId: id, actor: req.user, updates });
+    await require("../repositories/event.repository").EventRepository.invalidate(event);
+    res.json({ success: true, event });
+  } catch (e) {
+    const status = e.status || 500;
+    if (status < 500) return res.status(status).json({ success: false, message: e.message });
+    console.error("Resubmit event error:", e);
+    return next(e);
+  }
+};
+
+exports.cancelEventProposal = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+    const service = require("../services/event-approval.service");
+    const event = await service.cancelEvent({ eventId: id, actor: req.user, reason });
+    await require("../repositories/event.repository").EventRepository.invalidate(event);
+    res.json({ success: true, event });
+  } catch (e) {
+    const status = e.status || 500;
+    if (status < 500) return res.status(status).json({ success: false, message: e.message });
+    console.error("Cancel event error:", e);
+    return next(e);
+  }
+};
+
+exports.getEventApprovalHistory = async (req, res, next) => {
+  try {
+    const event = await Event.findById(req.params.id).select("approvalHistory approvalStatus proposingOrganizationId parentInstitutionId organizerType organizerId createdBy").lean();
+    if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+    if (!(await canManageEvent(req.user, event))) {
+      return res.status(403).json({ success: false, message: "You can't manage this event" });
+    }
+    res.json({ success: true, history: event.approvalHistory || [], approvalStatus: event.approvalStatus });
+  } catch (e) {
+    console.error("Get approval history error:", e);
+    return next(e);
+  }
+};
+
+exports.getInstitutionApprovalQueue = async (req, res, next) => {
+  try {
+    const { institutionId } = req.params;
+    const { status, limit, cursor } = req.query;
+    const service = require("../services/event-approval.service");
+    const events = await service.getApprovalQueue({ institutionId, actor: req.user, status, limit, cursor });
+    res.json({ success: true, events });
+  } catch (e) {
+    const st = e.status || 500;
+    if (st < 500) return res.status(st).json({ success: false, message: e.message });
+    console.error("Get approval queue error:", e);
+    return next(e);
+  }
+};
+
+exports.getClubProposals = async (req, res, next) => {
+  try {
+    const { clubId } = req.params;
+    const service = require("../services/event-approval.service");
+    const events = await service.getMyProposals({ clubId, actor: req.user });
+    res.json({ success: true, events });
+  } catch (e) {
+    const st = e.status || 500;
+    if (st < 500) return res.status(st).json({ success: false, message: e.message });
+    console.error("Get club proposals error:", e);
+    return next(e);
+  }
+};
+
+exports.updateEventWithReapprovalCheck = async (req, res, next) => {
+  try {
+    const body = { ...(req.body || {}) };
+    const eventBefore = await Event.findById(req.params.id);
+    if (!eventBefore) return res.status(404).json({ success: false, message: "Event not found" });
+    if (!(await canManageEvent(req.user, eventBefore))) {
+      return res.status(403).json({ success: false, message: "You can't manage this event" });
+    }
+    // For approved events, material changes go through reapproval flow
+    if (eventBefore.approvalStatus === "APPROVED") {
+      const service = require("../services/event-approval.service");
+      const updated = await service.handleUpdateAfterApproval({ eventId: eventBefore._id, actor: req.user, updates: body });
+      await require("../repositories/event.repository").EventRepository.invalidate(updated);
+      return res.json({ success: true, event: updated });
+    }
+    // For non-approved, use existing update logic (simplified)
+    const writable = [
+      "title", "description", "category", "eventType", "venue", "venueIframeLink",
+      "onlineEventLink", "platform", "meetingId", "passcode", "startDate", "endDate",
+      "startTime", "endTime", "bannerUrl", "organizer", "maxAttendees", "minAttendees",
+      "price", "theme", "visibility", "registrationLink", "whatsappGroup", "ticketSettings",
+      "requiredProfileFields", "registrationForm", "schedule", "speakers", "benefits", "partners",
+      "organization", "community",
+    ];
+    const patch = {};
+    for (const f of writable) if (Object.prototype.hasOwnProperty.call(body, f)) patch[f] = body[f];
+    const updated = await Event.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true });
+    await require("../repositories/event.repository").EventRepository.invalidate(updated);
+    res.json({ success: true, event: updated });
+  } catch (e) {
+    console.error("Update with reapproval error:", e);
+    return next(e);
+  }
+};
+

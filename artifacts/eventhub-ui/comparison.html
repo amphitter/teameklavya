@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EventHub UI Comparison</title>
+<style>
+  body { background:#0a0a0c; color:#fff; font-family: Inter, sans-serif; margin:0; padding:24px; }
+  h1 { font-size:24px; margin-bottom:8px; }
+  h2 { font-size:18px; margin:32px 0 12px; color:#a1a1aa; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .card { border:1px solid #232326; border-radius:12px; overflow:hidden; background:#121214; }
+  .card h3 { margin:0; padding:12px; font-size:13px; border-bottom:1px solid #1f1f23; background:#18181b; }
+  .card img { width:100%; height:auto; display:block; }
+  @media(max-width:768px){ .grid{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<h1>EventHub — Reference vs Implemented</h1>
+<p style="color:#71717a; font-size:13px;">Screenshots captured from actual implementation at 1280x900 and 390x844. Reference images from task.</p>
+
+<h2>Desktop Home Feed</h2>
+<div class="grid">
+  <div class="card"><h3>Reference — Desktop Home</h3><img src="../../../uploads/edb2740b-a994-4ba3-ae54-3d6682bcbc03.png" alt="ref desktop home"></div>
+  <div class="card"><h3>Implemented — home-desktop.png</h3><img src="home-desktop.png" alt="impl desktop home"></div>
+</div>
+
+<h2>Mobile Home Feed</h2>
+<div class="grid">
+  <div class="card"><h3>Reference — Mobile Home</h3><img src="../../../uploads/31e8d357-4947-4766-8a16-94a805825d25.png" alt="ref mobile home"></div>
+  <div class="card"><h3>Implemented — home-mobile.png</h3><img src="home-mobile.png" alt="impl mobile home"></div>
+</div>
+
+<h2>Organization Profile — GITM</h2>
+<div class="grid">
+  <div class="card"><h3>Reference — Org Profile</h3><img src="../../../uploads/bfa49e78-52f7-4e03-ab86-2b1bb0c0155d.png" alt="ref org"></div>
+  <div class="card"><h3>Implemented — organization-gitm-desktop.png</h3><img src="organization-gitm-desktop.png" alt="impl org"></div>
+</div>
+
+<h2>Onboarding</h2>
+<div class="grid">
+  <div class="card"><h3>Implemented — onboarding-desktop.png</h3><img src="onboarding-desktop.png" alt="onboarding desktop"></div>
+  <div class="card"><h3>Implemented — onboarding-mobile.png</h3><img src="onboarding-mobile.png" alt="onboarding mobile"></div>
+</div>
+
+<h2>Responsive Viewports</h2>
+<div class="grid">
+  <div class="card"><h3>320px</h3><img src="home-320.png"></div>
+  <div class="card"><h3>360px</h3><img src="home-360.png"></div>
+  <div class="card"><h3>375px</h3><img src="home-375.png"></div>
+  <div class="card"><h3>390px</h3><img src="home-390.png" style="display:none"><img src="home-mobile.png"></div>
+  <div class="card"><h3>430px</h3><img src="home-430.png"></div>
+  <div class="card"><h3>768px Tablet</h3><img src="home-tablet.png"></div>
+  <div class="card"><h3>1024px</h3><img src="home-1024.png"></div>
+  <div class="card"><h3>1440px</h3><img src="home-1440.png"></div>
+  <div class="card"><h3>1920px</h3><img src="home-1920.png"></div>
+</div>
+
+</body>
+</html>

@@ -50,17 +50,21 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  const [orgPending, setOrgPending] = useState<number | null>(null);
+
   const load = async () => {
     setLoading(true);
     setError(false);
     try {
-      const [statsRes, activityRes, upRes] = await Promise.all([
+      const [statsRes, activityRes, upRes, orgRes] = await Promise.all([
         api.get("/admin/stats").catch(() => null),
         api.get("/admin/activity").catch(() => null),
         api.get("/events/admin/list", { params: { status: "upcoming", limit: 4 } }).catch(() => null),
+        api.get("/organization-registration-requests/admin/list?status=PENDING_REVIEW&limit=1").catch(() => null),
       ]);
       setStats(statsRes?.data ?? null);
       setActivity(activityRes?.data?.activity ?? []);
+      setOrgPending(orgRes?.data?.counts?.PENDING_REVIEW ?? orgRes?.data?.pagination?.total ?? null);
 
       // Upcoming events with real registration counts
       let events: any[] = upRes?.data?.events ?? [];
@@ -153,9 +157,11 @@ export default function AdminDashboardPage() {
       <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           { title: "Create a new event", desc: "Publish in minutes with posters, tickets and custom forms", href: "/admin/events/create", icon: CalendarPlus },
-          upcomingEvents[0]
-            ? { title: "Manage participants", desc: `Registrations for ${upcomingEvents[0].title}`, href: `/admin/events/${upcomingEvents[0]._id}/registrations`, icon: Users }
-            : { title: "Manage registrations", desc: "View, export and track participants for your events", href: "/admin/events", icon: Users },
+          orgPending !== null && orgPending > 0
+            ? { title: `Org requests (${orgPending})`, desc: "Review pending college/club requests", href: "/admin/organizations/requests", icon: Users }
+            : upcomingEvents[0]
+              ? { title: "Manage participants", desc: `Registrations for ${upcomingEvents[0].title}`, href: `/admin/events/${upcomingEvents[0]._id}/registrations`, icon: Users }
+              : { title: "Manage registrations", desc: "View, export and track participants for your events", href: "/admin/events", icon: Users },
           upcomingEvents[0]
             ? { title: "View analytics", desc: "Attendance and engagement insights", href: `/admin/events/${upcomingEvents[0]._id}/analytics`, icon: Activity }
             : { title: "Scan tickets at entry", desc: "QR check-in and check-out from any phone camera", href: "/admin/events", icon: Ticket },

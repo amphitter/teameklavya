@@ -4,17 +4,15 @@ import { cn } from "@/lib/utils";
 import { AlertCircle, CalendarSearch, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-/** Page-level spinner */
 export function PageLoader({ label = "Loading…" }: { label?: string }) {
   return (
-    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-muted-foreground">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-primary" />
-      <p className="text-sm">{label}</p>
+    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-muted-foreground dark:text-[#71717a]">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-border dark:border-[#232326] border-t-primary dark:border-t-[#3b82f6]" />
+      <p className="text-[13px]">{label}</p>
     </div>
   );
 }
 
-/** Intentional empty state with a clear explanation + optional CTA */
 export function EmptyState({
   icon: Icon = CalendarSearch,
   title,
@@ -32,36 +30,25 @@ export function EmptyState({
   actionLabel?: string;
   onAction?: () => void;
   className?: string;
-  /**
-   * §96 — tighter proportions for an empty state that sits INSIDE a page which
-   * already has a header (a profile tab). The default reserves ~220px, which
-   * under a profile header read as "this page failed to load" rather than
-   * "there is nothing here yet". Opt-in, so every other caller keeps the
-   * original proportions.
-   */
   compact?: boolean;
 }) {
-  /* §19 (Part 17) — a tab with nothing in it should not reserve a quarter of
-     the screen. The compact variant drops the icon bubble for an inline icon
-     and tightens every step, which is the difference between 214px and ~140px;
-     the default variant keeps its proportions exactly as they were. */
   if (compact) {
     return (
       <div
         className={cn(
-          "flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-4 py-6 text-center",
+          "flex flex-col items-center justify-center rounded-[12px] border border-dashed bg-card px-4 py-6 text-center dark:border-[#232326] dark:bg-[#121214]",
           className
         )}
       >
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="text-[13px] font-semibold text-foreground dark:text-white">{title}</h3>
         </div>
-        {description && <p className="mt-1.5 max-w-sm text-[13px] text-muted-foreground">{description}</p>}
+        {description && <p className="mt-1.5 max-w-sm text-[12px] text-muted-foreground dark:text-[#71717a]">{description}</p>}
         {(action || actionLabel) && (
           <div className="mt-3">
             {action ?? (
-              <Button size="sm" onClick={onAction}>
+              <Button size="sm" onClick={onAction} className="h-8 rounded-[8px] bg-primary text-primary-foreground">
                 {actionLabel}
               </Button>
             )}
@@ -74,19 +61,19 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-6 py-14 text-center",
+        "flex flex-col items-center justify-center rounded-[12px] border border-dashed bg-card px-6 py-14 text-center dark:border-[#232326] dark:bg-[#121214]",
         className
       )}
     >
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-light text-primary">
-        <Icon className="h-7 w-7" />
+      <div className="flex h-12 w-12 items-center justify-center rounded-[12px] bg-muted text-primary border border-border dark:bg-[#1f1f23] dark:text-[#3b82f6] dark:border-[#232326]">
+        <Icon className="h-6 w-6" />
       </div>
-      <h3 className="mt-4 text-base font-semibold text-foreground">{title}</h3>
-      {description && <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{description}</p>}
+      <h3 className="mt-4 text-[14px] font-semibold text-foreground dark:text-white">{title}</h3>
+      {description && <p className="mt-1.5 max-w-sm text-[13px] text-muted-foreground dark:text-[#71717a]">{description}</p>}
       {(action || actionLabel) && (
         <div className="mt-5">
           {action ?? (
-            <Button size="sm" onClick={onAction}>
+            <Button size="sm" onClick={onAction} className="h-8 rounded-[8px] bg-primary text-primary-foreground">
               {actionLabel}
             </Button>
           )}
@@ -96,7 +83,6 @@ export function EmptyState({
   );
 }
 
-/** Human-readable error state with retry */
 export function ErrorState({
   title = "Something went wrong",
   description,
@@ -111,17 +97,17 @@ export function ErrorState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-xl border border-destructive/20 bg-destructive/5 px-6 py-12 text-center",
+        "flex flex-col items-center justify-center rounded-[12px] border border-destructive/20 bg-destructive/5 px-6 py-12 text-center dark:border-[#ef4444]/20 dark:bg-[#1a0f0f]",
         className
       )}
     >
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-        <AlertCircle className="h-7 w-7" />
+      <div className="flex h-12 w-12 items-center justify-center rounded-[12px] bg-destructive/10 text-destructive border border-destructive/20">
+        <AlertCircle className="h-6 w-6" />
       </div>
-      <h3 className="mt-4 text-base font-semibold text-foreground">{title}</h3>
-      {description && <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{description}</p>}
+      <h3 className="mt-4 text-[14px] font-semibold text-foreground dark:text-white">{title}</h3>
+      {description && <p className="mt-1.5 max-w-sm text-[13px] text-muted-foreground dark:text-[#a1a1aa]">{description}</p>}
       {onRetry && (
-        <Button size="sm" variant="outline" className="mt-5" onClick={onRetry}>
+        <Button size="sm" variant="outline" className="mt-5 h-8 rounded-[8px]" onClick={onRetry}>
           <RefreshCw className="mr-2 h-4 w-4" /> Try again
         </Button>
       )}
@@ -129,23 +115,21 @@ export function ErrorState({
   );
 }
 
-/** Skeleton block */
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("shimmer rounded-lg", className)} />;
+  return <div className={cn("shimmer rounded-[10px] bg-muted dark:bg-[#1f1f23]", className)} />;
 }
 
-/** Event card skeleton for grids */
 export function EventCardSkeleton() {
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
+    <div className="overflow-hidden rounded-[12px] border bg-card dark:border-[#1f1f23] dark:bg-[#121214]">
       <Skeleton className="h-44 w-full rounded-none" />
       <div className="space-y-3 p-4">
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-5 w-3/4" />
-        <Skeleton className="h-4 w-1/2" />
+        <Skeleton className="h-3 w-16" />
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
         <div className="flex gap-2 pt-2">
-          <Skeleton className="h-8 flex-1" />
-          <Skeleton className="h-8 flex-1" />
+          <Skeleton className="h-7 flex-1" />
+          <Skeleton className="h-7 flex-1" />
         </div>
       </div>
     </div>

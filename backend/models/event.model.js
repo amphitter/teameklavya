@@ -119,9 +119,12 @@ const eventSchema = new mongoose.Schema(
     startTime: String,
     endTime: String,
     
-    // Media and branding
+    // Media and branding. The event logo is independent of its banner and
+    // optional for legacy Events; no backfill guesses a logo from associations.
     bannerUrl: String,
-    bannerPublicId: String, // Cloudinary public id (used to replace/delete the asset)
+    bannerPublicId: String, // Provider public id (used to replace/delete the asset)
+    logoUrl: { type: String, default: null },
+    logoPublicId: { type: String, default: null },
     organizer: String,
     
     // Attendance limits
@@ -142,6 +145,10 @@ const eventSchema = new mongoose.Schema(
     // unlisted → accessible via direct link only, hidden from discovery
     removedAt: { type: Date, default: null },
     removedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    // Owner lifecycle is separate from visibility and moderation. Archiving is
+    // reversible and never deletes registrations, tickets, posts, or the Event.
+    archivedAt: { type: Date, default: null },
+    archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
 
     // ── LIVE EVENT ENGINE (Part 4, Phase 1) ──────────────────────────────
     // Explicit operational state machine (spec §13). The display-lifecycle
@@ -222,9 +229,14 @@ const eventSchema = new mongoose.Schema(
     registrationLink: String,
     whatsappGroup: String,
 
-    // Creator
+    // Creator is immutable provenance and is not an owner transfer field.
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    // Owning organization (colleges, clubs, communities)
+    // Explicit controller/organization/platform ownership. `organization` and
+    // `community` below remain independent discovery/host associations.
+    organizerType: { type: String, enum: ["USER", "ORGANIZATION", "PLATFORM"] },
+    organizerId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // Organization association (historically described as owner, but does not
+    // grant access unless organizerType is explicitly ORGANIZATION).
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", default: null },
     // Community hosting this event (Phase 6) — shown on the community page
     community: { type: mongoose.Schema.Types.ObjectId, ref: "Community", default: null },
@@ -263,7 +275,84 @@ const eventSchema = new mongoose.Schema(
       online: String, // Instructions for online participants
       offline: String, // Instructions for offline participants
       general: String // General instructions for all
-    }
+    },
+
+    // Trust & Safety moderation
+    moderationStatus: {
+      type: String,
+      enum: ["pending", "approved", "quarantined", "removed", "flagged"],
+      default: "approved",
+      index: true,
+    },
+    moderationCategory: { type: String, default: "" },
+    moderationConfidence: { type: Number, default: 0 },
+    moderationCheckedAt: { type: Date, default: null },
+    moderationCase: { type: mongoose.Schema.Types.ObjectId, ref: "ModerationCase", default: null },
+
+    // ── Institution–Club Event Approval Workflow (Master Refactor) ──
+    approvalStatus: {
+      type: String,
+      enum: ["DRAFT", "PENDING_REVIEW", "APPROVED", "REJECTED", "CHANGES_REQUESTED", "CANCELLED", "SUSPENDED"],
+      default: "APPROVED", // backward compat: existing events are approved
+      index: true,
+    },
+    proposingOrganizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null,
+      index: true,
+    },
+    parentInstitutionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null,
+      index: true,
+    },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    approvedAt: { type: Date, default: null },
+    rejectedAt: { type: Date, default: null },
+    rejectionReason: { type: String, default: "", maxlength: 2000 },
+    changeRequestMessage: { type: String, default: "", maxlength: 2000 },
+    submittedAt: { type: Date, default: null },
+    lastResubmittedAt: { type: Date, default: null },
+    version: { type: Number, default: 1 },
+    requiresReapproval: { type: Boolean, default: false },
+    lastMaterialChangeAt: { type: Date, default: null },
+    approvalHistory: {
+      type: [
+        {
+          action: {
+            type: String,
+            enum: [
+              "CREATED",
+              "SUBMITTED",
+              "RESUBMITTED",
+              "APPROVED",
+              "REJECTED",
+              "CHANGES_REQUESTED",
+              "CANCELLED",
+              "SUSPENDED",
+              "MATERIAL_CHANGE",
+              "AUTO_REQUIRES_REAPPROVAL",
+            ],
+            required: true,
+          },
+          actor: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+          actorRole: {
+            type: String,
+            enum: ["CLUB_ADMIN", "INSTITUTION_ADMIN", "SUPER_ADMIN", "SYSTEM", "CREATOR"],
+            default: "CREATOR",
+          },
+          fromStatus: { type: String, default: "" },
+          toStatus: { type: String, default: "" },
+          reason: { type: String, default: "", maxlength: 2000 },
+          message: { type: String, default: "", maxlength: 2000 },
+          createdAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
+    previousApprovedSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );
@@ -314,9 +403,13 @@ eventSchema.pre("validate", function (next) {
 eventSchema.index({ startDate: 1 });
 eventSchema.index({ isFeatured: 1 });
 eventSchema.index({ createdBy: 1 });
+eventSchema.index({ organizerType: 1, organizerId: 1, createdAt: -1 });
 eventSchema.index({ organization: 1 }, { sparse: true });
 eventSchema.index({ community: 1 }, { sparse: true });
 eventSchema.index({ "ticketSettings.autoGenerate": 1 });
 eventSchema.index({ eventType: 1 }); // New index for event type filtering
+eventSchema.index({ approvalStatus: 1, parentInstitutionId: 1, createdAt: -1 });
+eventSchema.index({ approvalStatus: 1, proposingOrganizationId: 1, createdAt: -1 });
+eventSchema.index({ parentInstitutionId: 1, approvalStatus: 1, startDate: 1 });
 
 module.exports = mongoose.model("Event", eventSchema);

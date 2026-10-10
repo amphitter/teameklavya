@@ -257,7 +257,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-border bg-card lg:flex">
         <div className="flex h-14 items-center border-b border-border px-5">
           <Link href="/" aria-label="EventHub home">
-            <Logo size={40} onDark />
+            <Logo size={40} />
           </Link>
         </div>
 
@@ -391,7 +391,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
           <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
             {/* Mobile: logo */}
             <Link href="/" aria-label="EventHub home" className="lg:hidden">
-              <Logo size={32} onDark />
+              <Logo size={32} />
             </Link>
 
             {/* Global search (Phase 11) — live dropdown + full page */}

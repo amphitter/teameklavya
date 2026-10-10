@@ -9,15 +9,8 @@ const { ERROR_CODES } = require("../utils/app-error");
 
 const USER_LIST_FIELDS = "firstName lastName username verified profile.avatar profile.institution";
 
-/** One page of a followers/following list (never thousands at once). */
 const LIST_PAGE_SIZE = 20;
 
-/**
- * POST /api/follow/:userId  — one smart toggle:
- *   accepted → unfollow
- *   pending  → cancel request
- *   none     → private target creates a REQUEST, public follows instantly
- */
 exports.toggleFollow = async (req, res) => {
   try {
     const followerId = req.user.id;
@@ -37,8 +30,6 @@ exports.toggleFollow = async (req, res) => {
     if (existing) {
       const wasPending = existing.status === "pending";
       await existing.deleteOne();
-      // §13 — the follower's cached social graph just changed; without this the
-      // feed keeps ranking as if they still followed this author.
       PostRepository.invalidateFeedContext(followerId);
       return res.json({ success: true, following: false, requested: false, wasPending });
     }
@@ -61,15 +52,9 @@ exports.toggleFollow = async (req, res) => {
   }
 };
 
-// GET /api/follow/:userId/status — viewer-aware follow state
 exports.getFollowStatus = async (req, res, next) => {
   try {
     const targetId = req.params.userId;
-
-    /* §16: same class of bug as getPostById. A malformed id reaches Mongo,
-     * throws a CastError, and the generic catch used to report a client
-     * mistake as a 500. Validate first; route the unexpected through next()
-     * so the taxonomy decides the status (§30). */
     if (!mongoose.Types.ObjectId.isValid(targetId)) {
       return res.status(400).json({
         success: false,
@@ -77,7 +62,6 @@ exports.getFollowStatus = async (req, res, next) => {
         error: { code: ERROR_CODES.VALIDATION_ERROR, message: "Invalid identifier" },
       });
     }
-
     let following = false;
     let requested = false;
     if (req.user && String(req.user.id) !== String(targetId)) {
@@ -100,14 +84,20 @@ exports.getFollowStatus = async (req, res, next) => {
   }
 };
 
-/* ── Followers / following lists (paginated, viewer-aware) ── */
-
-// GET /api/follow/:userId/followers?page=
 exports.getFollowers = async (req, res) => {
   try {
     const targetId = req.params.userId;
-    const target = await User.findById(targetId).select("_id");
+    const target = await User.findById(targetId).select("_id socialSettings");
     if (!target) return res.status(404).json({ success: false, message: "User not found" });
+
+    const viewerId = req.user?.id || null;
+    const isSelf = viewerId && String(viewerId) === String(targetId);
+    if (!isSelf && target.socialSettings?.profileVisibility === "private") {
+      const follows = viewerId ? await Follow.exists({ follower: viewerId, followee: targetId, status: "accepted" }) : null;
+      if (!follows) {
+        return res.status(403).json({ success: false, message: "This account is private", canView: false });
+      }
+    }
 
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const [edges, total] = await Promise.all([
@@ -132,12 +122,20 @@ exports.getFollowers = async (req, res) => {
   }
 };
 
-// GET /api/follow/:userId/following?page=
 exports.getFollowing = async (req, res) => {
   try {
     const targetId = req.params.userId;
-    const target = await User.findById(targetId).select("_id");
+    const target = await User.findById(targetId).select("_id socialSettings");
     if (!target) return res.status(404).json({ success: false, message: "User not found" });
+
+    const viewerId = req.user?.id || null;
+    const isSelf = viewerId && String(viewerId) === String(targetId);
+    if (!isSelf && target.socialSettings?.profileVisibility === "private") {
+      const follows = viewerId ? await Follow.exists({ follower: viewerId, followee: targetId, status: "accepted" }) : null;
+      if (!follows) {
+        return res.status(403).json({ success: false, message: "This account is private", canView: false });
+      }
+    }
 
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const [edges, total] = await Promise.all([
@@ -162,9 +160,6 @@ exports.getFollowing = async (req, res) => {
   }
 };
 
-/* ── Follow requests (private profiles) ── */
-
-// GET /api/follow/requests — incoming pending requests for me
 exports.getRequests = async (req, res) => {
   try {
     const edges = await Follow.find({ followee: req.user.id, status: "pending" })
@@ -172,7 +167,6 @@ exports.getRequests = async (req, res) => {
       .limit(50)
       .populate("follower", USER_LIST_FIELDS)
       .lean();
-
     res.json({ success: true, requests: edges.map((e) => e.follower).filter(Boolean) });
   } catch (error) {
     console.error("Follow requests error:", error.message);
@@ -180,21 +174,16 @@ exports.getRequests = async (req, res) => {
   }
 };
 
-// POST /api/follow/requests/:userId/accept
 exports.acceptRequest = async (req, res) => {
   try {
     const requesterId = req.params.userId;
     const edge = await Follow.findOne({ follower: requesterId, followee: req.user.id, status: "pending" });
     if (!edge) return res.status(404).json({ success: false, message: "No pending request from this user" });
-
     edge.status = "accepted";
     await edge.save();
-    // The requester's cached graph is what changes — they now follow someone.
     PostRepository.invalidateFeedContext(requesterId);
     await notify({ user: requesterId, actor: req.user.id, type: "follow_accepted" });
-    // Achievements: crowd_favorite (10 accepted followers — for the followed user)
     require("../services/achievement.service").checkAchievements(req.user.id);
-
     res.json({ success: true, following: true });
   } catch (error) {
     console.error("Accept request error:", error.message);
@@ -202,16 +191,15 @@ exports.acceptRequest = async (req, res) => {
   }
 };
 
-// POST /api/follow/requests/:userId/decline
 exports.declineRequest = async (req, res) => {
   try {
+    const requesterId = req.params.userId;
     const edge = await Follow.findOne({
-      follower: req.params.userId,
+      follower: requesterId,
       followee: req.user.id,
       status: "pending",
     });
     if (!edge) return res.status(404).json({ success: false, message: "No pending request from this user" });
-
     await edge.deleteOne();
     PostRepository.invalidateFeedContext(requesterId);
     res.json({ success: true, following: false });

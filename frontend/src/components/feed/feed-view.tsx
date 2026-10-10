@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { useInfiniteQuery, useQuery } from "@/lib/query";
 import { resolveFeedSections, needsBoundaryAboveHistory } from "@/lib/feed-sections";
 
-type Tab = "for-you" | "following" | "events" | "communities";
+type Tab = "for-you" | "following" | "events";
 /** §6 — "Feed should remember the selected filter during navigation." */
 const TAB_KEY = "eventhub.feed.tab";
 const PAGE_SIZE = 10;
@@ -92,7 +92,7 @@ export function FeedView() {
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem(TAB_KEY) as Tab | null;
-      if (saved && ["for-you", "following", "events", "communities"].includes(saved)) setTab(saved);
+      if (saved && ["for-you", "following", "events"].includes(saved)) setTab(saved);
     } catch { /* storage disabled — default is fine */ }
   }, []);
   const selectTab = (t: Tab) => {
@@ -552,43 +552,30 @@ export function FeedView() {
                 On a phone the four tabs sit in a 2x2 grid — equal cells, no ragged
               half-row — and from sm up they are the single flex line they always
               were. Nothing is clipped at any width. */}
-            {/* §9 — the filter strip is DESKTOP ONLY. On a phone the feed is one
-                stream: no For You / Following / Events / Communities, no chip
-                dashboard above the composer. Hidden rather than unmounted, so
-                the desktop markup and its state are exactly what they were
-                before this change (§26). */}
+            {/* Feed tabs — reference-matched: dark charcoal, electric blue active, moderate radii */}
             <div
-              role="group"
+              role="tablist"
               aria-label="Feed filters"
-              className="hidden gap-2 lg:flex lg:flex-wrap lg:items-center"
+              className="flex flex-wrap gap-2"
             >
               {(
                 [
                   { id: "for-you", label: "For You" },
                   { id: "following", label: "Following" },
                   { id: "events", label: "Events" },
-                  { id: "communities", label: "Communities" },
                 ] as const
               ).map((t) => (
                 <button
                   key={t.id}
                   type="button"
+                  role="tab"
+                  aria-selected={tab === t.id}
                   onClick={() => selectTab(t.id)}
-                  aria-pressed={tab === t.id}
-                  className={cn(
-                    // 44px tall on every screen, and every tab fits inside the
-                    // viewport at 320 — that is the whole point of this change.
-                    /* Full-width inside the 2x2 phone grid; content-width once
-                       the row is a single flex line at sm, otherwise each pill
-                       would stretch across a line of its own. */
-                    "flex w-full select-none items-center justify-center rounded-full sm:w-auto",
-                    "px-3 text-[12.5px] font-semibold leading-none transition-colors sm:px-4 sm:text-[13px]",
-                    "min-h-[44px] touch-manipulation active:scale-[0.97]",
+                  className={
                     tab === t.id
-                      ? // §3 — gradient is a reserved selected-state treatment.
-                        "brand-gradient text-white shadow-[0_4px_12px_rgba(37,99,255,0.25)]"
-                      : "border border-outline-variant bg-surface-container-lowest text-on-surface-variant hover:text-on-surface"
-                  )}
+                      ? "inline-flex h-9 items-center justify-center rounded-full bg-[#3b82f6] px-5 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(59,130,246,0.3)] transition-all dark:shadow-[0_0_20px_rgba(59,130,246,0.15)]"
+                      : "inline-flex h-9 items-center justify-center rounded-full border border-border bg-card px-5 text-[13px] font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground dark:border-[#232326] dark:bg-[#121214] dark:text-[#a1a1aa] dark:hover:border-[#2a2a30] dark:hover:text-white"
+                  }
                 >
                   {t.label}
                 </button>

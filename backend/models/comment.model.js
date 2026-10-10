@@ -40,6 +40,18 @@ const commentSchema = new mongoose.Schema(
     // ── Comment likes (Part 8 §13) ──────────────────────────────────────
     likers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     likesCount: { type: Number, default: 0 },
+
+    // ── Trust & Safety moderation ──
+    moderationStatus: {
+      type: String,
+      enum: ["pending", "approved", "quarantined", "removed", "flagged"],
+      default: "approved",
+      index: true,
+    },
+    moderationCategory: { type: String, default: "" },
+    moderationConfidence: { type: Number, default: 0 },
+    moderationCheckedAt: { type: Date, default: null },
+    moderationCase: { type: mongoose.Schema.Types.ObjectId, ref: "ModerationCase", default: null },
   },
   { timestamps: true }
 );

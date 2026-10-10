@@ -10,6 +10,7 @@
  *   MESSAGING   message send — 20/min
  *   SEARCH      search queries — 30/min
  *   EVENT       registration/check-in/join — 20/min
+ *   COMMUNICATION email fan-outs — 5/15m per authenticated actor
  *   UPLOAD      15/10m burst + 10/hr session cap (§23)
  *   READ        generous browsing bucket on /api — must never throttle
  *               normal use, including the frontend polling loops (§26)
@@ -49,6 +50,7 @@ const DEFAULTS = {
   MESSAGING:     { limit: 20,  windowMs: MINUTE },
   SEARCH:        { limit: 30,  windowMs: MINUTE },
   EVENT:         { limit: 20,  windowMs: MINUTE },
+  COMMUNICATION: { limit: 5,   windowMs: 15 * MINUTE },
   UPLOAD_BURST:  { limit: 15,  windowMs: 10 * MINUTE },
   UPLOAD_HOURLY: { limit: 10,  windowMs: HOUR },
   READ:          { limit: 300, windowMs: MINUTE },
@@ -187,6 +189,7 @@ const limiters = {
   messaging: createLimiter("MESSAGING"),
   search: createLimiter("SEARCH"),
   event: createLimiter("EVENT"),
+  communication: createLimiter("COMMUNICATION"),
   uploadBurst: createLimiter("UPLOAD_BURST"),
   uploadHourly: createLimiter("UPLOAD_HOURLY"),
   read: createLimiter("READ"),

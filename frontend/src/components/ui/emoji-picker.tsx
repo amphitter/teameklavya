@@ -36,7 +36,7 @@ export function EmojiButton({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+          "flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
           className
         )}
         aria-label="Insert emoji"

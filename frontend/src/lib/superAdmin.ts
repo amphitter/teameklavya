@@ -1,10 +1,22 @@
 /**
- * Client-side Super Admin hint (UI gating ONLY).
- * Every real permission check happens server-side — this constant never
- * grants anything by itself; it only decides which controls are rendered.
+ * Server-derived Super Admin hint for UI rendering only.
+ *
+ * The backend computes this from its centralized SUPER_ADMIN_EMAIL rule and
+ * enforces every real permission. The browser must never derive or grant this
+ * identity from an email string.
  */
-export const SUPER_ADMIN_EMAIL = "devanshsinghr00@gmail.com";
+export interface SuperAdminHint {
+  isSuperAdmin?: boolean;
+}
 
-export function isSuperAdminEmail(email?: string | null): boolean {
-  return Boolean(email) && String(email).toLowerCase() === SUPER_ADMIN_EMAIL;
+export function isSuperAdminHint(user?: SuperAdminHint | null): boolean {
+  return user?.isSuperAdmin === true;
+}
+
+/** UI helper for controls that the backend permits to either admin class. */
+export function hasPlatformAdminAccess(
+  role?: string | null,
+  user?: SuperAdminHint | null
+): boolean {
+  return String(role || "").trim().toLowerCase() === "admin" || isSuperAdminHint(user);
 }

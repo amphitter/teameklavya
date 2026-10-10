@@ -88,6 +88,18 @@ const postSchema = new mongoose.Schema(
     topics: { type: [String], default: [] },
     // @userIds parsed from content (for mention rendering + notifications)
     mentions: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], default: [] },
+
+    // ── Trust & Safety moderation ──
+    moderationStatus: {
+      type: String,
+      enum: ["pending", "approved", "quarantined", "removed", "flagged"],
+      default: "approved",
+      index: true,
+    },
+    moderationCategory: { type: String, default: "" },
+    moderationConfidence: { type: Number, default: 0 },
+    moderationCheckedAt: { type: Date, default: null },
+    moderationCase: { type: mongoose.Schema.Types.ObjectId, ref: "ModerationCase", default: null },
   },
   {
     timestamps: true,

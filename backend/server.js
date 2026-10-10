@@ -54,6 +54,11 @@ require('./migrations/social.migration').ensureUsernames();
 // conversation" with a 500) survived every deploy. This removes it in place.
 require('./migrations/conversation-index.migration').ensureConversationIndexes();
 
+// Organization foundation indexes (Phase 1) — additive and idempotent. This
+// creates only schema-declared indexes; it does not migrate records or change
+// the existing authorization source of truth.
+require('./migrations/organization-indexes.migration').ensureOrganizationIndexes();
+
 // Initialize Express
 const app = express();
 
@@ -191,11 +196,14 @@ app.use('/api/messages', require('./routes/message.routes'));
 app.use('/api/quizzes', require('./routes/quiz.routes'));
 app.use('/api/follow', require('./routes/follow.routes'));
 app.use('/api/organizations', require('./routes/organization.routes'));
+app.use('/api/organization-registration-requests', require('./routes/organization-registration.routes'));
 app.use('/api/communities', require('./routes/community.routes'));
 app.use('/api/users', require('./routes/user.routes'));
 app.use('/api/blocks', require('./routes/block.routes'));
 app.use('/api/admin', require('./routes/admin.routes'));
 app.use('/api/moderation', require('./routes/moderation.routes'));
+app.use('/api/onboarding', require('./routes/onboarding.routes'));
+app.use('/api', require('./routes/trust-safety.routes'));
 app.use('/api/search', require('./routes/search.routes'));
 app.use('/api', require('./routes/activity.routes'));
 
@@ -244,7 +252,11 @@ app.use((error, req, res, next) => {
 });
 
 app.use((req, res) => {
-  res.status(404).json({ success: false, message: 'Route not found' });
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+    error: { code: 'NOT_FOUND', message: 'Route not found' },
+  });
 });
 
 // ────────────────────────────────────────────────────────────
@@ -281,4 +293,6 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ EventHub API running on port ${PORT}`);
   // Event reminder scheduler (Part 3, Phase 8) — in-process, deduped
   require("./services/reminder.service").startReminderScheduler();
+  // Enforcement & IP expiry scheduler (Trust & Safety)
+  require("./services/enforcement-expiry.service").startEnforcementExpiryScheduler();
 });

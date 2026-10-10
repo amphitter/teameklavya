@@ -8,6 +8,7 @@ import { api } from "@/utils/api";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { PageLoader, ErrorState, EmptyState } from "@/components/states";
 import { Button } from "@/components/ui/button";
+import { isSuperAdminHint } from "@/lib/superAdmin";
 
 interface Claim {
   _id: string;
@@ -35,7 +36,7 @@ export default function AdminClaimsPage() {
   const [tab, setTab] = useState<"pending" | "approved" | "rejected">("pending");
   const [busyId, setBusyId] = useState("");
 
-  const isSuperAdmin = user?.email?.toLowerCase() === "devanshsinghr00@gmail.com";
+  const superAdminUiHint = isSuperAdminHint(user);
 
   const load = useCallback((status: string) => {
     setLoading(true);
@@ -48,9 +49,10 @@ export default function AdminClaimsPage() {
   }, []);
 
   useEffect(() => {
-    if (ready && user && isSuperAdmin) load(tab);
+    if (ready && user && superAdminUiHint) load(tab);
+    else if (ready && (!user || !superAdminUiHint)) setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, user?._id, tab]);
+  }, [ready, user?._id, superAdminUiHint, tab]);
 
   const review = (claimId: string, decision: "approve" | "reject", resolution?: "grant" | "transfer") => {
     setBusyId(claimId);
@@ -72,8 +74,10 @@ export default function AdminClaimsPage() {
       .finally(() => setBusyId(""));
   };
 
-  if (!ready || (loading && claims.length === 0 && !error)) return <PageLoader label="Checking access…" />;
-  if (!user || !isSuperAdmin)
+  if (!ready || (superAdminUiHint && loading && claims.length === 0 && !error)) {
+    return <PageLoader label="Checking access…" />;
+  }
+  if (!user || !superAdminUiHint)
     return (
       <div className="mx-auto max-w-2xl px-4 py-10">
         <EmptyState

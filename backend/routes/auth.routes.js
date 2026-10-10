@@ -2,8 +2,12 @@ const express = require('express');
 const { body } = require('express-validator');
 const authCtrl = require('../controllers/auth.controller');
 const { requireAuth, optionalUser } = require('../middleware/auth.middleware');
+const { checkIpRestriction } = require('../middleware/ip-restriction.middleware');
 
 const router = express.Router();
+
+// IP restriction check for auth routes
+router.use(checkIpRestriction);
 
 // Signup
 router.post('/signup', [

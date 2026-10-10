@@ -63,11 +63,11 @@ exports.getForm = async (req, res, next) => {
     const event = await Event.findById(eventId);
 
     // Moderation takedowns (Part 3, Phase 10) accept no new registrations
-    if (!event || event.removedAt) {
+    if (!event || event.removedAt || event.archivedAt) {
       return res.status(404).json({ message: "Event not found" });
     }
 
-    // Private events: only the organizer/admin may fetch the form
+    // Private events: only a user who manages this exact Event may fetch the form
     if (event.visibility === "private") {
       const { canManageEvent } = require("../middleware/auth.middleware");
       const authorized = await canManageEvent(req.user, event);
@@ -135,13 +135,13 @@ exports.submitResponse = async (req, res, next) => {
 
     const event = await Event.findById(eventId);
     // Moderation takedown (Part 3, Phase 10): no new registrations
-    if (!event || event.removedAt) return res.status(404).json({ message: "Event not found" });
+    if (!event || event.removedAt || event.archivedAt) return res.status(404).json({ message: "Event not found" });
 
     const existing = await RegistrationRepository.existsForUser(eventId, userId);
     if (existing) return res.status(400).json({ message: "Already registered for this event" });
 
-    // Private events are invite-only: participants are added by the organizer
-    // (e.g. via RSVP). Self-registration is not allowed unless already invited.
+    // Private events are invite-only: participants are added by an authorized
+    // Event manager (e.g. via RSVP). Self-registration is not allowed unless invited.
     if (event.visibility === "private") {
       const { canManageEvent } = require("../middleware/auth.middleware");
       const authorized = await canManageEvent(req.user, event);

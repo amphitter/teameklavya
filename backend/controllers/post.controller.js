@@ -13,6 +13,7 @@ const { isFollowerOf } = require("../services/social.service");
 // Reused by the message controller so a shared post respects the same rules
 // (Part 13 §22 — a share must never widen who can read a post).
 const { canViewPost } = require("../services/post-visibility.service");
+const { canManageEvent } = require("../middleware/auth.middleware");
 const Follow = require("../models/follow.model");
 const OrgFollow = require("../models/orgFollow.model");
 const Event = require("../models/event.model");
@@ -24,7 +25,7 @@ const mongoose = require("mongoose");
 const { ERROR_CODES } = require("../utils/app-error");
 
 const AUTHOR_FIELDS = "firstName lastName username verified email profile.avatar profile.institution";
-const EVENT_FIELDS = "title slug bannerUrl startDate endDate venue eventType category organizer price visibility isLive";
+const EVENT_FIELDS = "title slug bannerUrl logoUrl startDate endDate venue eventType category organizer price visibility isLive";
 const ORG_FIELDS = "name slug logoUrl";
 const COMMUNITY_FIELDS = "name slug avatarUrl";
 
@@ -491,6 +492,15 @@ exports.createPost = async (req, res) => {
       return res.status(400).json({ success: false, message: "Write something or add a photo" });
     }
 
+    // Trust & Safety: posting restriction / suspension already checked in auth middleware, but also feature-level restriction
+    try {
+      const enforcementService = require("../services/enforcement.service");
+      const check = await enforcementService.checkFeatureRestriction(req.user.id, "posting");
+      if (check.restricted) {
+        return res.status(403).json({ success: false, message: check.reason || "Posting restricted", restriction: check });
+      }
+    } catch (_) {}
+
     // Visibility (backend-enforced; event-memory shares of non-public
     // events are forced into the event channel further below)
     let visibility = ["public", "followers", "event_participants", "community"].includes(bodyVisibility)
@@ -557,14 +567,14 @@ exports.createPost = async (req, res) => {
       });
     }
 
-    // Event channel integrity: participants-only posts require the author to
-    // be a registered participant (organizers/admins exempt)
+    // Event channel integrity: participants-only posts require registration
+    // unless the caller is an authorized owner/manager of this exact Event.
     if (visibility === "event_participants") {
       const isParticipant = await RegistrationResponse.exists({ userId: req.user.id, eventId: eventRef });
-      if (!isParticipant && req.user.role !== "admin") {
-        const ev = await Event.findById(eventRef).select("createdBy").lean();
-        if (!ev || String(ev.createdBy) !== String(req.user.id)) {
-          return res.status(403).json({ success: false, message: "Only participants can post in the event channel" });
+      if (!isParticipant) {
+        const event = await Event.findById(eventRef).select("createdBy organizerType organizerId").lean();
+        if (!event || !(await canManageEvent(req.user, event))) {
+          return res.status(403).json({ success: false, message: "Only participants or event managers can post in the event channel" });
         }
       }
     }
@@ -609,6 +619,8 @@ exports.createPost = async (req, res) => {
     const topics = parseTopics(trimmed);
     const mentionedUsers = await parseMentions(trimmed, req.user.id);
 
+    // Publication safety: validate→store controlled→moderate→pending inaccessible→publish approved→quarantine/reject→case creation
+    // Initial store as pending to prevent premature publication
     const post = await Post.create({
       author: req.user.id,
       content: trimmed,
@@ -620,8 +632,53 @@ exports.createPost = async (req, res) => {
       visibility,
       topics,
       mentions: mentionedUsers.map((u) => u._id),
+      moderationStatus: "pending",
       ...(memoryData ? { memory: memoryData } : {}),
     });
+
+    // Moderate content
+    try {
+      const moderationService = require("../services/moderation.service");
+      const modResult = await moderationService.processContent({
+        contentType: "post",
+        contentId: post._id,
+        text: trimmed,
+        imageUrl: imgs[0] || null,
+        authorId: req.user.id,
+      });
+      // Determine final moderation status
+      let finalStatus = modResult.status;
+      if (finalStatus === "flagged") {
+        // flagged → pending review, keep status published but moderation flagged (only author sees via repository filter)
+        post.moderationStatus = "flagged";
+        post.moderationCategory = modResult.categories[0] || "";
+        post.moderationConfidence = modResult.confidence;
+        post.moderationCheckedAt = new Date();
+        post.moderationCase = modResult.moderationCase ? modResult.moderationCase._id : null;
+        await post.save();
+      } else if (finalStatus === "quarantined" || finalStatus === "removed") {
+        post.moderationStatus = finalStatus;
+        post.status = "hidden";
+        post.moderationCategory = modResult.categories[0] || "";
+        post.moderationConfidence = modResult.confidence;
+        post.moderationCheckedAt = new Date();
+        post.moderationCase = modResult.moderationCase ? modResult.moderationCase._id : null;
+        await post.save();
+      } else {
+        // approved
+        post.moderationStatus = "approved";
+        post.moderationCategory = "";
+        post.moderationConfidence = modResult.confidence;
+        post.moderationCheckedAt = new Date();
+        await post.save();
+      }
+    } catch (modErr) {
+      console.error("Post moderation error:", modErr.message);
+      // Safe fallback: approve if moderation fails open? For safety, keep pending for review
+      post.moderationStatus = "pending";
+      post.moderationCheckedAt = new Date();
+      await post.save();
+    }
 
     // Mention notifications (real users only, author excluded)
     await Promise.all(
@@ -716,7 +773,15 @@ exports.getComments = async (req, res) => {
        GET /comments/:commentId/replies — dumping every reply into the first
        page is what turns a busy thread into an unreadable tree (§13). */
     const viewerId = req.user?.id || null;
-    const comments = await Comment.find({ post: req.params.id, removedAt: null, parent: null })
+    const isPostAuthor = viewerId && String(post.author) === String(viewerId);
+    const commentFilter = {
+      post: req.params.id,
+      removedAt: null,
+      parent: null,
+      // Trust & Safety: filter moderated comments for non-authors
+      ...(isPostAuthor ? {} : { moderationStatus: { $nin: ["removed", "quarantined"] } }),
+    };
+    const comments = await Comment.find(commentFilter)
       .sort({ createdAt: 1 })
       .populate("author", AUTHOR_FIELDS)
       .lean();
@@ -747,6 +812,15 @@ exports.addComment = async (req, res) => {
     if (content.length > 1000) {
       return res.status(400).json({ success: false, message: "Comment is too long (max 1000 characters)" });
     }
+    // Trust & Safety: commenting restriction
+    try {
+      const enforcementService = require("../services/enforcement.service");
+      const check = await enforcementService.checkFeatureRestriction(req.user.id, "commenting");
+      if (check.restricted) {
+        return res.status(403).json({ success: false, message: check.reason || "Commenting restricted", restriction: check });
+      }
+    } catch (_) {}
+
     const post = await Post.findById(req.params.id);
     if (!post) return res.status(404).json({ success: false, message: "Post not found" });
     if (post.status !== "published" || !(await canViewPost(post, req.user.id))) {
@@ -755,6 +829,25 @@ exports.addComment = async (req, res) => {
     if (await isBlockedBetween(req.user.id, post.author)) {
       return res.status(403).json({ success: false, message: "You can't interact with this post" });
     }
+
+    // Moderate comment text before storing
+    let moderationStatus = "approved";
+    let moderationCategory = "";
+    let moderationConfidence = 0;
+    let moderationCaseId = null;
+    try {
+      const moderationService = require("../services/moderation.service");
+      const modResult = await moderationService.moderateText({ text: content, contentType: "comment", authorId: req.user.id });
+      if (modResult.status === "quarantined" || modResult.status === "flagged") {
+        moderationStatus = modResult.status;
+        moderationCategory = modResult.categories[0] || "";
+        moderationConfidence = modResult.confidence;
+        // If high confidence, quarantine comment (inaccessible to others)
+        if (modResult.confidence >= 0.85) {
+          moderationStatus = "quarantined";
+        }
+      }
+    } catch (_) {}
 
     /* Resolve the parent, collapsing depth to ONE level (§13).
        Replying to a reply attaches to the reply's parent instead of nesting
@@ -777,7 +870,35 @@ exports.addComment = async (req, res) => {
       author: req.user.id,
       content,
       parent: parent || null,
+      moderationStatus,
+      moderationCategory,
+      moderationConfidence,
+      moderationCheckedAt: new Date(),
+      moderationCase: moderationCaseId,
     });
+
+    // If quarantined, create case via processContent for audit
+    if (moderationStatus === "quarantined" || moderationStatus === "flagged") {
+      try {
+        const moderationService = require("../services/moderation.service");
+        const fullMod = await moderationService.processContent({
+          contentType: "comment",
+          contentId: comment._id,
+          text: content,
+          authorId: req.user.id,
+        });
+        if (fullMod.moderationCase) {
+          comment.moderationCase = fullMod.moderationCase._id;
+          await comment.save();
+        }
+      } catch (_) {}
+    }
+
+    // If quarantined, don't notify author (content hidden)
+    if (moderationStatus === "quarantined") {
+      const populated = await Comment.findById(comment._id).populate("author", AUTHOR_FIELDS).lean();
+      return res.status(201).json({ success: true, comment: decorateComment(populated, req.user.id), moderation: { status: moderationStatus, message: "Your comment is under review" } });
+    }
 
     // Keep the denormalised counter that powers "View replies (N)".
     if (parent) {
@@ -825,6 +946,7 @@ exports.getReplies = async (req, res) => {
     const replies = await Comment.find({
       parent: req.params.commentId,
       removedAt: null,
+      moderationStatus: { $nin: ["removed", "quarantined"] },
     })
       .sort({ createdAt: 1 })
       .populate("author", AUTHOR_FIELDS)

@@ -103,6 +103,8 @@ export interface EventFormValues {
 interface EventFormProps {
   mode: "create" | "edit";
   eventId?: string;
+  ownerOrganization?: { _id: string; name: string; slug: string };
+  returnTo?: string;
   initial?: Partial<EventFormValues> & {
     ticketSettings?: { autoGenerate: boolean; sendEmail: boolean; manualApproval: boolean };
     speakers?: Speaker[];
@@ -112,6 +114,7 @@ interface EventFormProps {
     registrationForm?: CustomField[];
     requiredProfileFields?: { institution: boolean; course: boolean; year: boolean };
     bannerUrl?: string;
+    logoUrl?: string | null;
     organization?: { _id: string; name: string; slug: string } | string | null;
     community?: { _id: string; name: string; slug: string } | string | null;
   };
@@ -208,7 +211,7 @@ const inputCls =
   "flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10";
 
 // ─── Component ─────────────────────────────────────────────
-export default function EventForm({ mode, eventId, initial }: EventFormProps) {
+export default function EventForm({ mode, eventId, ownerOrganization, returnTo, initial }: EventFormProps) {
   const router = useRouter();
 
   const [form, setForm] = useState<EventFormValues>({ ...EMPTY_FORM, ...initial });
@@ -225,15 +228,19 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
   );
 
   const [existingBanner, setExistingBanner] = useState(initial?.bannerUrl || "");
+  const [existingLogo, setExistingLogo] = useState(initial?.logoUrl || "");
+  const [clearLogo, setClearLogo] = useState(false);
   const [posterFile, setPosterFile] = useState<File | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [cropTarget, setCropTarget] = useState<"banner" | "logo" | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedArea, setCroppedArea] = useState<any>(null);
 
   const [orgs, setOrgs] = useState<{ _id: string; name: string }[]>([]);
   const [organization, setOrganization] = useState<string>(
-    (initial as any)?.organization?._id || (initial as any)?.organization || ""
+    (initial as any)?.organization?._id || (initial as any)?.organization || (mode === "create" ? ownerOrganization?._id : "") || ""
   );
   const [communityId, setCommunityId] = useState<string>(
     (initial as any)?.community?._id || (initial as any)?.community || ""
@@ -291,19 +298,30 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
     });
   }, [form.eventType]);
 
-  const onPosterSelect = (file: File) => {
+  const selectImageForCrop = (file: File, target: "banner" | "logo") => {
     if (!file.type.startsWith("image/")) return toast.error("Please select an image file");
     if (file.size > 5 * 1024 * 1024) return toast.error("Image must be 5 MB or smaller");
+    setCropTarget(target);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedArea(null);
     const reader = new FileReader();
     reader.onload = () => setCropSrc(reader.result as string);
     reader.readAsDataURL(file);
   };
 
   const applyCrop = async () => {
-    if (!cropSrc || !croppedArea) return;
+    if (!cropSrc || !croppedArea || !cropTarget) return;
     const blob = await getCroppedBlob(cropSrc, croppedArea);
-    setPosterFile(new File([blob], "poster.jpg", { type: "image/jpeg" }));
+    const file = new File([blob], cropTarget === "logo" ? "event-logo.jpg" : "poster.jpg", { type: "image/jpeg" });
+    if (cropTarget === "logo") {
+      setLogoFile(file);
+      setClearLogo(false);
+    } else {
+      setPosterFile(file);
+    }
     setCropSrc(null);
+    setCropTarget(null);
   };
 
   const validateStep = (s: number): string | null => {
@@ -336,25 +354,14 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
     }
     setSaving(true);
     try {
-      let bannerUrl = existingBanner || "";
-      if (posterFile) {
-        // §20 — posters render at ≤1920px; upload that, not the 12 MB original.
-        const { file: posterToUpload } = await compressFor(posterFile, "poster");
-        const fd = new FormData();
-        fd.append("file", posterToUpload);
-        const up = await api.post("/upload/image?folder=posters", fd, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
-        if (up.data?.success && up.data.url) bannerUrl = up.data.url;
-      }
-
       const payload = {
         ...form,
         organization: organization || null,
+        ...(mode === "create" && ownerOrganization ? { organizerType: "ORGANIZATION" } : {}),
         community: communityId || null,
         startDate: new Date(`${form.startDate}T${form.startTime}`).toISOString(),
         endDate: new Date(`${form.endDate}T${form.endTime}`).toISOString(),
-        bannerUrl,
+        bannerUrl: existingBanner || "",
         ticketSettings,
         speakers,
         schedule,
@@ -364,27 +371,88 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
         registrationForm: customFields,
       };
 
+      let savedEvent: any;
       if (mode === "create") {
         const res = await api.post("/events", payload);
-        if (res.data?.success) {
-          toast.success("Event created");
-          router.push(`/admin/events/edit/${res.data.event._id}?created=true`);
+        if (!res.data?.success || !res.data?.event?._id) {
+          throw new Error(res.data?.message || "Failed to create event");
         }
+        savedEvent = res.data.event;
       } else if (eventId) {
         const res = await api.put(`/events/${eventId}`, payload);
-        if (res.data?.success) {
-          toast.success("Event updated");
-          if (res.data.event?.bannerUrl) setExistingBanner(res.data.event.bannerUrl);
+        if (!res.data?.success) throw new Error(res.data?.message || "Failed to update event");
+        savedEvent = res.data.event || { _id: eventId };
+      } else {
+        throw new Error("Event id is missing");
+      }
+
+      // Upload only after the Event exists. The dedicated routes authorize via
+      // the same owner-aware Event manager check and attach/retire assets.
+      const imageFailures: string[] = [];
+      if (posterFile) {
+        try {
+          // Preserve the existing 16:10 banner crop and optimize for poster delivery.
+          const { file: posterToUpload } = await compressFor(posterFile, "poster");
+          const fd = new FormData();
+          fd.append("file", posterToUpload, posterToUpload.name);
+          const up = await api.post(`/upload/event/${savedEvent._id}`, fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          if (!up.data?.success || !up.data?.url) throw new Error(up.data?.message || "Upload failed");
+          setExistingBanner(up.data.url);
+          setPosterFile(null);
+        } catch {
+          imageFailures.push("poster");
         }
       }
+
+      if (logoFile) {
+        try {
+          // Logo crop is separate (1:1) and uses the existing logo compression preset.
+          const { file: logoToUpload } = await compressFor(logoFile, "logo");
+          const fd = new FormData();
+          fd.append("file", logoToUpload, logoToUpload.name);
+          const up = await api.post(`/upload/event/${savedEvent._id}/logo`, fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          if (!up.data?.success || !up.data?.url) throw new Error(up.data?.message || "Upload failed");
+          setExistingLogo(up.data.url);
+          setLogoFile(null);
+          setClearLogo(false);
+        } catch {
+          imageFailures.push("logo");
+        }
+      } else if (clearLogo && mode === "edit") {
+        try {
+          await api.delete(`/upload/event/${savedEvent._id}/logo`);
+          setExistingLogo("");
+          setClearLogo(false);
+        } catch {
+          imageFailures.push("logo removal");
+        }
+      }
+
+      if (imageFailures.length) {
+        toast.error(`Event saved, but these image changes failed: ${imageFailures.join(", ")}. You can retry.`);
+      } else {
+        toast.success(mode === "create" ? "Event created" : "Event updated");
+      }
+      if (mode === "create") {
+        router.push(returnTo || `/admin/events/edit/${savedEvent._id}?created=true`);
+      }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to save event");
+      toast.error(err.response?.data?.message || err.message || "Failed to save event");
     } finally {
       setSaving(false);
     }
   };
 
   const bannerPreview = posterFile ? URL.createObjectURL(posterFile) : getImageUrl(existingBanner);
+  const logoPreview = logoFile
+    ? URL.createObjectURL(logoFile)
+    : clearLogo
+      ? null
+      : getImageUrl(existingLogo);
 
   // Category not among presets (e.g. legacy "General") → treat as Other + custom text
   const presetCategories = EVENT_TYPES.map((t) => t.value);
@@ -607,11 +675,66 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 className="hidden"
-                onChange={(e) => e.target.files?.[0] && onPosterSelect(e.target.files[0])}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) selectImageForCrop(file, "banner");
+                  e.currentTarget.value = "";
+                }}
               />
             </label>
             {posterFile && <span className="text-xs font-medium text-success">New poster — uploads on save</span>}
             <p className="text-[11px] text-muted-foreground">JPEG/PNG/WebP · max 5 MB · crop after selecting</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Independent optional square Event logo — banner remains 16:10. */}
+      <div className="space-y-1.5">
+        <Label>Event logo (optional)</Label>
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-dashed border-border bg-muted">
+            {logoPreview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoPreview} alt="Event logo preview" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                <CalendarDays className="h-7 w-7" />
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col items-start gap-2">
+            <label className="cursor-pointer">
+              <span className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-semibold hover:bg-muted">
+                <ImagePlus className="h-4 w-4" />
+                {logoFile ? "Choose different logo" : existingLogo && !clearLogo ? "Replace logo" : "Upload logo"}
+              </span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) selectImageForCrop(file, "logo");
+                  e.currentTarget.value = "";
+                }}
+              />
+            </label>
+            {logoFile && <span className="text-xs font-medium text-success">New square logo — uploads on save</span>}
+            {clearLogo && <span className="text-xs font-medium text-warning">Logo will be removed on save</span>}
+            {logoFile ? (
+              <button type="button" onClick={() => setLogoFile(null)} className="text-xs font-semibold text-muted-foreground underline underline-offset-2">
+                Discard new logo
+              </button>
+            ) : existingLogo && !clearLogo ? (
+              <button type="button" onClick={() => setClearLogo(true)} className="text-xs font-semibold text-destructive underline underline-offset-2">
+                Remove logo
+              </button>
+            ) : clearLogo ? (
+              <button type="button" onClick={() => setClearLogo(false)} className="text-xs font-semibold text-muted-foreground underline underline-offset-2">
+                Undo removal
+              </button>
+            ) : null}
+            <p className="text-[11px] text-muted-foreground">Square crop · JPEG/PNG/WebP · max 5 MB · legacy Events may leave this empty</p>
           </div>
         </div>
       </div>
@@ -636,9 +759,17 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
         </div>
       </div>
 
-      {orgs.length > 0 && (
+      {ownerOrganization ? (
+        <div className="space-y-1.5 rounded-xl border border-primary/20 bg-primary/5 p-3.5">
+          <Label>Event owner</Label>
+          <p className="text-sm font-semibold text-foreground">{ownerOrganization.name}</p>
+          <p className="text-[11px] text-muted-foreground">
+            This event is explicitly owned by this organization. Host/community associations remain separate from ownership.
+          </p>
+        </div>
+      ) : orgs.length > 0 ? (
         <div className="space-y-1.5">
-          <Label>Host community</Label>
+          <Label>Host organization</Label>
           <select value={organization} onChange={(e) => setOrganization(e.target.value)} className={inputCls}>
             <option value="">No organization</option>
             {orgs.map((o) => (
@@ -647,9 +778,9 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
               </option>
             ))}
           </select>
-          <p className="text-[11px] text-muted-foreground">The event will appear on the organization page.</p>
+          <p className="text-[11px] text-muted-foreground">The event is associated with this organization for discovery; association alone does not transfer ownership.</p>
         </div>
-      )}
+      ) : null}
 
       <div className="space-y-1.5">
         <Label>Community</Label>
@@ -1172,10 +1303,18 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
       </form>
 
       {/* Crop dialog */}
-      <Dialog open={Boolean(cropSrc)} onOpenChange={(o) => !o && setCropSrc(null)}>
+      <Dialog
+        open={Boolean(cropSrc)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCropSrc(null);
+            setCropTarget(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Crop poster</DialogTitle>
+            <DialogTitle>{cropTarget === "logo" ? "Crop event logo" : "Crop poster"}</DialogTitle>
           </DialogHeader>
           <div className="relative h-72 w-full overflow-hidden rounded-lg bg-muted">
             {cropSrc && (
@@ -1183,7 +1322,7 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
                 image={cropSrc}
                 crop={crop}
                 zoom={zoom}
-                aspect={16 / 10}
+                aspect={cropTarget === "logo" ? 1 : 16 / 10}
                 onCropChange={setCrop}
                 onZoomChange={setZoom}
                 onCropComplete={(_area: any, px: any) => setCroppedArea(px)}
@@ -1195,7 +1334,13 @@ export default function EventForm({ mode, eventId, initial }: EventFormProps) {
             <input type="range" min={1} max={3} step={0.1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="flex-1 accent-[#0070f0]" />
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setCropSrc(null)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCropSrc(null);
+                setCropTarget(null);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={applyCrop} className="font-semibold">

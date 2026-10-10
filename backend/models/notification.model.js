@@ -18,6 +18,7 @@ const notificationSchema = new mongoose.Schema(
         "comment",
         "event_registration",
         "org_follow",
+        "organization_invite",
         "announcement",
         "mention",
         "event_update",
@@ -34,6 +35,11 @@ const notificationSchema = new mongoose.Schema(
         "story_reaction",
         // "community_activity" — activity in a community you follow (§42).
         "community_activity",
+        // ── Organization Registration Requests ───────────────────────
+        "organization_request_submitted",
+        "organization_request_approved",
+        "organization_request_rejected",
+        "organization_request_needs_info",
       ],
       required: true,
     },

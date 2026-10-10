@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { API_ORIGIN } from "@/utils/api";
+import { hasPlatformAdminAccess } from "@/lib/superAdmin";
 
 /**
  * Google OAuth callback.
@@ -46,10 +47,16 @@ export default function OAuthCallback() {
             email: data.user?.email || "",
             firstName: data.user?.firstName || "",
             lastName: data.user?.lastName || "",
+            role: data.user?.role || "user",
+            isSuperAdmin: data.user?.isSuperAdmin === true,
           })
         );
 
-        router.replace(data.user?.role === "admin" ? "/admin/dashboard" : "/user/profile");
+        router.replace(
+          hasPlatformAdminAccess(data.user?.role, data.user)
+            ? "/admin/dashboard"
+            : "/user/profile"
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : "Login failed");
         setTimeout(() => router.replace("/login?error=oauth_failed"), 1500);

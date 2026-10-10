@@ -39,7 +39,7 @@ const ROW_FIELDS = "_id eventId userId answers status createdAt source";
 const USER_FIELDS = "firstName lastName email profile";
 /** My-events cards — the event summary a registered user needs, nothing more. */
 const EVENT_CARD_FIELDS =
-  "title slug description bannerUrl startDate endDate startTime endTime venue eventType category organizer price visibility isLive";
+  "title slug description bannerUrl logoUrl startDate endDate startTime endTime venue eventType category organizer price visibility isLive";
 
 /** Rows per export batch — bounds memory regardless of event size. */
 const EXPORT_BATCH = 200;

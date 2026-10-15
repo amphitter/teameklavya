@@ -339,9 +339,13 @@ export interface ChatMessage {
   reactions?: { emoji: string; count: number; mine: boolean }[];
   deletedAt?: string | null;
   readAt?: string | null;
+  deliveredAt?: string | null;
+  /** Low-latency upgrade: explicit delivery lifecycle for UI */
+  _delivery?: "sending" | "sent" | "delivered" | "read" | "failed_retryable" | "failed_permanent";
   createdAt: string;
   pending?: boolean;
   failed?: boolean;
+  clientMessageId?: string;
 }
 
 /* ── Messages: REMOVED in Part 10 ────────────────────────────────────────

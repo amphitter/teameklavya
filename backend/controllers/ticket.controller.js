@@ -8,6 +8,22 @@ const User = require("../models/user.model");
 const { generateToken } = require("../utils/crypto");
 const emailService = require("../services/email.service");
 const templates = require("../services/emailTemplates");
+const { canManageEvent } = require("../middleware/auth.middleware");
+
+async function managedEventOrRespond(req, res, eventOrId) {
+  const event = typeof eventOrId === "object" && eventOrId?._id
+    ? eventOrId
+    : await Event.findById(eventOrId);
+  if (!event) {
+    res.status(404).json({ success: false, message: "Event not found" });
+    return null;
+  }
+  if (!(await canManageEvent(req.user, event))) {
+    res.status(403).json({ success: false, message: "You can't manage this event" });
+    return null;
+  }
+  return event;
+}
 
 // Generate a new event ticket
 exports.generateTicket = async (req, res, next) => {
@@ -60,13 +76,13 @@ exports.generateTicket = async (req, res, next) => {
   }
 };
 
-// Generate tickets in bulk (admin only)
+// Generate tickets in bulk for an Event the caller manages
 exports.generateBulkTickets = async (req, res, next) => {
   try {
     const { eventId, userIds, sendEmail = true } = req.body;
 
-    const event = await Event.findById(eventId);
-    if (!event) return res.status(404).json({ message: "Event not found" });
+    const event = await managedEventOrRespond(req, res, eventId);
+    if (!event) return;
 
     const results = [];
     
@@ -156,15 +172,21 @@ exports.generateBulkTickets = async (req, res, next) => {
   }
 };
 
-// Approve pending tickets (admin only)
+// Approve pending tickets only for Events the caller manages
 exports.approvePendingTickets = async (req, res, next) => {
   try {
     const { ticketIds } = req.body;
 
-    const tickets = await Ticket.find({ 
+    const tickets = await Ticket.find({
       _id: { $in: ticketIds },
-      status: 'pending' 
-    }).populate('userId').populate('eventId');
+      status: "pending",
+    }).populate("userId").populate("eventId");
+
+    // Verify every ticket's Event before sending any email or changing status;
+    // mixed-event batches are allowed only when the caller owns each Event.
+    for (const ticket of tickets) {
+      if (!(await managedEventOrRespond(req, res, ticket.eventId))) return;
+    }
 
     const results = [];
     
@@ -205,6 +227,7 @@ exports.approvePendingTickets = async (req, res, next) => {
 exports.getPendingTickets = async (req, res, next) => {
   try {
     const { eventId } = req.params;
+    if (!(await managedEventOrRespond(req, res, eventId))) return;
 
     const tickets = await Ticket.find({ 
       eventId, 
@@ -225,7 +248,7 @@ exports.getPendingTickets = async (req, res, next) => {
   }
 };
 
-// Send ticket to user manually (admin only)
+// Send a ticket to a user only for an Event the caller manages
 exports.sendTicketToUser = async (req, res, next) => {
   try {
     const { ticketId } = req.body;
@@ -237,6 +260,7 @@ exports.sendTicketToUser = async (req, res, next) => {
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found" });
     }
+    if (!(await managedEventOrRespond(req, res, ticket.eventId))) return;
 
     await this.sendTicketEmail(ticket, ticket.userId, ticket.eventId);
 
@@ -280,8 +304,8 @@ exports.generateTicketsForAllRegistered = async (req, res, next) => {
   try {
     const { eventId, sendEmail = true } = req.body;
 
-    const event = await Event.findById(eventId);
-    if (!event) return res.status(404).json({ message: "Event not found" });
+    const event = await managedEventOrRespond(req, res, eventId);
+    if (!event) return;
 
     // Get all registered users for the event
     const registrations = await RegistrationResponse.find({ eventId })
@@ -311,6 +335,7 @@ exports.generateTicketsForAllRegistered = async (req, res, next) => {
 exports.getTicketGenerationStats = async (req, res, next) => {
   try {
     const { eventId } = req.params;
+    if (!(await managedEventOrRespond(req, res, eventId))) return;
 
     const [
       totalRegistrations,
@@ -347,7 +372,7 @@ exports.getTicketGenerationStats = async (req, res, next) => {
   }
 };
 
-// Scan ticket (admin entry/exit) - ENHANCED
+// Scan ticket (Event-manager entry/exit) - ENHANCED
 exports.scanTicket = async (req, res, next) => {
   try {
     const { token, action } = req.body;
@@ -358,15 +383,16 @@ exports.scanTicket = async (req, res, next) => {
     }
 
     const ticket = await Ticket.findOne({ token })
-      .populate("eventId", "title startDate endDate venue")
+      .populate("eventId", "title startDate endDate venue organizerType organizerId createdBy")
       .populate("userId", "firstName lastName email profile");
 
-    if (!ticket) {
-      return res.status(404).json({ 
+    if (!ticket || !ticket.eventId) {
+      return res.status(404).json({
         success: false,
-        message: "Invalid ticket token" 
+        message: "Invalid ticket token",
       });
     }
+    if (!(await managedEventOrRespond(req, res, ticket.eventId))) return;
 
     // Check if ticket is active
     if (ticket.status !== 'active') {
@@ -447,7 +473,7 @@ exports.scanTicket = async (req, res, next) => {
 
     // Populate the updated ticket for response
     const updatedTicket = await Ticket.findById(ticket._id)
-      .populate("eventId", "title startDate endDate venue")
+      .populate("eventId", "title startDate endDate venue organizerType organizerId createdBy")
       .populate("userId", "firstName lastName email profile");
 
     res.json({
@@ -467,19 +493,20 @@ exports.getTicketByToken = async (req, res, next) => {
     const { token } = req.params;
     
     const ticket = await Ticket.findOne({ token })
-      .populate("eventId", "title startDate endDate venue")
+      .populate("eventId", "title startDate endDate venue organizerType organizerId createdBy")
       .populate("userId", "firstName lastName email profile");
 
-    if (!ticket) {
-      return res.status(404).json({ 
+    if (!ticket || !ticket.eventId) {
+      return res.status(404).json({
         success: false,
-        message: "Ticket not found" 
+        message: "Ticket not found",
       });
     }
+    if (!(await managedEventOrRespond(req, res, ticket.eventId))) return;
 
-    res.json({ 
-      success: true, 
-      ticket 
+    res.json({
+      success: true,
+      ticket,
     });
   } catch (error) {
     console.error("Get ticket by token error:", error);
@@ -637,7 +664,7 @@ exports.getRecentScans = async (req, res, next) => {
   }
 };
 
-// Get all scanned tickets for an event (admin)
+// Get all scanned tickets for an Event the caller manages
 exports.getEventScannedTickets = async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -684,7 +711,7 @@ exports.getUserTickets = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const tickets = await Ticket.find({ userId })
-      .populate("eventId", "title startDate endDate venue bannerUrl")
+      .populate("eventId", "title startDate endDate venue bannerUrl logoUrl")
       .sort({ createdAt: -1 });
 
     res.json({ success: true, tickets });

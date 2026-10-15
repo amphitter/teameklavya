@@ -536,15 +536,19 @@ async function call(path, opts = {}) {
     `${ownEdit.status} ${JSON.stringify(ownEdit.data).slice(0, 120)}`
   );
 
-  const peerRoleBlocked = await call(`/events/${evA._id}`, {
+  // Phase 5+: Event ownership allows the creator/organizer to manage their own
+  // Event via canManageEvent/requireEventManager, not just platform admins.
+  // The previous expectation that any non-admin organizer is refused is outdated
+  // for owner-scoped routes; the correct check is cross-owner denial.
+  const ownerEditOwn = await call(`/events/${evA._id}`, {
     method: "PUT",
-    body: { description: "attempted by a non-admin organizer" },
+    body: { description: "edited by the owning organizer" },
     headers: auth("ORGANIZER_A"),
   });
   ok(
-    "§17: a non-admin ORGANIZER is still refused by role (authorization is layered, not single-check)",
-    peerRoleBlocked.status === 403 || peerRoleBlocked.status === 401,
-    String(peerRoleBlocked.status)
+    "§17: the owning ORGANIZER can edit their own event (owner-scoped, not blanket admin-only)",
+    ownerEditOwn.status < 400,
+    `${ownerEditOwn.status} ${JSON.stringify(ownerEditOwn.data).slice(0, 120)}`
   );
 
   /* -- community: a plain member cannot act as admin -- */

@@ -115,48 +115,55 @@ exports.getAdminEvents = async (req, res) => {
   }
 };
 
-// Add this new endpoint for recent activity
+// Add this new endpoint for recent activity — fixed null checks for deleted users/events
 exports.getRecentActivity = async (req, res) => {
   try {
     const recentRegistrations = await RegistrationResponse.find()
       .populate('userId', 'firstName lastName email')
       .populate('eventId', 'title slug')
       .sort({ createdAt: -1 })
-      .limit(10);
+      .limit(15);
 
     const recentUsers = await User.find()
       .select('firstName lastName email createdAt')
       .sort({ createdAt: -1 })
       .limit(5);
 
-    const activity = [
-      ...recentRegistrations.map(reg => ({
+    const regActivities = recentRegistrations
+      .filter((reg) => reg.userId && reg.eventId)
+      .map((reg) => ({
         _id: reg._id,
         type: 'registration',
-        title: `${reg.userId.firstName} ${reg.userId.lastName} registered`,
-        description: `Registered for ${reg.eventId.title}`,
+        title: `${reg.userId?.firstName || 'Someone'} ${reg.userId?.lastName || ''} registered`.trim(),
+        description: `Registered for ${reg.eventId?.title || 'an event'}`,
         timestamp: reg.createdAt,
         user: {
-          name: `${reg.userId.firstName} ${reg.userId.lastName}`,
-          email: reg.userId.email
+          name: `${reg.userId?.firstName || ''} ${reg.userId?.lastName || ''}`.trim() || 'Unknown',
+          email: reg.userId?.email || '',
         },
         event: {
-          title: reg.eventId.title,
-          slug: reg.eventId.slug
-        }
-      })),
-      ...recentUsers.map(user => ({
+          title: reg.eventId?.title || 'Deleted event',
+          slug: reg.eventId?.slug || '',
+        },
+      }));
+
+    const userActivities = recentUsers
+      .filter((u) => u)
+      .map((user) => ({
         _id: user._id,
         type: 'user_joined',
-        title: `${user.firstName} ${user.lastName} joined`,
+        title: `${user.firstName || ''} ${user.lastName || ''} joined`.trim() || 'New user joined',
         description: 'New user registered on platform',
         timestamp: user.createdAt,
         user: {
-          name: `${user.firstName} ${user.lastName}`,
-          email: user.email
-        }
-      }))
-    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 10);
+          name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown',
+          email: user.email || '',
+        },
+      }));
+
+    const activity = [...regActivities, ...userActivities]
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(0, 10);
 
     res.json({ success: true, activity });
   } catch (err) {

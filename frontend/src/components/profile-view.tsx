@@ -37,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EmptyState, ErrorState, PageLoader, Skeleton } from "@/components/states";
 import { cn } from "@/lib/utils";
+import { hasPlatformAdminAccess } from "@/lib/superAdmin";
 
 /**
  * The user as `/auth/me` returns it.
@@ -54,6 +55,7 @@ interface ProfileUser {
   email: string;
   username?: string;
   role: string;
+  isSuperAdmin?: boolean;
   emailVerified: boolean;
   profile?: {
     avatar?: string;
@@ -124,20 +126,30 @@ export default function ProfileView() {
     }
     (async () => {
       try {
-        const [meRes, eventsRes, ticketsRes] = await Promise.all([
-          api.get("/auth/me").catch(() => null),
+        const { dedupedFetch, keyToString, queryCache } = await import("@/lib/query");
+        const cacheKey = keyToString(["session"]);
+        let meData: any = queryCache.get(cacheKey)?.data;
+        if (!meData) {
+          try {
+            meData = await dedupedFetch(cacheKey, "/auth/me");
+            queryCache.setData(cacheKey, meData);
+          } catch {
+            meData = null;
+          }
+        }
+        const [eventsRes, ticketsRes] = await Promise.all([
           api.get("/registration/user/events").catch(() => ({ data: { events: [] } })),
           api.get("/tickets/user-tickets").catch(() => ({ data: { tickets: [] } })),
         ]);
-        if (!meRes?.data?.user) {
-          // Token invalid/expired
+        const userFromCache = (meData as any)?.user || meData;
+        if (!userFromCache?._id && !userFromCache?.id) {
           localStorage.removeItem("token");
           localStorage.removeItem("role");
           localStorage.removeItem("user");
           router.replace("/login");
           return;
         }
-        const u = meRes.data.user;
+        const u = userFromCache;
         setUser(u);
         setEvents(eventsRes.data?.events ?? []);
         setTickets(ticketsRes.data?.tickets ?? []);
@@ -296,7 +308,7 @@ export default function ProfileView() {
                     <BadgeCheck className="h-3.5 w-3.5" /> Verified
                   </span>
                 )}
-                {user.role === "admin" && (
+                {hasPlatformAdminAccess(user.role, user) && (
                   <span className="rounded-full bg-purple-light px-2.5 py-1 text-[11px] font-semibold text-purple">
                     Organizer
                   </span>
@@ -385,9 +397,8 @@ export default function ProfileView() {
           if (saved) {
             setUser((prev) => (prev ? { ...prev, ...saved } : prev));
             updateSessionUser(saved);
-            // Re-read /auth/me so anything the sheet did not return (e.g.
-            // derived stats) is refreshed through the same code path.
-            api.get("/auth/me").then((r) => r.data?.user && setUser(r.data.user)).catch(() => {});
+            // Use shared cache, not direct fetch, to avoid duplicate /auth/me
+            // The edit sheet already returns canonical data; no extra fetch needed
           }
         }}
       />

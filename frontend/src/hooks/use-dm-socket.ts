@@ -185,19 +185,23 @@ function attachSocketHandlers() {
   socket.on("dm:read", (payload: { conversationId: string; readerId: string; at: string }) => {
     if (!payload?.conversationId) return;
     const id = payload.conversationId;
-    // Blue ticks apply to messages I sent. Applied in place so only this
-    // thread re-renders — and only if it is mounted.
     const state = threads.get(id);
     if (!state.messages.length) return;
     let changed = false;
     const next = state.messages.map((m) => {
-      if (m.sender?._id === payload.readerId && m.readAt !== payload.at) {
+      const senderId = m.sender?._id ? String(m.sender._id) : "";
+      const readerId = String(payload.readerId);
+      if (senderId && senderId !== readerId && !m.readAt) {
         changed = true;
-        return { ...m, readAt: payload.at };
+        return { ...m, readAt: payload.at, _delivery: "read" } as ChatMessage;
+      }
+      if (!senderId && !m.readAt) {
+        changed = true;
+        return { ...m, readAt: payload.at, _delivery: "read" } as ChatMessage;
       }
       return m;
     });
-    if (changed) threads.update(id, { messages: next });
+    if (changed) threads.update(id, { messages: next as ChatMessage[] });
   });
 
   socket.on("dm:deleted", (payload: { conversationId: string; messageId: string }) => {
@@ -207,6 +211,23 @@ function attachSocketHandlers() {
       content: "",
       image: "",
     });
+  });
+
+  socket.on("dm:delivered", (payload: { conversationId: string; messageIds: string[]; at: string; recipientId: string }) => {
+    if (!payload?.conversationId || !payload?.messageIds?.length) return;
+    const id = payload.conversationId;
+    const state = threads.get(id);
+    if (!state.messages.length) return;
+    const idSet = new Set(payload.messageIds.map(String));
+    let changed = false;
+    const next = state.messages.map((m) => {
+      if (idSet.has(String(m._id)) && !m.deliveredAt) {
+        changed = true;
+        return { ...m, deliveredAt: payload.at, _delivery: "delivered" } as ChatMessage;
+      }
+      return m;
+    });
+    if (changed) threads.update(id, { messages: next as ChatMessage[] });
   });
 }
 
@@ -259,16 +280,19 @@ export function useDmSocket(): { connection: DmConnection } {
       if (open) {
         const state = threads.get(open);
         if (state.synced) {
-          // Catch up on anything sent while the socket was down, using the
-          // `after=` cursor so only the gap is fetched.
           const newest = state.messages[state.messages.length - 1];
           if (newest && !newest.pending && !newest._id.startsWith("tmp:")) {
+            const start = typeof performance !== "undefined" ? performance.now() : Date.now();
             void import("@/utils/api").then(({ api }) =>
               api
                 .get(`/messages/conversations/${open}?after=${newest._id}`)
                 .then((r) => {
                   const missed: ChatMessage[] = r.data?.messages || [];
                   missed.forEach((m) => threads.append(open, m));
+                  void import("@/lib/messages/metrics").then(({ recordLatency }) => {
+                    const dur = Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - start);
+                    recordLatency("reconnect_fetch", dur, { conversationId: open, meta: { missed: missed.length } });
+                  });
                 })
                 .catch(() => {})
             );

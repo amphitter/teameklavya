@@ -88,6 +88,7 @@ export default function EditEventPage() {
     registrationForm: e.registrationForm,
     requiredProfileFields: e.requiredProfileFields,
     bannerUrl: e.bannerUrl || "",
+    logoUrl: e.logoUrl || "",
     organization: e.organization || null,
   };
 

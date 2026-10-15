@@ -34,6 +34,7 @@ export default function AdminOrganizationsPage() {
   const [form, setForm] = useState(EMPTY);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pendingLogoPublicId, setPendingLogoPublicId] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -50,12 +51,14 @@ export default function AdminOrganizationsPage() {
   const openCreate = () => {
     setEditing(null);
     setForm(EMPTY);
+    setPendingLogoPublicId(null);
     setDialogOpen(true);
   };
 
   const openEdit = (org: Org) => {
     setEditing(org);
     setForm({ name: org.name, description: org.description || "", website: org.website || "", logoUrl: org.logoUrl || "" });
+    setPendingLogoPublicId(null);
     setDialogOpen(true);
   };
 
@@ -69,7 +72,12 @@ export default function AdminOrganizationsPage() {
       const res = await api.post("/upload/image?folder=organizers", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      if (res.data?.success && res.data.url) setForm((f) => ({ ...f, logoUrl: res.data.url }));
+      if (res.data?.success && res.data.url) {
+        setForm((f) => ({ ...f, logoUrl: res.data.url }));
+        setPendingLogoPublicId(res.data.publicId || null);
+      } else {
+        toast.error(res.data?.message || "Logo upload failed");
+      }
     } catch {
       toast.error("Logo upload failed");
     } finally {
@@ -86,9 +94,31 @@ export default function AdminOrganizationsPage() {
         ? await api.put(`/organizations/${editing._id}`, form)
         : await api.post("/organizations", form);
       if (res.data?.success) {
-        toast.success(editing ? "Organization updated" : "Organization created");
-        setDialogOpen(false);
-        load();
+        let logoAttached = true;
+        const savedOrganizationId = res.data.organization?._id || editing?._id;
+        if (pendingLogoPublicId) {
+          if (!savedOrganizationId) logoAttached = false;
+          else {
+            try {
+              await api.post("/upload/attach", {
+                publicId: pendingLogoPublicId,
+                attachedTo: `organization:${savedOrganizationId}:logo`,
+              });
+            } catch {
+              logoAttached = false;
+            }
+          }
+        }
+        if (logoAttached) {
+          toast.success(editing ? "Organization updated" : "Organization created");
+          setPendingLogoPublicId(null);
+          setDialogOpen(false);
+          load();
+        } else {
+          toast.error("Organization saved, but logo tracking could not be confirmed. Save again to retry.");
+        }
+      } else {
+        toast.error(res.data?.message || "Failed to save organization");
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Failed to save organization");
@@ -103,12 +133,21 @@ export default function AdminOrganizationsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Communities</h1>
           <p className="text-sm text-muted-foreground">
-            Organizations hosting events on EventHub — attach them to events and post as them.
+            Organizations hosting events on EventHub — attach them to events and post as them. Official colleges/universities are created via{" "}
+            <a href="/admin/organizations/requests" className="font-semibold text-primary hover:underline">
+              Organization Requests
+            </a>{" "}
+            review.
           </p>
         </div>
-        <Button onClick={openCreate} className="shrink-0 gap-1.5">
-          <Plus className="h-4 w-4" /> New organization
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" asChild>
+            <a href="/admin/organizations/requests">View requests</a>
+          </Button>
+          <Button onClick={openCreate} className="shrink-0 gap-1.5">
+            <Plus className="h-4 w-4" /> New organization
+          </Button>
+        </div>
       </div>
 
       {loading ? (

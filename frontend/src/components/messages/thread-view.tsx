@@ -1,36 +1,23 @@
 "use client";
 
 /**
- * Thread view (Part 10 §5, §6, §7, §8, §9, §33)
- * ──────────────────────────────────────────────
- * Renders the conversation. Three things here are load-bearing:
- *
- *  1. WINDOWING (§6). Above `VIRTUALIZE_ABOVE` messages only the visible
- *     slice is in the DOM. Below it, everything renders — windowing a short
- *     conversation adds moving parts and buys nothing.
- *
- *  2. SCROLL ANCHORING (§5). Loading older messages must not move what the
- *     reader is looking at. We measure `scrollHeight` before the prepend and
- *     add the delta to `scrollTop` in a layout effect, so the same message
- *     stays under the same pixel.
- *
- *  3. BOTTOM STICKINESS. Auto-scroll only when the reader is already at the
- *     bottom. Yanking someone down while they read history is the single
- *     most common way a chat feels broken.
+ * Thread view — fixed for mobile keyboard + performance
+ * ──────────────────────────────────────────────────────
+ * 1. No custom virtualization — uses CSS content-visibility: auto (msg-row)
+ *    which is the cheapest fix and avoids ResizeObserver leak.
+ * 2. Scroll anchoring preserved for older loads.
+ * 3. Bottom stickiness + ResizeObserver for keyboard resize (Fix 2).
+ * 4. Scroll handler throttled via rAF.
+ * 5. Only new messages animate, not initial load.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Loader2, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MessageBubble } from "@/components/messages/message-bubble";
 import type { ChatMessage } from "@/hooks/use-social";
 
 const GROUP_WINDOW_MS = 4 * 60 * 1000;
-/** Below this, render everything — windowing here would be premature (§6). */
-const VIRTUALIZE_ABOVE = 60;
-/** Rows kept rendered above and below the viewport while windowing. */
-const OVERSCAN = 12;
-/** How close to the bottom still counts as "following the conversation". */
 const STICK_THRESHOLD_PX = 140;
 
 function dayKey(d: string) {
@@ -61,14 +48,6 @@ export interface ThreadRow {
   quoted: { authorName?: string; content?: string; image?: string } | null;
 }
 
-/**
- * Group and annotate messages (§8).
- *
- * Consecutive messages from one sender within GROUP_WINDOW_MS collapse into a
- * group: one avatar, one name, and a timestamp only on the group's last row.
- * Computed once per message-list identity so an unrelated state change cannot
- * re-derive it.
- */
 export function buildRows(messages: ChatMessage[], currentUserId?: string): ThreadRow[] {
   return messages.map((m, i) => {
     const prev = messages[i - 1];
@@ -113,13 +92,7 @@ export interface ThreadViewProps {
   loading: boolean;
   error?: boolean;
   typing?: boolean;
-  /** What the typing bubble says (a team names the person typing). */
   typingLabel?: string;
-  /**
-   * Show the sender's name above a group of received messages. On in a team
-   * (who said it is the point); off in a direct chat, where there are only
-   * ever two possible authors and the name is noise.
-   */
   showSenderNames?: boolean;
   onLoadOlder: () => void;
   onRetryLoad?: () => void;
@@ -127,8 +100,6 @@ export interface ThreadViewProps {
   onReply?: (message: ChatMessage) => void;
   onUnsend?: (messageId: string) => void;
   onRetrySend?: (message: ChatMessage) => void;
-  /** Identifies the conversation, so the initial scroll-jump happens once
-   *  per conversation instead of on every change to the list. */
   conversationId: string;
 }
 
@@ -151,74 +122,79 @@ export function ThreadView({
   onRetrySend,
   conversationId,
 }: ThreadViewProps) {
+  // All refs at top — hooks order must never change (React #310)
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
-  /** Set right before a prepend so the layout effect can restore position. */
   const anchorRef = useRef<{ height: number; top: number } | null>(null);
   const prevFirstIdRef = useRef<string | null>(null);
-  const [, forceRender] = useState(0);
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  const jumpedFor = useRef<string | null>(null);
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
 
   const rows = useMemo(() => buildRows(messages, currentUserId), [messages, currentUserId]);
 
-  const virtual = rows.length > VIRTUALIZE_ABOVE;
-
-  /* ── Measured window (only when virtualising) ── */
-  const heights = useRef(new Map<string, number>());
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportH, setViewportH] = useState(600);
-
-  const { startIndex, endIndex, padTop, padBottom } = useMemo(() => {
-    if (!virtual) return { startIndex: 0, endIndex: rows.length, padTop: 0, padBottom: 0 };
-
-    // Average measured height, falling back to a bubble-sized estimate —
-    // measured heights converge within a screen or two of scrolling.
-    let sum = 0;
-    let n = 0;
-    for (const r of rows) {
-      const h = heights.current.get(r.message._id);
-      if (h) {
-        sum += h;
-        n++;
+  // Track which ids are truly new for animation (not initial load)
+  useEffect(() => {
+    const currentIds = new Set(messages.map((m) => m._id));
+    const newlySeen: string[] = [];
+    for (const id of currentIds) {
+      if (!seenIdsRef.current.has(id)) {
+        if (seenIdsRef.current.size > 0) newlySeen.push(id);
       }
     }
-    const avg = n ? sum / n : 68;
+    // Always update seen set — previously only updated when no new ids, causing loop
+    seenIdsRef.current = currentIds;
+    if (newlySeen.length) {
+      setNewIds(new Set(newlySeen));
+      const t = setTimeout(() => setNewIds(new Set()), 500);
+      return () => clearTimeout(t);
+    }
+  }, [messages]);
 
-    const start = Math.max(0, Math.floor(scrollTop / avg) - OVERSCAN);
-    const end = Math.min(rows.length, Math.ceil((scrollTop + viewportH) / avg) + OVERSCAN);
-    return {
-      startIndex: start,
-      endIndex: end,
-      padTop: start * avg,
-      padBottom: (rows.length - end) * avg,
-    };
-  }, [virtual, rows, scrollTop, viewportH]);
+  // Reset seen when conversation changes
+  useEffect(() => {
+    seenIdsRef.current = new Set();
+    setNewIds(new Set());
+    jumpedFor.current = null;
+  }, [conversationId]);
 
-  const visible = virtual ? rows.slice(startIndex, endIndex) : rows;
-
-  /* ── Track scroll + pinning ── */
+  /* ── Track scroll + pinning — throttled via rAF ── */
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    let raf = 0;
+    let ticking = false;
     const onScroll = () => {
-      pinnedRef.current =
-        el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
-      if (virtual) setScrollTop(el.scrollTop);
-      if (el.scrollTop < 400 && hasMore && !fetchingOlder) onLoadOlder();
+      if (ticking) return;
+      ticking = true;
+      raf = requestAnimationFrame(() => {
+        pinnedRef.current =
+          el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
+        if (el.scrollTop < 400 && hasMore && !fetchingOlder) onLoadOlder();
+        ticking = false;
+      });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [virtual, hasMore, fetchingOlder, onLoadOlder]);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [hasMore, fetchingOlder, onLoadOlder]);
 
+  /* ── Fix 2: keyboard resize keeps pinned at bottom ── */
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !virtual) return;
-    setViewportH(el.clientHeight);
-    const ro = new ResizeObserver(() => setViewportH(el.clientHeight));
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (pinnedRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [virtual]);
+  }, []);
 
-  /* ── §5 — preserve position across a prepend ── */
+  /* ── Preserve position across prepend ── */
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -226,19 +202,13 @@ export function ThreadView({
     const anchor = anchorRef.current;
 
     if (anchor && prevFirstIdRef.current !== firstId) {
-      // Older messages were inserted above. Restore the exact pixel the
-      // reader was on by adding however much the content grew.
       const grew = el.scrollHeight - anchor.height;
       if (grew > 0) el.scrollTop = anchor.top + grew;
       anchorRef.current = null;
-      if (virtual) setScrollTop(el.scrollTop);
     }
     prevFirstIdRef.current = firstId;
-  }, [rows, virtual]);
+  }, [rows]);
 
-  /* Capture the measurement BEFORE the prepend lands. The hook that fetches
-     older pages calls `onLoadOlder`; the fetch resolves later, so we record
-     geometry now and compare it once the new rows are in the DOM. */
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -247,26 +217,16 @@ export function ThreadView({
     }
   }, [fetchingOlder]);
 
-  /* ── Stick to the bottom for new messages ── */
+  /* ── Stick to bottom for new messages ── */
   const lastId = rows[rows.length - 1]?.message._id;
   useEffect(() => {
     if (!pinnedRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
-    if (virtual) setScrollTop(el.scrollTop);
-  }, [lastId, typing, virtual]);
+  }, [lastId, typing]);
 
-  /* Jump to the newest message ONCE per conversation. `auto` not `smooth`:
-     animating a long jump is slower and looks broken.
-   *
-   * This previously depended on `rows.length`, so it ran again for every
-   * message that arrived — which meant that a reader who had scrolled up to
-   * read history was yanked back to the bottom the moment anyone sent
-   * anything, and it fired an extra HTTP request each time. Scoping the
-   * jump to the conversation fixes both: arriving in a thread still lands
-   * you at the newest message, and staying there is the reader's choice. */
-  const jumpedFor = useRef<string | null>(null);
+  /* Jump once per conversation */
   useEffect(() => {
     if (loading) return;
     const el = scrollRef.current;
@@ -274,29 +234,9 @@ export function ThreadView({
     if (jumpedFor.current === conversationId) return;
     jumpedFor.current = conversationId;
     el.scrollTop = el.scrollHeight;
-    if (virtual) setScrollTop(el.scrollTop);
     pinnedRef.current = true;
-  }, [loading, rows.length, virtual, conversationId]);
-
-  /**
-   * Cache each rendered row's height for the offset estimate.
-   *
-   * `forceRender` only fires when the measured height actually CHANGED —
-   * an unguarded re-render inside a ResizeObserver callback is a layout
-   * loop waiting to happen, and it would run on every scroll tick.
-   */
-  const measure = useCallback((id: string) => {
-    return (node: HTMLDivElement | null) => {
-      if (!node) return;
-      const ro = new ResizeObserver(() => {
-        const h = node.offsetHeight;
-        if (heights.current.get(id) === h) return;
-        heights.current.set(id, h);
-        forceRender((n) => n + 1);
-      });
-      ro.observe(node);
-    };
-  }, []);
+    seenIdsRef.current = new Set(messages.map((m) => m._id));
+  }, [loading, rows.length, conversationId, messages]);
 
   if (loading && !messages.length) {
     return <ThreadSkeleton />;
@@ -311,7 +251,7 @@ export function ThreadView({
           <button
             type="button"
             onClick={onRetryLoad}
-            className="mt-1 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white"
+            className="mt-1 min-h-11 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white"
           >
             Try again
           </button>
@@ -335,28 +275,11 @@ export function ThreadView({
   return (
     <div
       ref={scrollRef}
-      /* THE SAFE PADDING OF THE MESSAGE COLUMN (Part 15 §5).
-       *
-       * One value, 16px, on every width — it is the canonical EventHub
-       * spacing step and it is what the desktop column already used, so the
-       * desktop (lg+) column's output is unchanged.
-       *
-       * What it means per side (the row structure is [rail][gap][bubble], with
-       * a 28px rail and a 6px gap):
-       *   • sent   — the rail is gone on phones (see message-bubble.tsx), so
-       *              the bubble's right edge is exactly the safe padding, 16px
-       *              from the viewport edge, on every phone width.
-       *   • received — the rail holds the avatar, so the avatar starts at the
-       *              16px padding and the bubble 34px further in.
-       * The previous 9px phone value (chosen when both gutters were meant to
-       * measure 43px) put the sent bubble 43px from the edge, which is the
-       * dead strip this part removes. */
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2"
-      style={{ WebkitOverflowScrolling: "touch" }}
+      style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
       data-testid="thread-scroll"
     >
       <div className="mx-auto flex w-full max-w-3xl flex-col">
-        {/* Top affordance: fetching older pages, or the end of history. */}
         <div className="flex justify-center py-2">
           {fetchingOlder ? (
             <span className="flex items-center gap-1.5 text-[11px] text-on-surface-variant">
@@ -366,7 +289,7 @@ export function ThreadView({
             <button
               type="button"
               onClick={onLoadOlder}
-              className="rounded-full px-3 py-1 text-[11px] font-semibold text-primary hover:bg-surface-container"
+              className="min-h-11 touch-manipulation rounded-full px-3 py-1 text-[11px] font-semibold text-primary hover:bg-surface-container"
             >
               Load older messages
             </button>
@@ -375,36 +298,34 @@ export function ThreadView({
           )}
         </div>
 
-        {virtual ? <div style={{ height: padTop }} aria-hidden /> : null}
-
-        {visible.map((row) => (
-          <div
-            key={row.message._id}
-            ref={virtual ? measure(row.message._id) : undefined}
-            className={cn("animate-msg-in", row.showHeader && "mt-2.5")}
-          >
-            <MessageBubble
-              message={row.message}
-              mine={row.mine}
-              showHeader={row.showHeader}
-              showDay={row.showDay}
-              dayLabel={row.dayLabel}
-              quoted={row.quoted}
-              showSenderName={showSenderNames}
-              timeLabel={timeOf(row.message.createdAt)}
-              onReact={onReact ? (e) => onReact(row.message._id, e) : undefined}
-              onReply={onReply ? () => onReply(row.message) : undefined}
-              onUnsend={
-                onUnsend && row.mine && !row.message.pending && !row.message.failed
-                  ? () => onUnsend(row.message._id)
-                  : undefined
-              }
-              onRetry={row.message.failed && onRetrySend ? () => onRetrySend(row.message) : undefined}
-            />
-          </div>
-        ))}
-
-        {virtual ? <div style={{ height: padBottom }} aria-hidden /> : null}
+        {rows.map((row) => {
+          const isNew = newIds.has(row.message._id);
+          return (
+            <div
+              key={row.message._id}
+              className={cn("msg-row", row.showHeader && "mt-2.5", isNew && "animate-msg-in-new")}
+            >
+              <MessageBubble
+                message={row.message}
+                mine={row.mine}
+                showHeader={row.showHeader}
+                showDay={row.showDay}
+                dayLabel={row.dayLabel}
+                quoted={row.quoted}
+                showSenderName={showSenderNames}
+                timeLabel={timeOf(row.message.createdAt)}
+                onReact={onReact ? (e) => onReact(row.message._id, e) : undefined}
+                onReply={onReply ? () => onReply(row.message) : undefined}
+                onUnsend={
+                  onUnsend && row.mine && !row.message.pending && !row.message.failed
+                    ? () => onUnsend(row.message._id)
+                    : undefined
+                }
+                onRetry={row.message.failed && onRetrySend ? () => onRetrySend(row.message) : undefined}
+              />
+            </div>
+          );
+        })}
 
         {typing ? <TypingBubble name={typingLabel || otherName} /> : null}
       </div>
@@ -412,11 +333,6 @@ export function ThreadView({
   );
 }
 
-/**
- * Typing indicator (§13).
- * Three dots that pulse — a single CSS animation, no layout thrash, and no
- * re-render per frame.
- */
 export function TypingBubble({ name }: { name?: string }) {
   return (
     <div className="mt-1 flex items-center gap-1.5 pl-9" aria-live="polite" aria-label={`${name || "They"} is typing`}>

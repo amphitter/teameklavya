@@ -211,8 +211,11 @@ export function MemberPicker({ meId, lockedIds = [], selected, onChange, busy }:
         </div>
       </div>
 
-      {/* List */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-2">
+      {/* List — keyboard inset so search doesn't hide bottom */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-2"
+        style={{ paddingBottom: "max(0.5rem, var(--keyboard-inset, 0px), var(--kb-inset, 0px))" } as React.CSSProperties}
+      >
         {error ? (
           <div className="px-5 py-8 text-center">
             <p className="text-[13px] font-semibold text-on-surface">Couldn&apos;t load people</p>

@@ -56,24 +56,9 @@ export function MessageComposer({
   const imageRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /* Keep the composer above the mobile keyboard (§30: "Mobile keyboard must
-     not break layout"). */
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const apply = () => {
-      const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      document.documentElement.style.setProperty("--keyboard-inset", `${offset}px`);
-    };
-    apply();
-    vv.addEventListener("resize", apply);
-    vv.addEventListener("scroll", apply);
-    return () => {
-      vv.removeEventListener("resize", apply);
-      vv.removeEventListener("scroll", apply);
-      document.documentElement.style.removeProperty("--keyboard-inset");
-    };
-  }, []);
+  // Keyboard inset is now managed centrally by useChatViewport hook to avoid
+  // two writers fighting over --keyboard-inset. This component just reads it
+  // via CSS max(var(--keyboard-inset), safe-area).
 
   // Grow with content up to a cap, then scroll internally.
   useEffect(() => {
@@ -88,14 +73,11 @@ export function MessageComposer({
     if (!value || disabled) return;
     onSend(value);
     setText("");
-    /* Keep the keyboard up on desktop, where focus is expected to persist.
-     * On a touch device the field already holds focus while typing, so
-     * re-focusing is unnecessary — and on Android it can round-trip through
-     * a keyboard close/open that visibly jolts the composer (§18: "Pressing
-     * send should NOT close the keyboard"). */
-    if (typeof window !== "undefined" && window.matchMedia?.("(pointer: fine)").matches) {
-      requestAnimationFrame(() => taRef.current?.focus());
-    }
+    // Keep keyboard open on all devices: refocus without scrolling.
+    // preventScroll avoids iOS page scroll jank.
+    requestAnimationFrame(() => {
+      taRef.current?.focus({ preventScroll: true } as FocusOptions);
+    });
   };
 
   // Nothing network-bound gates this: with optimisic sends the next message
@@ -104,20 +86,16 @@ export function MessageComposer({
 
   return (
     <div
-      /* Part 10 §2, §18, §33.
-       *
-       * `background` is a flat surface, NOT a backdrop-blur: §33 asks us to
-       * avoid expensive backdrop-filter on a surface that is on screen for
-       * every frame of a scroll, and this is the hottest surface in the app.
-       *
-       * The bottom padding is the KEYBOARD inset when the keyboard is up and
-       * the SAFE-AREA inset when it is not. The max() matters: on an iPhone
-       * the home indicator needs ~34px, but a keyboard needs ~300px, and
-       * adding them would float the composer a home-bar's height above the
-       * keyboard. Whichever is larger wins. */
+      /* Fix: keyboard handling is now done by useChatViewport which sizes the
+       * container to visualViewport (vv.height). When that hook is active,
+       * the keyboard is OUTSIDE the container, so adding --keyboard-inset as
+       * padding would create a gap equal to keyboard height. We only need
+       * safe-area here. For inbox (which is 100dvh, not vv.height), the list
+       * itself has paddingBottom var(--keyboard-inset) so last items aren't
+       * hidden. */
       className="shrink-0 border-t border-outline-variant bg-surface-container-lowest"
       style={{
-        paddingBottom: "max(var(--keyboard-inset, 0px), env(safe-area-inset-bottom, 0px))",
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
       }}
     >
       {/* Reply quote (§30) */}
@@ -131,7 +109,7 @@ export function MessageComposer({
           <button
             type="button"
             onClick={onCancelReply}
-            className="rounded-full p-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container hover:text-on-surface"
             aria-label="Cancel reply"
           >
             <X className="h-3.5 w-3.5" />
@@ -162,7 +140,7 @@ export function MessageComposer({
             <button
               type="button"
               onClick={() => imageRef.current?.click()}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary"
+              className="flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary"
               aria-label="Send a photo"
             >
               <ImagePlus className="h-5 w-5" />
@@ -188,13 +166,15 @@ export function MessageComposer({
           </>
         ) : null}
 
-        <EmojiButton
-          preferAbove
-          onSelect={(emoji) => {
-            setText((t) => (t + emoji).slice(0, MAX_LEN));
-            taRef.current?.focus();
-          }}
-        />
+        <div className="emoji-btn-desktop">
+          <EmojiButton
+            preferAbove
+            onSelect={(emoji) => {
+              setText((t) => (t + emoji).slice(0, MAX_LEN));
+              taRef.current?.focus({ preventScroll: true } as FocusOptions);
+            }}
+          />
+        </div>
 
         <label className="sr-only" htmlFor="message-input">
           Message
@@ -228,22 +208,22 @@ export function MessageComposer({
                iOS zooms the page when a focused input's font-size is under
                16px; the composer was 15px, so tapping it magnified the whole
                thread. From `sm` it returns to its designed 15px. */
-          className="no-scrollbar max-h-[8.25rem] min-h-[2.5rem] flex-1 resize-none overflow-y-auto [scrollbar-width:none] rounded-2xl border border-outline-variant bg-surface px-3.5 py-2.5 text-base leading-snug outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 disabled:opacity-60 sm:text-[15px]"
+          className="no-scrollbar max-h-[8.25rem] min-h-11 flex-1 resize-none overflow-y-auto [scrollbar-width:none] rounded-2xl border border-outline-variant bg-surface px-3.5 py-2.5 text-base leading-snug outline-none placeholder:text-on-surface-variant/70 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/12 disabled:opacity-60 sm:text-[15px]"
         />
 
         <button
           type="submit"
           disabled={!canSend}
+          onPointerDown={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
           className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all",
+            "flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all",
             canSend
-              ? "brand-gradient text-white elevation-glow hover:brightness-105"
+              ? "bg-primary text-white hover:brightness-105"
               : "bg-surface-container text-on-surface-variant"
           )}
           aria-label="Send message"
         >
-          {/* §10 — no spinner. The optimistic bubble IS the feedback, and a
-              spinner here would imply the user must wait for it. */}
           <SendHorizontal className="h-5 w-5" />
         </button>
       </form>

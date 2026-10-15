@@ -14,6 +14,7 @@ export default function NotificationsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
 
   const load = useCallback(() => {
@@ -24,6 +25,7 @@ export default function NotificationsPage() {
       .then((r) => {
         setItems(r.data?.notifications || []);
         setHasMore(Boolean(r.data?.hasMore));
+        setNextCursor(r.data?.nextCursor || null);
         setUnread(r.data?.unreadCount || 0);
       })
       .catch(() => setError(true))
@@ -33,13 +35,14 @@ export default function NotificationsPage() {
   useEffect(load, [load]);
 
   const loadMore = () => {
-    if (loadingMore || !hasMore) return;
+    if (loadingMore || !hasMore || !nextCursor) return;
     setLoadingMore(true);
     api
-      .get("/notifications", { params: { limit: 25, page: Math.ceil(items.length / 25) + 1 } })
+      .get("/notifications", { params: { limit: 25, cursor: nextCursor } })
       .then((r) => {
         setItems((p) => [...p, ...(r.data?.notifications || [])]);
         setHasMore(Boolean(r.data?.hasMore));
+        setNextCursor(r.data?.nextCursor || null);
       })
       .catch(() => {})
       .finally(() => setLoadingMore(false));

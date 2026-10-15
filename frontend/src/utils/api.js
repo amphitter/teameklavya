@@ -44,10 +44,19 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor — surface readable errors
+// Response interceptor — surface readable errors, but ignore canceled
 api.interceptors.response.use(
   (r) => r,
   (err) => {
+    const isCanceled =
+      axios.isCancel?.(err) ||
+      err.code === "ERR_CANCELED" ||
+      err.message === "canceled" ||
+      err.message?.toLowerCase?.().includes("canceled");
+    if (isCanceled) {
+      // Silent — request was aborted due to navigation/unmount, not an error
+      return Promise.reject(err);
+    }
     console.error("API Error:", err.response?.data || err.message);
     return Promise.reject(err);
   }

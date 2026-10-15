@@ -3,11 +3,16 @@
 import { cn } from "@/lib/utils";
 
 /**
- * EventHub brand marks — always the official assets from /public/brand.
- * Never hand-draw the wordmark; use the logo image.
+ * EventHub brand marks — theme-aware, no flicker, no layout shift.
+ * 
+ * Both logos are 488x128, RGBA, same aspect 3.8125:1, so width is identical for same height.
+ * Light: eventhub-logo-plain.png (dark text, transparent) — 43KB — for light theme
+ * Dark: eventhub-logo-dark-theme.png (white text, transparent) — 37KB — for dark theme
+ * 
+ * Uses CSS dark: variant (html.dark class) to switch, not JS theme state,
+ * so no hydration mismatch, no flicker, both preloaded, instant switch.
  */
 
-/** Icon-only mark (favicons, tight spaces). */
 export function LogoIcon({ className, size = 32 }: { className?: string; size?: number }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
@@ -18,41 +23,61 @@ export function LogoIcon({ className, size = 32 }: { className?: string; size?: 
       height={size}
       className={cn("h-8 w-8 object-contain", className)}
       style={{ height: size, width: size }}
+      loading="eager"
+      decoding="async"
     />
   );
 }
 
-/**
- * Full logo WITH tagline (official brand image, 3:1 aspect).
- * `size` = rendered height in px; width follows the image ratio.
- */
 export function Logo({
   className,
   size = 32,
-  /** On dark surfaces: lift brightness slightly so the blue mark stays readable */
   onDark = false,
 }: {
   className?: string;
   size?: number;
-  /** kept for API compatibility — the tagline is baked into the official image */
   showTagline?: boolean;
   onDark?: boolean;
 }) {
+  const aspect = 488 / 128; // 3.8125
+  const width = size * aspect;
+
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      /* The same mark the mobile bar uses. The tagline version was replaced
-         everywhere (Part 13 follow-up: "the logo we are using in mobile phone
-         should be used in desktop nav login pages and extra places") — at the
-         24–44px every one of these call sites renders, "People • Events •
-         Opportunities" is a grey smudge, and the icon-only mark loses the name.
-         One asset, one component: changing it here changes the desktop
-         sidebar, the auth pages, the admin header and the rest together. */
-      src="/brand/eventhub-logo-plain.png"
-      alt="EventHub"
-      className={cn("w-auto object-contain", onDark && "dark:brightness-[1.45] dark:saturate-[1.15]", className)}
-      style={{ height: size }}
-      draggable={false}
-    />
+    <div
+      className={cn("relative shrink-0 overflow-hidden", className)}
+      style={{ height: size, width: width }}
+      aria-label="EventHub"
+    >
+      {/* Light theme logo — OLD logo preserved */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/brand/eventhub-logo-plain.png"
+        alt="EventHub"
+        width={488}
+        height={128}
+        className={cn(
+          "absolute inset-0 h-full w-full object-contain object-left transition-opacity duration-200",
+          onDark ? "hidden" : "block dark:hidden"
+        )}
+        loading="eager"
+        decoding="async"
+        draggable={false}
+      />
+      {/* Dark theme logo — White Accent */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/brand/eventhub-logo-dark-theme.png"
+        alt="EventHub"
+        width={488}
+        height={128}
+        className={cn(
+          "absolute inset-0 h-full w-full object-contain object-left transition-opacity duration-200",
+          onDark ? "block" : "hidden dark:block"
+        )}
+        loading="eager"
+        decoding="async"
+        draggable={false}
+      />
+    </div>
   );
 }

@@ -37,6 +37,8 @@ const { io } = require("socket.io-client");
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
 const Event = require("../models/event.model");
+const Organization = require("../models/organization.model");
+const OrganizationMembership = require("../models/organizationMembership.model");
 const Activity = require("../models/activity.model");
 const Question = require("../models/question.model");
 const EventResult = require("../models/eventResult.model");
@@ -141,6 +143,21 @@ const mint = (user) => jwt.sign({ id: String(user._id), role: "user", purpose: "
   const p1Tok = mint(p1u);
   const p2Tok = mint(p2u);
   const p3Tok = mint(p3u);
+  const eventManagerOwner = await User.create({ firstName: "Org", lastName: "Owner", email: `orgowner${Date.now()}@test.com`, passwordHash: "x", emailVerified: true });
+  const organizationEventManager = await User.create({ firstName: "Event", lastName: "Manager", email: `eventmanager${Date.now()}@test.com`, passwordHash: "x", emailVerified: true });
+  const organizationEventManagerToken = mint(organizationEventManager);
+  const eventOrganization = await Organization.create({
+    name: "Socket Event Organization",
+    slug: `socket-event-org-${Date.now()}`,
+    createdBy: eventManagerOwner._id,
+    category: "TECH_COMMUNITY",
+  });
+  await OrganizationMembership.create({
+    organizationId: eventOrganization._id,
+    userId: organizationEventManager._id,
+    role: "EVENT_MANAGER",
+    status: "ACTIVE",
+  });
 
   const createRes = await fetch(`${B}/events`, {
     method: "POST",
@@ -161,6 +178,35 @@ const mint = (user) => jwt.sign({ id: String(user._id), role: "user", purpose: "
   const ev = (await createRes.json()).event;
   await Event.updateOne({ _id: ev._id }, { $set: { liveState: "WAITING" } }); // doors open, organizer hasn't started
 
+  const organizationOwnedEvent = await Event.create({
+    title: "Organization Event Manager Socket Check",
+    slug: `org-event-manager-socket-${Date.now()}`,
+    description: "Owner-aware Socket.IO authorization",
+    eventType: "offline",
+    venue: "Test Hall",
+    startDate: new Date(Date.now() - 600e3),
+    endDate: new Date(Date.now() + 7200e3),
+    liveState: "WAITING",
+    createdBy: organizer._id,
+    organizerType: "ORGANIZATION",
+    organizerId: eventOrganization._id,
+    organization: eventOrganization._id,
+  });
+  const userOwnedAssociatedEvent = await Event.create({
+    title: "User-owned Association Socket Check",
+    slug: `user-owned-associated-socket-${Date.now()}`,
+    description: "Association must not grant Socket.IO organizer rights",
+    eventType: "offline",
+    venue: "Test Hall",
+    startDate: new Date(Date.now() - 600e3),
+    endDate: new Date(Date.now() + 7200e3),
+    liveState: "WAITING",
+    createdBy: p1u._id,
+    organizerType: "USER",
+    organizerId: p1u._id,
+    organization: eventOrganization._id,
+  });
+
   const quizAct = await Activity.create({ event: ev._id, type: "QUIZ", title: "Round 1 — Mixed Bag", order: 0, state: "UPCOMING" });
   await Question.create({ activity: quizAct._id, type: "SINGLE_CHOICE", text: "2 + 2 ?", options: ["3", "4", "5", "6"], correctAnswer: 1, points: 100, timeLimit: 30, order: 0 });
   await Question.create({ activity: quizAct._id, type: "SINGLE_CHOICE", text: "First president of the moon?", options: ["Nobody", "Buzz", "Neil"], correctAnswer: 0, points: 100, timeLimit: 5, order: 1 });
@@ -174,8 +220,21 @@ const mint = (user) => jwt.sign({ id: String(user._id), role: "user", purpose: "
   const org = connect(orgTok);
   const p1 = connect(p1Tok);
   const p2 = connect(p2Tok);
-  await Promise.all([org, p1, p2].map((r) => r.waitFor("server:time", { timeout: 4000 }).catch(() => {})));
+  const eventManagerSocket = connect(organizationEventManagerToken);
+  await Promise.all([org, p1, p2, eventManagerSocket].map((r) => r.waitFor("server:time", { timeout: 4000 }).catch(() => {})));
   console.log("sockets connected");
+
+  // Phase 5: Socket.IO uses the same explicit owner policy as REST. An active
+  // EVENT_MANAGER can control an Organization-owned Event, but an organization
+  // association on a USER-owned Event does not grant organizer commands.
+  const eventManagerJoin = await attempt(eventManagerSocket, "event:join", { eventId: organizationOwnedEvent._id });
+  check("Organization EVENT_MANAGER joins as organizer", eventManagerJoin.ack?.ok && eventManagerJoin.ack.role === "organizer", JSON.stringify(eventManagerJoin));
+  await wait(300);
+  const eventManagerStart = await attempt(eventManagerSocket, "event:start", { eventId: organizationOwnedEvent._id });
+  check("Organization EVENT_MANAGER controls Organization-owned live Event", eventManagerStart.ack?.ok === true, JSON.stringify(eventManagerStart));
+  const associationOnlyStart = await attempt(eventManagerSocket, "event:start", { eventId: userOwnedAssociatedEvent._id });
+  check("organization association grants no Socket.IO owner access", errCode(associationOnlyStart) === "NOT_AUTHORIZED", JSON.stringify(associationOnlyStart));
+  eventManagerSocket.socket.disconnect();
 
   /* 1. organizer + two participants join.
    * The organizer MUST emit event:join too — the server only calls

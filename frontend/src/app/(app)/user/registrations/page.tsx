@@ -82,7 +82,20 @@ export default function MyRegistrationsPage() {
           api.get("/tickets/user-tickets").catch(() => ({ data: { tickets: [] } })),
         ]);
         setEvents(eventsRes.data?.events ?? []);
-        setTickets(ticketsRes.data?.tickets ?? []);
+        const fetchedTickets = ticketsRes.data?.tickets ?? [];
+        setTickets(fetchedTickets);
+        // Claude #3: Cache QR for offline use (service worker or local storage)
+        try {
+          const cache = fetchedTickets.map((t: any) => ({
+            eventId: t.eventId?._id,
+            qrCode: t.qrCode,
+            token: t.token,
+            checkedIn: t.checkedIn,
+            title: t.eventId?.title,
+            startDate: t.eventId?.startDate,
+          }));
+          localStorage.setItem("eventhub:ticket-cache", JSON.stringify(cache));
+        } catch {}
       } catch {
         setError(true);
       } finally {
@@ -129,28 +142,51 @@ export default function MyRegistrationsPage() {
         </Button>
       </div>
 
-      {/* Tabs */}
-      <div className="mt-6 inline-flex rounded-xl border border-border bg-card p-1">
-        {(
-          [
-            { id: "upcoming", label: `Upcoming (${upcoming.length})` },
-            { id: "past", label: `Past (${past.length})` },
-          ] as const
-        ).map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "rounded-lg px-4 py-2 text-sm font-semibold transition-colors",
-              tab === t.id
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
+      {/* Tabs - sticky on mobile with safe-area */}
+      <div className="mt-6 sticky top-0 z-10 -mx-4 px-4 py-2 bg-background/80 backdrop-blur-md sm:mx-0 sm:px-0 sm:static sm:bg-transparent sm:backdrop-blur-none">
+        <div className="inline-flex rounded-xl border border-border bg-card p-1">
+          {(
+            [
+              { id: "upcoming", label: `Upcoming (${upcoming.length})` },
+              { id: "past", label: `Past (${past.length})` },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "rounded-lg px-4 py-2 text-sm font-semibold transition-colors min-h-[36px]",
+                tab === t.id
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Next event shortcut - if upcoming exists, show first as prominent */}
+      {tab === "upcoming" && upcoming.length > 0 && (
+        <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-primary">Next up</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">{upcoming[0].title}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {upcoming[0].startDate ? new Date(upcoming[0].startDate).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }) : ""} {upcoming[0].startTime ? `· ${upcoming[0].startTime}` : ""} · {upcoming[0].venue || "Online"}
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" asChild className="min-h-[40px]">
+              <Link href={upcoming[0].slug ? `/events/${upcoming[0].slug}` : "/events"}>View event</Link>
+            </Button>
+            {ticketByEvent.get(upcoming[0]._id) && (
+              <Button size="sm" variant="outline" className="min-h-[40px]" onClick={() => setTicketModal(ticketByEvent.get(upcoming[0]._id)!)}>
+                <QrCode className="mr-1.5 h-4 w-4" /> Ticket
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* List */}
       <div className="mt-6 space-y-3">

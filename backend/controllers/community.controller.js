@@ -13,11 +13,12 @@ const { notify } = require("../services/notification.service");
 const CommunityClaim = require("../models/communityClaim.model");
 const AuditLog = require("../models/auditLog.model");
 const { isSuperAdminEmail } = require("../middleware/auth.middleware");
+const { parseLimit, buildPage, withCursor, isCursorRequest } = require("../repositories/cursor");
 const { isInstitutionalDomain, emailDomain } = require("../utils/domain");
 const { guardSuperAdmin, isSelfAction, PROTECTED_ACTIONS } = require("../services/ownership.service");
 
 const AUTHOR_FIELDS = "firstName lastName username verified profile.avatar profile.institution";
-const EVENT_FIELDS = "title slug bannerUrl startDate endDate venue eventType category organizer price visibility isLive";
+const EVENT_FIELDS = "title slug bannerUrl logoUrl startDate endDate venue eventType category organizer price visibility isLive";
 const ORG_FIELDS = "name slug logoUrl";
 const COMMUNITY_FIELDS = "name slug avatarUrl";
 const MEMBER_PAGE = 30;
@@ -118,33 +119,51 @@ async function findVisibleCommunity(slug, user) {
 
 /* ── List & detail ───────────────────────────────────────── */
 
-// GET /api/communities?q=&limit=&page=
+// GET /api/communities?q=&limit=&cursor=… (legacy `page` remains supported)
 exports.getCommunities = async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
-    const q = String(req.query.q || "").trim();
-    // Suspended communities are hidden platform-wide
+    const limit = parseLimit(req.query.limit, { def: 20, max: 50 });
+    const q = String(req.query.q || "").trim().slice(0, 100);
+    // Suspended communities are hidden platform-wide.
     const filter = { deletedAt: null, status: { $ne: "suspended" } };
     if (q) filter.name = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
 
-    const [communities, total] = await Promise.all([
-      Community.find(filter)
+    let communities;
+    let legacyPagination = null;
+    let cursorPage = null;
+    if (isCursorRequest(req.query)) {
+      const rows = await Community.find(withCursor(filter, req.query.cursor))
         .sort({ createdAt: -1, _id: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
+        .limit(limit + 1)
         .populate("organization", "name slug logoUrl isVerified")
         .populate("officialOrganization", "name slug logoUrl isVerified")
-        .lean(),
-      Community.countDocuments(filter),
-    ]);
+        .lean();
+      cursorPage = buildPage(rows, limit);
+      communities = cursorPage.items;
+    } else {
+      const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+      const [rows, total] = await Promise.all([
+        Community.find(filter)
+          .sort({ createdAt: -1, _id: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .populate("organization", "name slug logoUrl isVerified")
+          .populate("officialOrganization", "name slug logoUrl isVerified")
+          .lean(),
+        Community.countDocuments(filter),
+      ]);
+      communities = rows;
+      legacyPagination = { page, hasMore: page * limit < total };
+    }
 
     const counts = await memberCounts(communities.map((c) => c._id));
-    res.json({
+    return res.json({
       success: true,
       communities: communities.map((c) => ({ ...c, memberCount: counts.get(String(c._id)) || 0 })),
-      page,
-      hasMore: page * limit < total,
+      ...(legacyPagination || {
+        nextCursor: cursorPage.nextCursor,
+        hasMore: cursorPage.hasMore,
+      }),
     });
   } catch (error) {
     console.error("Get communities error:", error.message);
@@ -186,7 +205,7 @@ exports.getCommunityBySlug = async (req, res) => {
         : null,
     ]);
 
-    const eventCount = await Event.countDocuments({ community: community._id, visibility: "public" });
+    const eventCount = await Event.countDocuments({ community: community._id, visibility: "public", removedAt: null, archivedAt: null });
     const isManager = await isCommunityManager(req.user, community._id);
 
     res.json({
@@ -252,6 +271,19 @@ exports.createCommunity = async (req, res) => {
           message: "Communities are created with an institutional email (e.g. your college or company address)",
         });
       }
+    }
+
+    // Trust & Safety: moderate community name/description
+    try {
+      const moderationService = require("../services/moderation.service");
+      const textToCheck = [trimmed, description].filter(Boolean).join(" ");
+      const modResult = await moderationService.moderateText({ text: textToCheck, contentType: "community", authorId: req.user.id });
+      if (modResult.status === "quarantined" || (modResult.confidence >= 0.85 && modResult.categories.length)) {
+        return res.status(400).json({ success: false, message: "Community contains prohibited content: " + (modResult.categories.join(", ") || modResult.reason) });
+      }
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ success: false, message: err.message });
+      console.warn("Community moderation check failed:", err.message);
     }
 
     let slug = slugify(trimmed);
@@ -645,8 +677,11 @@ exports.getCommunityEvents = async (req, res) => {
     const events = await Event.find({
       community: community._id,
       visibility: { $in: ["public", "unlisted"] },
+      removedAt: null,
+      archivedAt: null,
       endDate: { $gte: new Date(Date.now() - 24 * 3600 * 1000) },
     })
+      .select("title slug description category venue venueIframeLink eventType platform startDate endDate startTime endTime bannerUrl logoUrl organizer price isFeatured visibility maxAttendees organization")
       .sort({ startDate: 1, _id: 1 })
       .limit(50)
       .populate("organization", "name slug logoUrl")

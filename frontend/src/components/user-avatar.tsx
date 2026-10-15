@@ -91,8 +91,8 @@ export function AvatarFallback({
     <span
       aria-hidden
       className={cn(
-        "flex shrink-0 select-none items-center justify-center rounded-full",
-        user ? "bg-brand-light font-bold text-primary" : "bg-muted text-muted-foreground",
+        "flex shrink-0 select-none items-center justify-center rounded-full border border-border",
+        user ? "bg-muted font-bold text-foreground" : "bg-muted text-muted-foreground",
         className
       )}
       style={{ width: size, height: size, fontSize: Math.max(10, size * 0.36) }}
@@ -127,7 +127,7 @@ export function UserAvatar({
         width={size}
         height={size}
         sizes={`${size}px`}
-        className={cn("shrink-0 rounded-full object-cover", className)}
+        className={cn("shrink-0 rounded-full object-cover bg-muted", className)}
         /* Explicit box + square aspect + centred crop. `objectPosition` is
            deliberately NOT settable from outside: a caller that could shift it
            could put a different part of someone's face in the circle than every
@@ -139,6 +139,7 @@ export function UserAvatar({
           aspectRatio: "1 / 1",
           objectFit: "cover",
           objectPosition: "50% 50%",
+          backgroundColor: "var(--color-muted)",
         }}
       />
     );

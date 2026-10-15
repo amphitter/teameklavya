@@ -1,7 +1,8 @@
 # Data retention (Part 5, Phase 8 — spec §53, §54)
 
-What EventHub keeps, what it disposes of, and — most importantly — **why the
-disposal is scripted rather than delegated to MongoDB TTL indexes.**
+What EventHub keeps, what it disposes of, and how each temporary record is
+retained or removed. Most cleanup is an explicit, bounded sweep; the only TTL
+index is narrowly scoped to soft `seen` feed impressions.
 
 ---
 
@@ -62,7 +63,13 @@ user or admin action only (delete post, delete account, event takedown).
 | `mediaassets` in `pending` / `cleanup_pending` | `media-sweeper.js` (Phase 4) — deletes record **and** remote object | Reclaimed after a 24 h grace |
 | `livemessages` (live chat) | `retention-sweeper.js --section=live` | **Kept forever unless** `RETENTION_LIVE_ARCHIVE_DAYS` is set |
 | `qaquestions` (Q&A) | same | same |
+| `communications` / `communicationdeliveries` | `retention-sweeper.js --section=communications` — delivery rows are deleted before their campaign rows | Fixed 90 days; run daily |
+| `postimpressions` with `kind: "seen"` | Partial MongoDB TTL index on `at` | 30 days by default (`POST_SEEN_TTL_DAYS`); `dismissed` rows are excluded and permanent |
 | `registrationresponses.rsvpVerificationExpires` | Field value, cleared with the RSVP flow | n/a |
+
+Communication history stores the campaign subject/scope and each recipient email,
+delivery status and timestamp; it never stores the message body. Its 90-day
+window is a product requirement, not an opt-in flag.
 
 ---
 
@@ -78,6 +85,12 @@ node scripts/retention-sweeper.js --section=tokens --apply
 # Machine-readable, for a cron job's log
 node scripts/retention-sweeper.js --json
 
+# Preview old communication history without changing it
+node scripts/retention-sweeper.js --section=communications
+
+# Remove communication campaigns and their recipient rows past 90 days
+node scripts/retention-sweeper.js --section=communications --apply
+
 # Reclaim abandoned uploads (separate tool — deletes the remote file too)
 npm run media:sweep            # dry run
 npm run media:sweep:apply
@@ -89,6 +102,9 @@ Suggested schedule (cron, or your platform's scheduler):
 # Clear expired one-time codes nightly
 17 3 * * *  cd /app && node scripts/retention-sweeper.js --section=tokens --apply --json >> /var/log/eh-retention.log
 
+# Enforce the 90-day communications-history window nightly
+37 3 * * *  cd /app && node scripts/retention-sweeper.js --section=communications --apply --json >> /var/log/eh-retention.log
+
 # Reclaim abandoned uploads nightly, an hour later
 17 4 * * *  cd /app && node scripts/media-sweeper.js --apply >> /var/log/eh-media.log
 ```
@@ -98,12 +114,13 @@ Both are idempotent and safe to re-run. Both default to a dry run, so a missing
 
 ---
 
-## 4. Why there are **no** TTL indexes
+## 4. TTL indexes are tightly scoped
 
-§53 says "TTL indexes only on temporary classes". Applied honestly to this
-schema, **no collection currently qualifies** — and adding one anyway would be
-actively dangerous. A MongoDB TTL index deletes the **entire document** when the
-indexed date passes; it cannot clear a field.
+§53 says "TTL indexes only on temporary classes." A MongoDB TTL index deletes
+the **entire document** when the indexed date passes; it cannot clear a field.
+EventHub has one partial TTL index for the explicitly temporary `seen`
+impression signal. All other cleanup here is explicit so dangerous records
+survive and related communication rows are deleted together.
 
 ### `users` — would delete accounts
 
@@ -126,6 +143,20 @@ Each record points at an object in Cloudinary or R2. A TTL index deletes the
 Cloudinary credits with nothing left in the database to reference it, so no
 sweeper can ever find it again. Reclamation has to remove record and object
 together, which is precisely what `media-sweeper.js` does (§55).
+
+### `postimpressions` — only soft `seen` signals expire
+
+A partial TTL index removes rows where `kind: "seen"` after
+`POST_SEEN_TTL_DAYS` (30 days by default). Explicit `dismissed` rows are not
+matched by the partial index and remain permanent; a deliberate exclusion is
+not a soft, expiring signal.
+
+### `communications` / `communicationdeliveries` — paired cleanup
+
+These collections contain campaign subjects and recipient email/status snapshots,
+not user-authored content or message bodies. The product retention window is 90
+days. The sweeper deletes delivery rows first and then the campaign rows, in a
+bounded, repeatable run; a database TTL index is intentionally not used.
 
 ### `livemessages` / `qaquestions` — a policy judgement, not a technical one
 

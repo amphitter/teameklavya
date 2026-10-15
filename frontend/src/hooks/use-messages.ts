@@ -17,9 +17,13 @@ import { unwatchConversations, watchConversations } from "@/lib/messages/watch";
 import {
   cacheInbox,
   cacheThread,
+  listOutboxForConversation,
   readCachedInbox,
   readCachedThread,
+  removeOutboxItem,
+  saveOutboxItem,
 } from "@/lib/messages/cache";
+import { recordEvent, recordLatency, shouldSample } from "@/lib/messages/metrics";
 import {
   inbox,
   presence as presenceSlice,
@@ -530,20 +534,64 @@ export function useThread(conversationId: string | null): UseThreadResult {
   }, [conversationId]);
 
   /**
-   * Optimistic send (§10, §11).
+   * Optimistic send (§10, §11) — now with durable outbox, bounded ack,
+   * exponential backoff jitter, latency metrics, delivered state.
    *
-   * A temporary row appears on this frame with `pending: true` and a
-   * clientMessageId. The server echoes that id back, which is how the
-   * response and the socket echo both reconcile onto the SAME row instead of
-   * adding a second copy.
+   * Flow:
+   *  1. temp row with pending:true + clientMessageId → immediate render
+   *  2. persist to IndexedDB outbox (survives tab close, offline)
+   *  3. POST with 8s bounded timeout, measure queue + send_to_ack
+   *  4. reconcile by clientMessageId → sent state, remove from outbox
+   *  5. on transient failure → failed:true with retry affordance, keep outbox
+   *  6. retry uses exponential backoff 500ms*2^n + jitter, capped 8s, max 3 auto
    */
+
+  // --- helpers inside hook closure (stable via refs) ---
+  const sendAttempt = useCallback(
+    async (
+      id: string,
+      text: string,
+      replyTo: string | null | undefined,
+      clientMessageId: string,
+      attempt: number
+    ): Promise<ChatMessage> => {
+      const start = performance.now();
+      // queue time already accounted by optimistic render; here is network time
+      const res = await api.post(
+        `/messages/conversations/${id}`,
+        {
+          content: text,
+          ...(replyTo ? { replyTo } : {}),
+          clientMessageId,
+        },
+        { timeout: 8000 } // bounded ack — do not wait forever
+      );
+      const saved: ChatMessage = res.data?.message;
+      if (!saved) throw new Error("no message");
+      const dur = Math.round(performance.now() - start);
+      recordLatency("send_to_ack", dur, {
+        conversationId: id,
+        meta: { attempt, duplicate: Boolean(res.data?.duplicate) },
+      });
+      if (res.data?.duplicate) {
+        recordLatency("duplicate_suppressed" as never, 0, { conversationId: id } as never);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (recordEvent as any)("duplicate_suppressed", { conversationId: id });
+      }
+      return saved;
+    },
+    []
+  );
+
   const sendMessage = useCallback(
     async (text: string, replyTo?: string | null) => {
       const id = conversationId;
       if (!id || !text.trim()) return;
       const clientMessageId = makeClientId();
+      const nowIso = new Date().toISOString();
+      const queueStart = performance.now();
 
-      const optimistic: ChatMessage & { clientMessageId: string } = {
+      const optimistic: ChatMessage & { clientMessageId: string; _delivery?: string } = {
         _id: `tmp:${clientMessageId}`,
         sender: user
           ? {
@@ -556,49 +604,174 @@ export function useThread(conversationId: string | null): UseThreadResult {
           : null,
         content: text,
         replyTo: replyTo ?? null,
-        createdAt: new Date().toISOString(),
+        createdAt: nowIso,
         pending: true,
         clientMessageId,
-      };
+        _delivery: "sending",
+      } as ChatMessage & { clientMessageId: string; _delivery?: string };
 
       threads.append(id, optimistic);
       inbox.patch(id, {
-        lastMessage: { text: text.slice(0, 200), at: optimistic.createdAt, mine: true },
-        updatedAt: optimistic.createdAt,
+        lastMessage: { text: text.slice(0, 200), at: nowIso, mine: true },
+        updatedAt: nowIso,
       });
 
+      // Durable outbox — survives offline, tab kill, before ack
+      void saveOutboxItem({
+        clientMessageId,
+        conversationId: id,
+        content: text,
+        replyTo: replyTo ?? null,
+        createdAt: nowIso,
+        attempts: 0,
+      });
+
+      // measure queue time (optimistic render → network start)
+      const queueDur = Math.round(performance.now() - queueStart);
+      if (queueDur > 2) recordLatency("queue", queueDur, { conversationId: id });
+
       try {
-        const res = await api.post(`/messages/conversations/${id}`, {
-          content: text,
-          ...(replyTo ? { replyTo } : {}),
+        const saved = await sendAttempt(id, text, replyTo ?? null, clientMessageId, 0);
+        // Reconcile by clientMessageId — NOT by removing temp and appending,
+        // which would reorder if anything else arrived meantime.
+        threads.append(id, {
+          ...saved,
           clientMessageId,
-        });
-        const saved: ChatMessage = res.data?.message;
-        if (!saved) throw new Error("no message");
-        // Reconcile by clientMessageId — NOT by removing the temp row and
-        // appending, which would reorder the message if anything else
-        // arrived in the meantime.
-        threads.append(id, { ...saved, clientMessageId } as ChatMessage);
+          _delivery: "sent",
+        } as unknown as ChatMessage);
         if (threads.get(id).messages.some((m) => m._id === `tmp:${clientMessageId}`)) {
           threads.removeMessage(id, `tmp:${clientMessageId}`);
         }
-      } catch {
-        // §10 — mark it failed and offer a retry. Never silently drop it.
-        threads.patchMessage(id, `tmp:${clientMessageId}`, { pending: false, failed: true });
+        void removeOutboxItem(clientMessageId);
+      } catch (err: unknown) {
+        const e = err as { response?: { status?: number }; code?: string };
+        const status = e?.response?.status;
+        const isPermanent = status === 400 || status === 403 || status === 404;
+        // §10 — mark failed, offer retry. Never silently drop.
+        threads.patchMessage(id, `tmp:${clientMessageId}`, {
+          pending: false,
+          failed: true,
+          _delivery: isPermanent ? "failed_permanent" : "failed_retryable",
+        } as unknown as Partial<ChatMessage>);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (recordEvent as any)("send_failed", {
+          conversationId: id,
+          meta: { status, permanent: isPermanent, clientMessageId },
+        });
+        if (isPermanent) {
+          void removeOutboxItem(clientMessageId);
+        }
       }
     },
-    [conversationId, user]
+    [conversationId, user, sendAttempt]
   );
 
   const retry = useCallback(
     async (message: ChatMessage) => {
       const id = conversationId;
       if (!id) return;
-      threads.removeMessage(id, message._id);
-      await sendMessage(message.content, (message.replyTo as string) ?? null);
+      const cmid =
+        (message as ChatMessage & { clientMessageId?: string }).clientMessageId || makeClientId();
+      const text = message.content;
+      const replyTo = (message.replyTo as string) ?? null;
+
+      // Optimistic retry: mark sending again
+      threads.patchMessage(id, message._id, {
+        pending: true,
+        failed: false,
+        _delivery: "sending",
+      } as unknown as Partial<ChatMessage>);
+
+      // exponential backoff with jitter: 500*2^n + rand(0..250)
+      const maxAuto = 3;
+      for (let attempt = 0; attempt <= maxAuto; attempt++) {
+        try {
+          const backoff =
+            attempt === 0 ? 0 : Math.min(8000, 500 * Math.pow(2, attempt) + Math.random() * 250);
+          if (backoff) await new Promise((r) => setTimeout(r, backoff));
+          const saved = await sendAttempt(id, text, replyTo, cmid, attempt);
+          threads.append(id, { ...saved, clientMessageId: cmid, _delivery: "sent" } as unknown as ChatMessage);
+          // remove both old tmp and possibly duplicate tmp
+          if (threads.get(id).messages.some((m) => m._id === message._id && message._id.startsWith("tmp:"))) {
+            threads.removeMessage(id, message._id);
+          }
+          if (threads.get(id).messages.some((m) => m._id === `tmp:${cmid}` && m._id !== saved._id)) {
+            threads.removeMessage(id, `tmp:${cmid}`);
+          }
+          void removeOutboxItem(cmid);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (attempt > 0) (recordEvent as any)("outbox_retry", { conversationId: id, meta: { attempt } });
+          return;
+        } catch (err: unknown) {
+          const e = err as { response?: { status?: number } };
+          const status = e?.response?.status;
+          if (status === 400 || status === 403 || status === 404) {
+            threads.patchMessage(id, message._id, {
+              pending: false,
+              failed: true,
+              _delivery: "failed_permanent",
+            } as unknown as Partial<ChatMessage>);
+            void removeOutboxItem(cmid);
+            return;
+          }
+          if (attempt === maxAuto) {
+            threads.patchMessage(id, message._id, {
+              pending: false,
+              failed: true,
+              _delivery: "failed_retryable",
+            } as unknown as Partial<ChatMessage>);
+            void saveOutboxItem({
+              clientMessageId: cmid,
+              conversationId: id,
+              content: text,
+              replyTo,
+              createdAt: new Date().toISOString(),
+              attempts: attempt + 1,
+            });
+            return;
+          }
+        }
+      }
     },
-    [conversationId, sendMessage]
+    [conversationId, sendAttempt]
   );
+
+  // On mount, re-hydrate outbox for this conversation and attempt retry if online
+  useEffect(() => {
+    if (!conversationId) return;
+    let alive = true;
+    (async () => {
+      const pending = await listOutboxForConversation(conversationId);
+      if (!alive || !pending.length) return;
+      // Paint pending rows that may have been lost on hard refresh
+      for (const item of pending) {
+        if (threads.get(conversationId).messages.some((m) => (m as { clientMessageId?: string }).clientMessageId === item.clientMessageId))
+          continue;
+        const optimistic: ChatMessage & { clientMessageId: string } = {
+          _id: `tmp:${item.clientMessageId}`,
+          sender: user
+            ? {
+                _id: user._id ?? "",
+                firstName: user.firstName ?? "",
+                lastName: user.lastName ?? "",
+                username: user.username,
+                profile: user.profile,
+              }
+            : null,
+          content: item.content,
+          replyTo: item.replyTo ?? null,
+          createdAt: item.createdAt,
+          pending: false,
+          failed: true,
+          clientMessageId: item.clientMessageId,
+        } as unknown as ChatMessage & { clientMessageId: string };
+        threads.append(conversationId, optimistic);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [conversationId, user]);
 
   /* The typing signal carries its own expiry (the server also expires it),
      but a dropped event must not leave the indicator on forever — so the

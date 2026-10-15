@@ -52,22 +52,39 @@ export default function AdminEventsPage() {
   const [events, setEvents] = useState<AdminEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(false);
+  const load = useCallback(async (cursor: string | null = null, append = false) => {
+    if (append && !cursor) return;
+    if (append) setLoadingMore(true);
+    else {
+      setLoading(true);
+      setError(false);
+    }
     try {
       const res = await api.get("/events/admin/list", {
-        params: { search: search || undefined, status: status !== "all" ? status : undefined },
+        params: {
+          search: search || undefined,
+          status: status !== "all" ? status : undefined,
+          limit: 50,
+          cursor: cursor || undefined,
+        },
       });
-      setEvents(res.data?.events ?? res.data ?? []);
+      const incoming: AdminEvent[] = res.data?.events ?? res.data ?? [];
+      setEvents((previous) => append ? [...previous, ...incoming] : incoming);
+      setNextCursor(res.data?.nextCursor || null);
+      setHasMore(Boolean(res.data?.hasMore));
     } catch {
-      setError(true);
+      if (!append) setError(true);
+      else toast.error("Couldn't load more events");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [search, status]);
 
@@ -100,7 +117,7 @@ export default function AdminEventsPage() {
             {loading ? "Loading…" : `${events.length} event${events.length === 1 ? "" : "s"}`}
           </p>
         </div>
-        <Button asChild className="font-semibold">
+        <Button asChild className="min-h-11 font-semibold">
           <Link href="/admin/events/create">
             <CalendarPlus className="mr-2 h-4 w-4" /> Create Event
           </Link>
@@ -115,16 +132,16 @@ export default function AdminEventsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by title, venue or organizer…"
-            className="h-10 w-full rounded-lg border border-input bg-card pl-10 pr-4 text-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+            className="h-11 w-full rounded-lg border border-input bg-card pl-10 pr-4 text-base outline-none transition-all placeholder:text-muted-foreground focus:border-primary/50 focus:ring-4 focus:ring-primary/10 sm:text-sm"
           />
         </div>
-        <div className="no-scrollbar flex gap-1.5 overflow-x-auto">
+        <div className="flex flex-wrap gap-1.5">
           {STATUS_OPTIONS.map((s) => (
             <button
               key={s.value}
               onClick={() => setStatus(s.value)}
               className={cn(
-                "shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                "min-h-11 touch-manipulation rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
                 status === s.value
                   ? "border-primary bg-primary text-primary-foreground"
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -281,6 +298,13 @@ export default function AdminEventsPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+        {!loading && !error && hasMore && (
+          <div className="mt-5 text-center">
+            <Button variant="outline" onClick={() => void load(nextCursor, true)} disabled={loadingMore || !nextCursor}>
+              {loadingMore ? "Loading…" : "Load more events"}
+            </Button>
           </div>
         )}
       </div>

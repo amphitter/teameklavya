@@ -19,5 +19,7 @@ const orgFollowSchema = new mongoose.Schema(
 
 orgFollowSchema.index({ user: 1, organization: 1 }, { unique: true });
 orgFollowSchema.index({ organization: 1 });
+// Supports organization-first lookups while retaining the existing unique pair.
+orgFollowSchema.index({ organization: 1, user: 1 });
 
 module.exports = mongoose.model("OrgFollow", orgFollowSchema);

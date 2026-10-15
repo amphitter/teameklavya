@@ -5,6 +5,7 @@
  */
 const Event = require("../models/event.model");
 const { canManageEvent } = require("../middleware/auth.middleware");
+const { canAccessPrivateEvent } = require("../services/event-permissions.service");
 const realtime = require("../services/realtime.service");
 const resultService = require("../services/result.service");
 const ParticipantSession = require("../models/participantSession.model");
@@ -36,7 +37,7 @@ exports.joinByCode = async (req, res) => {
     if (!code || code.length < 4 || code.length > 12) {
       return res.status(400).json({ success: false, message: "Enter a valid join code" });
     }
-    const event = await Event.findOne({ joinCode: code, removedAt: null }).select("slug title liveState").lean();
+    const event = await Event.findOne({ joinCode: code, removedAt: null, archivedAt: null }).select("slug title liveState").lean();
     if (!event) {
       return res.status(404).json({ success: false, message: "No event found for this code" });
     }
@@ -52,8 +53,10 @@ exports.joinByCode = async (req, res) => {
 // (activities, questions); participants get the public board + their own row.
 exports.getEventResults = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id).select("title slug liveState removedAt createdBy");
-    if (!event || event.removedAt) {
+    const event = await Event.findById(req.params.id)
+      .select("title slug liveState removedAt visibility createdBy organizerType organizerId")
+      .lean();
+    if (!event || event.removedAt || !(await canAccessPrivateEvent(req.user, event))) {
       return res.status(404).json({ success: false, message: "Event not found" });
     }
     if (event.liveState !== "COMPLETED") {
@@ -108,11 +111,17 @@ exports.getEventResults = async (req, res) => {
 // GET /api/events/:id/live/eligibility — pre-flight join check (participant)
 exports.getJoinEligibility = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id).select("liveState removedAt visibility liveSettings slug title");
+    const event = await Event.findById(req.params.id).select("liveState removedAt archivedAt visibility liveSettings slug title organizerType organizerId createdBy");
     if (!event || event.removedAt) {
       return res.status(404).json({ success: false, message: "Event not found" });
     }
     const isOrganizer = await canManageEvent(req.user, event);
+    if (event.archivedAt && !isOrganizer) {
+      return res.status(404).json({ success: false, message: "Event not found" });
+    }
+    if (!(await canAccessPrivateEvent(req.user, event))) {
+      return res.status(404).json({ success: false, message: "Event not found" });
+    }
     const joinable = ["CHECK_IN", "WAITING", "LIVE", "PAUSED"].includes(event.liveState);
     const response = { success: true, liveState: event.liveState, joinable, isOrganizer };
     if (!isOrganizer && joinable) {

@@ -341,7 +341,7 @@ export default function EventManagementPage() {
                 { href: `/admin/events/${id}/analytics`, label: "Analytics", icon: BarChart3 },
                 { href: `/admin/events/${id}/scan`, label: "Scanner", icon: QrCode },
                 { href: `/admin/events/${id}/quiz`, label: "Live quiz", icon: Target },
-                { href: `/admin/events/${id}/edit`, label: "Edit event", icon: Pencil },
+                { href: `/admin/events/edit/${id}`, label: "Edit event", icon: Pencil },
               ].map((q) => (
                 <Link
                   key={q.label}

@@ -252,7 +252,7 @@ export function ThreadPanel({
         <button
           type="button"
           onClick={onBack}
-          className="-ml-0.5 flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-lg text-on-surface-variant active:bg-surface-container md:hidden"
+          className="-ml-0.5 flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-lg text-on-surface-variant active:bg-surface-container lg:hidden"
           aria-label="Back to conversations"
         >
           <ArrowLeft className="h-5 w-5" />

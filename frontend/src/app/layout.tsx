@@ -23,6 +23,7 @@ export const metadata: Metadata = {
     "EventHub is the social platform for events. Discover what's happening around you, register in seconds, get your QR ticket, and build your event identity.",
 
   applicationName: "EventHub",
+  manifest: "/manifest.json",
   authors: [{ name: "EventHub" }],
   keywords: [
     "EventHub",
@@ -89,9 +90,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#ffffff",
+  themeColor: "#2563FF",
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -136,6 +138,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             }),
           }}
         />
+        {/* PWA service worker registration for offline QR */}
+        <Script id="sw-register" strategy="afterInteractive">
+          {`if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}`}
+        </Script>
       </body>
     </html>
   );

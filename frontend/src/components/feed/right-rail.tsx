@@ -409,31 +409,37 @@ export function RightRail({
             </header>
             <ul className="space-y-3">
               {suggestedOrgs.map((o) => (
-                <li key={o._id} className="flex items-center gap-3">
-                  {o.logoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={cloudinaryUrl(o.logoUrl, { w: 96, h: 96 }) || o.logoUrl}
-                      alt=""
-                      className="h-9 w-9 shrink-0 rounded-lg object-cover"
-                    />
-                  ) : (
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-[#6C35FF]/15 to-[#D946EF]/15 text-primary">
-                      <span className="material-symbols-outlined text-[18px] leading-none">groups</span>
-                    </span>
-                  )}
+                <li key={o._id} className="flex items-start gap-3">
+                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-[10px] border border-border bg-transparent dark:bg-white/5 flex items-center justify-center">
+                    {o.logoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={cloudinaryUrl(o.logoUrl, { w: 96, h: 96 }) || o.logoUrl}
+                        alt=""
+                        className="h-full w-full object-contain p-1 bg-white"
+                      />
+                    ) : (
+                      <span className="grid h-full w-full place-items-center bg-gradient-to-br from-[#6C35FF]/15 to-[#D946EF]/15 text-primary">
+                        <span className="material-symbols-outlined text-[18px] leading-none">groups</span>
+                      </span>
+                    )}
+                  </div>
                   <span className="min-w-0 flex-1">
                     <Link
                       href={`/organizations/${o.slug}`}
-                      className="line-clamp-1 block text-[13px] font-semibold text-foreground hover:underline"
+                      className="block truncate text-[13px] font-semibold text-foreground hover:underline"
                     >
                       {o.name}
                     </Link>
                     {o.description ? (
-                      <span className="line-clamp-1 block text-xs text-muted-foreground">{o.description}</span>
+                      <span className="mt-0.5 block text-[12px] leading-[1.4] text-muted-foreground line-clamp-3 sm:line-clamp-2">
+                        {o.description}
+                      </span>
                     ) : null}
                   </span>
-                  <OrgFollowPill orgId={o._id} />
+                  <div className="shrink-0 self-center">
+                    <OrgFollowPill orgId={o._id} />
+                  </div>
                 </li>
               ))}
             </ul>

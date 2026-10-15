@@ -7,18 +7,30 @@ interface EventItem {
   startDate?: string;
 }
 
+interface EventsPageResponse {
+  events?: EventItem[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+}
+
 export async function GET() {
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 
   let events: EventItem[] = [];
 
   try {
-    const res = await api.get("/events", { params: { limit: 100 } });
-    const data = res?.data;
-    if (Array.isArray(data)) {
-      events = data;
-    } else if (Array.isArray(data?.events)) {
-      events = data.events;
+    let cursor: string | null = null;
+    // Keep sitemap generation bounded while walking stable public-event pages.
+    // 20 × 50 = up to 1,000 current event URLs; the API itself remains capped.
+    for (let page = 0; page < 20; page += 1) {
+      const response: { data: EventsPageResponse | EventItem[] } = await api.get("/events", {
+        params: { limit: 50, cursor: cursor || undefined },
+      });
+      const data: EventsPageResponse | EventItem[] = response.data;
+      const rows: EventItem[] = Array.isArray(data) ? data : data.events || [];
+      events.push(...rows);
+      cursor = Array.isArray(data) ? null : data.nextCursor || null;
+      if (!cursor || Array.isArray(data) || !data.hasMore) break;
     }
   } catch (error) {
     console.error("Error fetching events for sitemap:", error);

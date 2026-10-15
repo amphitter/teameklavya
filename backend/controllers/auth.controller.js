@@ -5,11 +5,16 @@ const User = require('../models/user.model');
 const emailService = require('../services/email.service');
 const templates = require('../services/emailTemplates');
 const { generateToken, generateOTP } = require('../utils/crypto');
+const { isSuperAdminUser } = require('../services/ownership.service');
 
 const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES || 10);
 
 function signJwt(user) {
-  return jwt.sign({ id: user._id, role: user.role, email: user.email, purpose: 'auth' }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+  return jwt.sign(
+    { id: user._id, role: user.role, email: user.email, purpose: 'auth', tokenVersion: user.tokenVersion || 0 },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+  );
 }
 
 exports.signup = async (req, res) => {
@@ -173,14 +178,29 @@ exports.login = async (req, res) => {
       return res.status(403).json({ message: 'Please verify your email before logging in.' });
     }
 
-    // Moderation (Part 3, Phase 10): suspended accounts can't log in
-    if (user.suspendedAt) {
+    // Moderation (Part 3, Phase 10 + Trust & Safety): banned and suspended checks
+    if (user.bannedAt) {
       return res.status(403).json({
-        suspended: true,
-        message: user.suspensionReason
-          ? `Your account has been suspended: ${user.suspensionReason}`
-          : 'Your account has been suspended.',
+        banned: true,
+        message: user.banReason ? `Your account has been permanently banned: ${user.banReason}` : 'Your account has been permanently banned.',
       });
+    }
+    if (user.suspendedAt) {
+      if (user.suspensionExpiresAt && new Date(user.suspensionExpiresAt).getTime() < Date.now()) {
+        // auto-expire: clear suspension
+        user.suspendedAt = null;
+        user.suspensionReason = "";
+        user.suspensionExpiresAt = null;
+        await user.save();
+      } else {
+        return res.status(403).json({
+          suspended: true,
+          expiresAt: user.suspensionExpiresAt,
+          message: user.suspensionReason
+            ? `Your account has been suspended: ${user.suspensionReason}`
+            : 'Your account has been suspended.',
+        });
+      }
     }
 
     const token = signJwt(user);
@@ -200,6 +220,7 @@ exports.login = async (req, res) => {
         email: user.email,
         username: user.username,
         role: user.role,
+        isSuperAdmin: isSuperAdminUser(user),
         /* The shell renders the account avatar, the nav avatar and every
          * cached author label from THIS payload — it is the only identity the
          * client stores. Leaving `profile` out meant a member with a photo saw
@@ -371,6 +392,7 @@ exports.getProfile = async (req, res) => {
         email: user.email,
         username: user.username,
         role: user.role,
+        isSuperAdmin: isSuperAdminUser(user),
         verified: user.verified,
         profile: user.profile,
         socialSettings: user.socialSettings,

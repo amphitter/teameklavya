@@ -23,6 +23,7 @@ const LiveMessage = require("../models/liveMessage.model");
 const resultService = require("./result.service");
 const { validateActivity } = require("../services/quizValidation.service");
 const { canManageEvent } = require("../middleware/auth.middleware");
+const { canAccessPrivateEvent } = require("./event-permissions.service");
 // Part 5, Phase 2 — cross-socket rate guards (§24 REALTIME)
 const { SlidingWindow } = require("../utils/frequency-limiter");
 const { LIMITS, REALTIME_CAPS, isRateLimitingDisabled } = require("../config/rate-limits");
@@ -308,7 +309,7 @@ const ENDED_STATES = ["COMPLETED", "CANCELLED"];
 
 async function validateJoin(user, eventId) {
   const event = await Event.findById(eventId).select(
-    "title slug liveState visibility removedAt createdBy liveSettings organization"
+    "title slug liveState visibility removedAt archivedAt createdBy organizerType organizerId liveSettings organization"
   );
   if (!event || event.removedAt) {
     return { ok: false, code: ERROR_CODES.VALIDATION_FAILED, message: "Event not found", event: null };
@@ -317,6 +318,9 @@ async function validateJoin(user, eventId) {
     return { ok: false, code: ERROR_CODES.EVENT_ENDED, message: "This event has already ended", event };
   }
   const isOrganizer = await canManageEvent(user, event);
+  if (event.archivedAt && !isOrganizer) {
+    return { ok: false, code: ERROR_CODES.VALIDATION_FAILED, message: "Event not found", event: null };
+  }
   if (PRE_LIVE_STATES.includes(event.liveState)) {
     return {
       ok: false,
@@ -1015,7 +1019,7 @@ async function commandGuard(socket, payload, needActivityId) {
       emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Activity not found");
       return null;
     }
-    const event = await Event.findById(activity.event).select("liveState removedAt");
+    const event = await Event.findById(activity.event).select("liveState removedAt organizerType organizerId createdBy");
     if (!event || event.removedAt) {
       emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
       return null;
@@ -1199,9 +1203,15 @@ function registerHandlers(socket) {
        * own, no controls — and it can NEVER receive organizer-only data
        * (answer keys, stats), so projecting it leaks nothing. */
       if (payload?.display) {
-        const event = await Event.findById(eventId).select("liveState removedAt");
+        const event = await Event.findById(eventId)
+          .select("liveState removedAt visibility organizerType organizerId createdBy");
         if (!event || event.removedAt) {
           return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
+        }
+        if (!(await canAccessPrivateEvent(user, event))) {
+          const message = "This event is invite-only";
+          if (ack) ack({ ok: false, code: ERROR_CODES.NOT_AUTHORIZED, message });
+          return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, message);
         }
         socket.join(roomKey(eventId));
         socket.data.eventId = eventId;
@@ -1329,7 +1339,7 @@ function registerHandlers(socket) {
       if (!mongoose.isValidObjectId(eventId)) {
         return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Invalid event");
       }
-      const event = await Event.findById(eventId).select("liveState removedAt");
+      const event = await Event.findById(eventId).select("liveState removedAt organizerType organizerId createdBy");
       if (!event || event.removedAt) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
       if (!(await canManageEvent(user, event))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to control this event");
@@ -1361,7 +1371,7 @@ function registerHandlers(socket) {
       const guard = await commandGuard(socket, payload, false);
       if (!guard) return;
       const eventId = String(payload?.eventId || "");
-      const event = await Event.findById(eventId).select("liveState removedAt");
+      const event = await Event.findById(eventId).select("liveState removedAt organizerType organizerId createdBy");
       if (!event || event.removedAt) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
       if (!(await canManageEvent(user, event))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to control this event");
@@ -1389,7 +1399,7 @@ function registerHandlers(socket) {
       const guard = await commandGuard(socket, payload, false);
       if (!guard) return;
       const eventId = String(payload?.eventId || "");
-      const event = await Event.findById(eventId).select("liveState removedAt");
+      const event = await Event.findById(eventId).select("liveState removedAt organizerType organizerId createdBy");
       if (!event || event.removedAt) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
       if (!(await canManageEvent(user, event))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to control this event");
@@ -1419,7 +1429,7 @@ function registerHandlers(socket) {
       const guard = await commandGuard(socket, payload, false);
       if (!guard) return;
       const eventId = String(payload?.eventId || "");
-      const event = await Event.findById(eventId).select("liveState removedAt");
+      const event = await Event.findById(eventId).select("liveState removedAt organizerType organizerId createdBy");
       if (!event || event.removedAt) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
       if (!(await canManageEvent(user, event))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to control this event");
@@ -1446,7 +1456,7 @@ function registerHandlers(socket) {
       }
       // Re-read INSIDE the lock: the winner may have finished between our
       // earlier read and now (double-checked locking).
-      const fresh = await Event.findById(eventId).select("liveState removedAt").lean();
+      const fresh = await Event.findById(eventId).select("liveState removedAt organizerType organizerId createdBy").lean();
       if (!fresh || fresh.removedAt || fresh.liveState === "COMPLETED") {
         await endLock.release().catch(() => {});
         if (ack) ack({ ok: true, alreadyCompleted: true });
@@ -1914,7 +1924,7 @@ function registerHandlers(socket) {
       const guard = await commandGuard(socket, payload, false);
       if (!guard) return;
       const eventId = String(payload?.eventId || "");
-      const event = await Event.findById(eventId).select("liveState removedAt liveSettings");
+      const event = await Event.findById(eventId).select("liveState removedAt archivedAt liveSettings organizerType organizerId createdBy");
       if (!event || event.removedAt) {
         return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
       }
@@ -1943,7 +1953,7 @@ function registerHandlers(socket) {
       const guard = await commandGuard(socket, payload, false);
       if (!guard) return;
       const eventId = String(payload?.eventId || "");
-      const event = await Event.findById(eventId).select("liveState removedAt liveSettings");
+      const event = await Event.findById(eventId).select("liveState removedAt archivedAt liveSettings organizerType organizerId createdBy");
       if (!event || event.removedAt) {
         return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
       }
@@ -2039,7 +2049,7 @@ function registerHandlers(socket) {
       if (!guard) return;
       const doc = await QAQuestion.findById(String(payload?.questionId || ""));
       if (!doc) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Question not found");
-      const ev = await Event.findById(doc.event).select("createdBy removedAt");
+      const ev = await Event.findById(doc.event).select("createdBy removedAt organizerType organizerId");
       if (!ev || ev.removedAt || !(await canManageEvent(socket.data.user, ev))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to moderate this event");
       }
@@ -2067,7 +2077,7 @@ function registerHandlers(socket) {
       }
       const doc = await QAQuestion.findById(String(payload?.questionId || ""));
       if (!doc) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Question not found");
-      const ev = await Event.findById(doc.event).select("createdBy removedAt");
+      const ev = await Event.findById(doc.event).select("createdBy removedAt organizerType organizerId");
       if (!ev || ev.removedAt || !(await canManageEvent(socket.data.user, ev))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to moderate this event");
       }
@@ -2091,7 +2101,7 @@ function registerHandlers(socket) {
       if (!guard) return;
       const doc = await QAQuestion.findById(String(payload?.questionId || ""));
       if (!doc) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Question not found");
-      const ev = await Event.findById(doc.event).select("createdBy removedAt");
+      const ev = await Event.findById(doc.event).select("createdBy removedAt organizerType organizerId");
       if (!ev || ev.removedAt || !(await canManageEvent(socket.data.user, ev))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to moderate this event");
       }
@@ -2174,7 +2184,7 @@ function registerHandlers(socket) {
         if (ack) ack({ ok: true, alreadyDeleted: true });
         return;
       }
-      const ev = await Event.findById(msg.event).select("createdBy removedAt");
+      const ev = await Event.findById(msg.event).select("createdBy removedAt organizerType organizerId");
       if (!ev || ev.removedAt || !(await canManageEvent(socket.data.user, ev))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to moderate this event");
       }
@@ -2196,7 +2206,7 @@ function registerHandlers(socket) {
       if (!guard) return;
       const msg = await LiveMessage.findById(String(payload?.messageId || ""));
       if (!msg || msg.deletedAt) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Message not found");
-      const ev = await Event.findById(msg.event).select("createdBy removedAt");
+      const ev = await Event.findById(msg.event).select("createdBy removedAt organizerType organizerId");
       if (!ev || ev.removedAt || !(await canManageEvent(socket.data.user, ev))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to moderate this event");
       }
@@ -2230,7 +2240,7 @@ function registerHandlers(socket) {
       const eventId = String(payload?.eventId || "");
       const targetId = String(payload?.userId || "");
       const muted = Boolean(payload?.muted);
-      const event = await Event.findById(eventId).select("createdBy removedAt");
+      const event = await Event.findById(eventId).select("createdBy removedAt organizerType organizerId");
       if (!event || event.removedAt) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
       if (!(await canManageEvent(socket.data.user, event))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to moderate this event");
@@ -2265,7 +2275,7 @@ function registerHandlers(socket) {
       if (!text || text.length > 300) {
         return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Announcement must be 1–300 characters");
       }
-      const event = await Event.findById(eventId).select("liveState removedAt");
+      const event = await Event.findById(eventId).select("liveState removedAt organizerType organizerId createdBy");
       if (!event || event.removedAt) return emitError(socket, ERROR_CODES.VALIDATION_FAILED, "Event not found");
       if (!(await canManageEvent(socket.data.user, event))) {
         return emitError(socket, ERROR_CODES.NOT_AUTHORIZED, "You are not allowed to run this event");
@@ -2404,9 +2414,12 @@ function init(socketIo) {
 
 /** HTTP-facing: role-scoped live state (used by GET /api/events/:id/live/state). */
 async function liveStateFor(eventId, user) {
-  const event = await Event.findById(eventId).select("removedAt");
+  const event = await Event.findById(eventId)
+    .select("removedAt archivedAt visibility organizerType organizerId createdBy");
   if (!event || event.removedAt) return { notFound: true };
-  const isOrganizer = await canManageEvent(user, { _id: eventId });
+  const isOrganizer = await canManageEvent(user, event);
+  if (event.archivedAt && !isOrganizer) return { notFound: true };
+  if (!(await canAccessPrivateEvent(user, event))) return { notFound: true };
   if (isOrganizer) return { organizer: await stateForOrganizer(eventId) };
   return { participant: await stateForParticipant(eventId, user.id) };
 }

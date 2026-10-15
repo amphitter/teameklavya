@@ -67,25 +67,18 @@ function DiscoverContent() {
     load();
   }, [load]);
 
-  // Real categories from the backend (no hard-coded lists).
-  // §15 — this barely ever changes, so it is cached for 5 minutes and shared
-  // with any other surface that asks for the same key.
-  const { data: meta } = useQuery<{ categories?: string[] }>(
-    ["event-categories"],
-    "/events/meta/categories",
-    { staleTime: 5 * 60_000 }
-  );
+  const { data: meta } = useQuery<{ categories?: string[] }>(["event-categories"], "/events/meta/categories", {
+    staleTime: 5 * 60_000,
+  });
   useEffect(() => {
     if (meta?.categories) setCategories(meta.categories);
   }, [meta]);
 
-  // Reset page when filters change
   useEffect(() => {
     setPage(1);
   }, [query, category, eventType, when, featuredOnly]);
 
-  const hasActiveFilters =
-    query !== "" || category !== "all" || eventType !== "all" || when !== "upcoming" || featuredOnly;
+  const hasActiveFilters = query !== "" || category !== "all" || eventType !== "all" || when !== "upcoming" || featuredOnly;
 
   const clearFilters = () => {
     setQuery("");
@@ -96,204 +89,192 @@ function DiscoverContent() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-      {/* Header */}
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-          Discover events
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Find hackathons, workshops, meetups and more
-        </p>
-      </div>
+    <div className="min-h-screen bg-[#F8FAFF] dark:bg-black">
+      <div className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-[26px] font-bold tracking-[-0.015em] text-[#0B1235] dark:text-[#ededed] sm:text-[32px] sm:leading-[40px] sm:tracking-[-0.02em]" style={{ fontFamily: "Inter, sans-serif" }}>
+            Discover events
+          </h1>
+          <p className="text-[14px] leading-5 text-[#64709A] dark:text-[#a1a1aa]" style={{ fontFamily: "Inter, sans-serif" }}>
+            Find hackathons, workshops, meetups and more — curated for builders
+          </p>
+        </div>
 
-      {/* Search + filter toggle */}
-      <div className="mt-6 flex gap-2">
-        <form
-          className="relative flex-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setPage(1);
-            load();
-          }}
-        >
-          <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search events…"
-            className="h-11 w-full rounded-full border border-input bg-card pl-11 pr-10 text-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-          />
-          {query && (
-            <button
-              type="button"
-              onClick={() => setQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              aria-label="Clear search"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </form>
-        <Button
-          variant="outline"
-          className="h-11 shrink-0 rounded-full px-4"
-          onClick={() => setShowFilters((s) => !s)}
-        >
-          <SlidersHorizontal className="mr-1.5 h-4 w-4" />
-          Filters
-        </Button>
-      </div>
-
-      {/* Filters */}
-      {showFilters && (
-        <div className="mt-4 grid gap-4 rounded-xl border border-border bg-card p-4 sm:grid-cols-3">
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-              Format
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {EVENT_TYPES.map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => setEventType(t.value)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                    eventType === t.value
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
-                  )}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-              When
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {WHEN.map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => setWhen(t.value)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                    when === t.value
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
-                  )}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-              Category
-            </label>
-            <div className="flex flex-wrap gap-1.5">
+        <div className="mt-6 flex gap-2">
+          <form
+            className="relative flex-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setPage(1);
+              load();
+            }}
+          >
+            <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#64709A]" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search events…"
+              className="h-12 w-full rounded-[12px] border border-[#E4E9F4] bg-white pl-12 pr-10 text-[15px] leading-6 text-[#0B1235] outline-none transition-all placeholder:text-[#64709A] focus:border-[#2563FF] focus:ring-[3px] focus:ring-[rgba(37,99,255,0.12)] dark:border-[#262626] dark:bg-[#0a0a0a] dark:text-[#ededed] dark:placeholder:text-[#a1a1aa]"
+              style={{ fontFamily: "Inter, sans-serif" }}
+            />
+            {query && (
               <button
-                onClick={() => setCategory("all")}
-                className={cn(
-                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                  category === "all"
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
-                )}
+                type="button"
+                onClick={() => setQuery("")}
+                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[#64709A] hover:bg-[#F8FAFF] hover:text-[#0B1235] dark:hover:bg-[#171717] dark:hover:text-[#ededed]"
+                aria-label="Clear search"
               >
-                All
+                <X className="h-4 w-4" />
               </button>
-              {categories.map((c) => (
+            )}
+          </form>
+          <Button
+            variant="outline"
+            className="h-12 shrink-0 rounded-[12px] border-[#E4E9F4] bg-white px-5 text-[14px] font-semibold text-[#0B1235] hover:border-[#2563FF] hover:bg-[#EFF6FF] dark:border-[#262626] dark:bg-[#0a0a0a] dark:text-[#ededed] dark:hover:bg-[#171717] dark:hover:border-[#3b82f6]"
+            onClick={() => setShowFilters((s) => !s)}
+            style={{ fontFamily: "Inter, sans-serif" }}
+          >
+            <SlidersHorizontal className="mr-2 h-4 w-4" />
+            Filters
+          </Button>
+        </div>
+
+        {showFilters && (
+          <div className="mt-4 grid gap-5 rounded-[1rem] border border-[#E4E9F4] bg-white p-5 shadow-[0px_4px_16px_rgba(24,39,75,0.04)] dark:border-[#262626] dark:bg-[#0a0a0a] sm:grid-cols-3 animate-fade-in">
+            <div>
+              <label className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.03em] text-[#64709A] dark:text-[#a1a1aa]">Format</label>
+              <div className="flex flex-wrap gap-2">
+                {EVENT_TYPES.map((t) => (
+                  <button
+                    key={t.value}
+                    onClick={() => setEventType(t.value)}
+                    className={cn(
+                      "inline-flex h-9 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.02em] transition-all",
+                      eventType === t.value
+                        ? "border-[#2563FF] bg-[#2563FF] text-white shadow-[0px_8px_24px_rgba(37,99,255,0.25)]"
+                        : "border-[#E4E9F4] bg-white text-[#64709A] hover:border-[#2563FF]/40 hover:bg-[#EFF6FF] hover:text-[#2563FF] dark:border-[#262626] dark:bg-black dark:text-[#a1a1aa] dark:hover:bg-[#171717] dark:hover:border-[#3b82f6]/40 dark:hover:text-[#ededed]"
+                    )}
+                    style={{ fontFamily: "Inter, sans-serif" }}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.03em] text-[#64709A] dark:text-[#a1a1aa]">When</label>
+              <div className="flex flex-wrap gap-2">
+                {WHEN.map((t) => (
+                  <button
+                    key={t.value}
+                    onClick={() => setWhen(t.value)}
+                    className={cn(
+                      "inline-flex h-9 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.02em] transition-all",
+                      when === t.value
+                        ? "border-[#2563FF] bg-[#2563FF] text-white shadow-[0px_8px_24px_rgba(37,99,255,0.25)]"
+                        : "border-[#E4E9F4] bg-white text-[#64709A] hover:border-[#2563FF]/40 hover:bg-[#EFF6FF] hover:text-[#2563FF] dark:border-[#262626] dark:bg-black dark:text-[#a1a1aa] dark:hover:bg-[#171717] dark:hover:border-[#3b82f6]/40 dark:hover:text-[#ededed]"
+                    )}
+                    style={{ fontFamily: "Inter, sans-serif" }}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.03em] text-[#64709A] dark:text-[#a1a1aa]">Category</label>
+              <div className="flex flex-wrap gap-2">
                 <button
-                  key={c}
-                  onClick={() => setCategory(c)}
+                  onClick={() => setCategory("all")}
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                    category === c
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
+                    "inline-flex h-9 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.02em] transition-all",
+                    category === "all"
+                      ? "border-[#2563FF] bg-[#2563FF] text-white shadow-[0px_8px_24px_rgba(37,99,255,0.25)]"
+                      : "border-[#E4E9F4] bg-white text-[#64709A] hover:border-[#2563FF]/40 hover:bg-[#EFF6FF] hover:text-[#2563FF] dark:border-[#262626] dark:bg-black dark:text-[#a1a1aa]"
                   )}
+                  style={{ fontFamily: "Inter, sans-serif" }}
                 >
-                  {c}
+                  All
                 </button>
+                {categories.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setCategory(c)}
+                    className={cn(
+                      "inline-flex h-9 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.02em] transition-all",
+                      category === c
+                        ? "border-[#2563FF] bg-[#2563FF] text-white shadow-[0px_8px_24px_rgba(37,99,255,0.25)]"
+                        : "border-[#E4E9F4] bg-white text-[#64709A] hover:border-[#2563FF]/40 hover:bg-[#EFF6FF] hover:text-[#2563FF] dark:border-[#262626] dark:bg-black dark:text-[#a1a1aa]"
+                    )}
+                    style={{ fontFamily: "Inter, sans-serif" }}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {hasActiveFilters && (
+              <button onClick={clearFilters} className="text-[12px] font-semibold tracking-[0.02em] text-[#2563FF] hover:text-[#1677FF] hover:underline sm:col-span-3 sm:justify-self-end" style={{ fontFamily: "Inter, sans-serif" }}>
+                Clear all filters
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="mt-8">
+          {error ? (
+            <ErrorState title="Couldn't load events" description="Please check your connection and try again." onRetry={load} />
+          ) : loading ? (
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <EventCardSkeleton key={i} />
               ))}
             </div>
-          </div>
-          {hasActiveFilters && (
-            <button
-              onClick={clearFilters}
-              className="text-xs font-semibold text-primary hover:underline sm:col-span-3 sm:justify-self-end"
-            >
-              Clear all filters
-            </button>
+          ) : events.length === 0 ? (
+            <EmptyState
+              icon={Compass}
+              title="No events found"
+              description={hasActiveFilters ? "Try adjusting or clearing your filters to see more events." : "New events are added regularly — check back soon!"}
+              actionLabel={hasActiveFilters ? "Clear filters" : "Explore all events"}
+              onAction={hasActiveFilters ? clearFilters : undefined}
+              action={!hasActiveFilters ? <Button size="sm" asChild className="h-9 rounded-full bg-[#2563FF] text-white hover:bg-[#1677FF]"><Link href="/events">Browse</Link></Button> : undefined}
+            />
+          ) : (
+            <>
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {events.map((event) => (
+                  <EventCard key={event._id} event={event} />
+                ))}
+              </div>
+
+              {pagination.pages > 1 && (
+                <div className="mt-10 flex items-center justify-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-10 rounded-[10px] border-[#E4E9F4] bg-white text-[#0B1235] hover:border-[#2563FF] hover:bg-[#EFF6FF] dark:border-[#262626] dark:bg-[#0a0a0a] dark:text-[#ededed] dark:hover:border-[#3b82f6]"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-4 w-4" /> Prev
+                  </Button>
+                  <span className="text-[13px] font-medium text-[#64709A] dark:text-[#a1a1aa]" style={{ fontFamily: "Inter, sans-serif" }}>
+                    Page {pagination.page} of {pagination.pages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-10 rounded-[10px] border-[#E4E9F4] bg-white text-[#0B1235] hover:border-[#2563FF] hover:bg-[#EFF6FF] dark:border-[#262626] dark:bg-[#0a0a0a] dark:text-[#ededed] dark:hover:border-[#3b82f6]"
+                    disabled={page >= pagination.pages}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
-      )}
-
-      {/* Results */}
-      <div className="mt-8">
-        {error ? (
-          <ErrorState
-            title="Couldn't load events"
-            description="Please check your connection and try again."
-            onRetry={load}
-          />
-        ) : loading ? (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <EventCardSkeleton key={i} />
-            ))}
-          </div>
-        ) : events.length === 0 ? (
-          <EmptyState
-            icon={Compass}
-            title="No events found"
-            description={
-              hasActiveFilters
-                ? "Try adjusting or clearing your filters to see more events."
-                : "New events are added regularly — check back soon!"
-            }
-            actionLabel={hasActiveFilters ? "Clear filters" : "Explore all events"}
-            onAction={hasActiveFilters ? clearFilters : undefined}
-            action={!hasActiveFilters ? <Button size="sm" asChild><Link href="/events">Browse</Link></Button> : undefined}
-          />
-        ) : (
-          <>
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {events.map((event) => (
-                <EventCard key={event._id} event={event} />
-              ))}
-            </div>
-
-            {/* Pagination */}
-            {pagination.pages > 1 && (
-              <div className="mt-10 flex items-center justify-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  <ChevronLeft className="h-4 w-4" /> Prev
-                </Button>
-                <span className="text-sm text-muted-foreground">
-                  Page {pagination.page} of {pagination.pages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page >= pagination.pages}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-          </>
-        )}
       </div>
     </div>
   );

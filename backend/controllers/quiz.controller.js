@@ -2,16 +2,23 @@ const Quiz = require("../models/quiz.model");
 const QuizParticipation = require("../models/quizParticipation.model");
 const Event = require("../models/event.model");
 const { canManageEvent } = require("../middleware/auth.middleware");
+const { canAccessPrivateEvent } = require("../services/event-permissions.service");
 
 const USER_FIELDS = "firstName lastName username profile";
-const EVENT_FIELDS = "title slug createdBy";
+const EVENT_FIELDS = "title slug visibility createdBy organizerType organizerId";
 
 /* ── helpers ─────────────────────────────────────────────── */
 
 function sanitizeQuiz(quiz, isManager) {
-  const o = quiz.toObject ? quiz.toObject() : quiz;
+  const o = quiz.toObject ? quiz.toObject() : { ...quiz };
+  const safe = { ...o };
+  if (safe.event && typeof safe.event === "object") {
+    safe.event = { ...safe.event };
+    delete safe.event.organizerType;
+    delete safe.event.organizerId;
+  }
   return {
-    ...o,
+    ...safe,
     questionCount: o.questions?.length || 0,
     // participants never see the answer key
     questions: isManager
@@ -199,7 +206,13 @@ exports.deleteQuiz = async (req, res) => {
 // GET /api/quizzes/event/:eventId
 exports.getEventQuizzes = async (req, res) => {
   try {
-    const quizzes = await Quiz.find({ event: req.params.eventId }).sort({ createdAt: -1 }).lean();
+    const event = await Event.findById(req.params.eventId)
+      .select("_id visibility createdBy organizerType organizerId")
+      .lean();
+    if (!event || !(await canAccessPrivateEvent(req.user, event))) {
+      return res.status(404).json({ success: false, message: "Event not found" });
+    }
+    const quizzes = await Quiz.find({ event: event._id }).sort({ createdAt: -1 }).lean();
     const list = await Promise.all(
       quizzes.map(async (q) => ({
         _id: q._id,
@@ -223,7 +236,9 @@ exports.getEventQuizzes = async (req, res) => {
 exports.getQuizById = async (req, res) => {
   try {
     const quiz = await Quiz.findById(req.params.id).populate("event", EVENT_FIELDS).lean();
-    if (!quiz) return res.status(404).json({ success: false, message: "Quiz not found" });
+    if (!quiz || !quiz.event || !(await canAccessPrivateEvent(req.user, quiz.event))) {
+      return res.status(404).json({ success: false, message: "Quiz not found" });
+    }
 
     const isManager = await canManageEvent(req.user, quiz.event);
     const participation = req.user
@@ -246,8 +261,10 @@ exports.getQuizById = async (req, res) => {
 exports.submitAnswer = async (req, res) => {
   try {
     const { questionIndex, optionIndex } = req.body;
-    const quiz = await Quiz.findById(req.params.id);
-    if (!quiz) return res.status(404).json({ success: false, message: "Quiz not found" });
+    const quiz = await Quiz.findById(req.params.id).populate("event", EVENT_FIELDS);
+    if (!quiz || !quiz.event || !(await canAccessPrivateEvent(req.user, quiz.event))) {
+      return res.status(404).json({ success: false, message: "Quiz not found" });
+    }
     if (quiz.status !== "live") {
       return res.status(400).json({ success: false, message: "This quiz isn't live right now" });
     }
@@ -299,8 +316,13 @@ exports.submitAnswer = async (req, res) => {
 // GET /api/quizzes/:id/leaderboard
 exports.getLeaderboard = async (req, res) => {
   try {
-    const quiz = await Quiz.findById(req.params.id).select("status").lean();
-    if (!quiz) return res.status(404).json({ success: false, message: "Quiz not found" });
+    const quiz = await Quiz.findById(req.params.id)
+      .select("status event")
+      .populate("event", EVENT_FIELDS)
+      .lean();
+    if (!quiz || !quiz.event || !(await canAccessPrivateEvent(req.user, quiz.event))) {
+      return res.status(404).json({ success: false, message: "Quiz not found" });
+    }
     const board = await leaderboardFor(req.params.id, req.user?.id);
     res.json({ success: true, ...board });
   } catch (error) {

@@ -1,12 +1,41 @@
 const Notification = require("../models/notification.model");
 const User = require("../models/user.model");
 
+// Claude #8: Budgeted notifications — cap pushes at ~3/week by default, only 4 triggers matter + weekly digest
+// Critical types bypass budget: approval/rejection/cancellation/changes/registration
+const CRITICAL_TYPES = new Set([
+  "event_approved",
+  "event_rejected",
+  "event_cancelled",
+  "event_changes_requested",
+  "event_registration",
+  "registration_confirmed",
+  "ticket_ready",
+]);
+const DEFAULT_WEEKLY_CAP = 3;
+
+async function checkBudget(userId, type) {
+  if (CRITICAL_TYPES.has(type)) return true; // never cap critical
+  try {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    const count = await Notification.countDocuments({
+      user: userId,
+      createdAt: { $gte: weekAgo },
+      type: { $nin: Array.from(CRITICAL_TYPES) },
+    });
+    return count < DEFAULT_WEEKLY_CAP;
+  } catch {
+    return true; // fail open
+  }
+}
+
 /**
  * Fire-and-forget notification creator. Never throws — a failing
  * notification must never break the action that triggered it.
  * Self-notifications are skipped. Per-type mute preferences (user.
  * notificationPrefs) are honoured — the client can never override this.
  * actor may be null for system notifications (reminders, achievements).
+ * Budgeted: ~3/week cap for non-critical, critical bypasses.
  */
 async function notify({ user, actor = null, type, post = undefined, event = undefined, organization = undefined, community = undefined }) {
   try {
@@ -14,6 +43,10 @@ async function notify({ user, actor = null, type, post = undefined, event = unde
     if (actor && String(user) === String(actor)) return;
     const recipient = await User.findById(user).select("notificationPrefs").lean();
     if (!recipient || recipient.notificationPrefs?.[type]) return; // muted
+    if (!(await checkBudget(user, type))) {
+      console.log(`[notify] budget cap hit for ${user} type ${type} — skipped`);
+      return;
+    }
     await Notification.create({ user, actor, type, post, event, organization, community });
   } catch (err) {
     console.error("Notification create failed:", err.message);

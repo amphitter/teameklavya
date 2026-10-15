@@ -290,7 +290,46 @@ function publishMessage({ conversation, message, participantIds, senderId }) {
       recipientArchived: archivedBy.includes(pid),
     });
   }
+
+  // Low-latency upgrade: if any recipient besides sender is currently online,
+  // emit dm:delivered to sender immediately — drives Sent→Delivered without DB write.
+  // No DB write — ephemeral, best-effort.
+  try {
+    const onlineRecipients = ids.filter((id) => id !== String(senderId) && isUserOnline(id));
+    if (onlineRecipients.length) {
+      const at = new Date();
+      for (const recipientId of onlineRecipients) {
+        emitToUser(senderId, EVENTS.S_DM_DELIVERED, {
+          conversationId: String(conversation._id),
+          messageIds: [String(message._id)],
+          at,
+          recipientId,
+        });
+      }
+    }
+  } catch {
+    /* delivered is best-effort */
+  }
+
   return base;
+}
+
+/**
+ * Publish delivered receipt — called when recipient's client acks receipt
+ * via socket or when they come online and have undelivered messages.
+ * No DB write, ephemeral, per spec § reliable delivery lifecycle.
+ */
+function publishDelivered({ conversationId, messageIds, recipientId, senderIds }) {
+  const at = new Date();
+  for (const senderId of (senderIds || []).map(String)) {
+    if (senderId === String(recipientId)) continue;
+    emitToUser(senderId, EVENTS.S_DM_DELIVERED, {
+      conversationId: String(conversationId),
+      messageIds: (messageIds || []).map(String),
+      at,
+      recipientId: String(recipientId),
+    });
+  }
 }
 
 /**
@@ -502,6 +541,7 @@ module.exports = {
   publishTyping,
   publishRead,
   publishDeleted,
+  publishDelivered,
   emitToUser,
   isUserConnected,
   isUserOnline,

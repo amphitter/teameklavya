@@ -22,7 +22,14 @@ const { parseLimit, buildPage, withCursor } = require("./cursor");
 /** Notification row projection — enough to render an item (§6). */
 const FIELDS =
   "_id type actor post event organization community conversation read createdAt";
-const ACTOR_FIELDS = "firstName lastName username profile.avatar";
+const POPULATE = [
+  { path: "actor", select: "firstName lastName username profile" },
+  { path: "post", select: "content" },
+  { path: "event", select: "title slug" },
+  { path: "organization", select: "name slug" },
+  { path: "community", select: "name slug" },
+  { path: "conversation", select: "_id" },
+];
 
 /** Short TTL — the badge must feel live; event-driven invalidation does the rest. */
 const UNREAD_TTL = 15 * 1000;
@@ -39,7 +46,7 @@ async function listForUser({ userId, limit, cursor, unreadOnly = false }) {
 
   const rows = await Notification.find(withCursor(filter, cursor))
     .select(FIELDS)
-    .populate("actor", ACTOR_FIELDS)
+    .populate(POPULATE)
     .sort({ createdAt: -1, _id: -1 })
     .limit(size + 1)
     .lean();
@@ -73,5 +80,5 @@ async function invalidate(userId) {
 module.exports = {
   NotificationRepository: { listForUser, unreadCount, invalidate },
   FIELDS,
-  ACTOR_FIELDS,
+  POPULATE,
 };

@@ -68,15 +68,27 @@ export default function ProfileView() {
   useEffect(() => {
     (async () => {
       try {
-        const meRes = await api.get("/auth/me").catch(() => null);
-        if (!meRes?.data?.user) {
+        // Use shared deduped session query (Priority 2)
+        const { dedupedFetch, keyToString, queryCache } = await import("@/lib/query");
+        const cacheKey = keyToString(["session"]);
+        let meData: any = queryCache.get(cacheKey)?.data;
+        if (!meData) {
+          try {
+            meData = await dedupedFetch(cacheKey, "/auth/me");
+            queryCache.setData(cacheKey, meData);
+          } catch {
+            meData = null;
+          }
+        }
+        const userFromCache = (meData as any)?.user || meData;
+        if (!userFromCache?._id && !userFromCache?.id) {
           localStorage.removeItem("token");
           localStorage.removeItem("role");
           localStorage.removeItem("user");
           router.replace("/login?returnUrl=%2Fuser%2Fprofile");
           return;
         }
-        const u = meRes.data.user;
+        const u = userFromCache;
         setUser(u);
         setEditForm({
           institution: u.profile?.institution || "",

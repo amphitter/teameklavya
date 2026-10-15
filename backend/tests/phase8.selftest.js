@@ -79,7 +79,16 @@ function eq(label, actual, expected) {
       if (/expireAfterSeconds/.test(line)) ttlHits.push(`${f}:${i + 1}`);
     });
   }
-  ok("no TTL index exists on any model", ttlHits.length === 0, ttlHits.join(", "));
+  const unexpectedTtlHits = ttlHits.filter((hit) => !hit.startsWith("post-impression.model.js:"));
+  ok("the only TTL is the scoped, temporary seen-impression index", ttlHits.length === 1 && unexpectedTtlHits.length === 0, ttlHits.join(", "));
+  const impressionSrc = fs.readFileSync(path.join(modelsDir, "post-impression.model.js"), "utf8");
+  ok("seen-impression TTL excludes dismissed records", /partialFilterExpression:\s*\{\s*kind:\s*[\"']seen[\"']\s*\}/.test(impressionSrc));
+
+  // Communication history is paired by the explicit 90-day sweeper.
+  for (const file of ["communication.model.js", "communicationDelivery.model.js"]) {
+    const source = fs.readFileSync(path.join(modelsDir, file), "utf8");
+    ok(`${file} has no TTL index`, !/expireAfterSeconds/.test(source));
+  }
 
   // The two specific traps, asserted separately so a failure says WHICH one.
   const userSrc = fs.readFileSync(path.join(modelsDir, "user.model.js"), "utf8");

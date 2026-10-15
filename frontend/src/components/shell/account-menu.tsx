@@ -18,6 +18,7 @@ import {
   Archive,
   Bell,
   Bookmark,
+  Building2,
   Heart,
   LayoutDashboard,
   LogOut,
@@ -40,6 +41,7 @@ import { useSessionUser } from "@/components/shell/use-session-user";
 import { useLogout } from "@/components/shell/use-logout";
 import { useTheme } from "@/context/ThemeContext";
 import { cn } from "@/lib/utils";
+import { hasPlatformAdminAccess } from "@/lib/superAdmin";
 
 /** The signed-in avatar (or a placeholder), always through the canonical crop. */
 export function AccountAvatar({ size = 32, user }: { size?: number; user?: any }) {
@@ -84,6 +86,11 @@ export function AccountMenu({ children }: { children: React.ReactNode }) {
             <Ticket className="h-4 w-4" /> My events &amp; tickets
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuItem asChild className="gap-2.5 py-2.5">
+          <Link href="/user/organizations">
+            <Building2 className="h-4 w-4" /> My organizations
+          </Link>
+        </DropdownMenuItem>
         {/* The feed's top bar carries the bell, but that bar is feed-only — and
             the bottom nav is navigation, not notifications. Without this entry a
             phone could only reach /notifications from the feed. */}
@@ -122,7 +129,7 @@ export function AccountMenu({ children }: { children: React.ReactNode }) {
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           {theme === "dark" ? "Light mode" : "Dark mode"}
         </DropdownMenuItem>
-        {role === "admin" && (
+        {hasPlatformAdminAccess(role, user) && (
           <DropdownMenuItem asChild className="gap-2.5 py-2.5">
             <Link href="/admin/dashboard">
               <LayoutDashboard className="h-4 w-4" /> Organizer dashboard

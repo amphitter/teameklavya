@@ -5,7 +5,7 @@ const { idempotencyWindow } = require("../middleware/idempotency");
 
 const router = express.Router();
 const registrationController = require("../controllers/registration.controller");
-const { requireAuth, requireAdmin, optionalUser } = require("../middleware/auth.middleware");
+const { requireAuth, optionalUser, requireEventManager } = require("../middleware/auth.middleware");
 
 // Public: get registration form for an event
 router.get("/form/:eventId", optionalUser, registrationController.getForm);
@@ -20,8 +20,8 @@ router.post("/responses/counts/batch", registrationController.getRegistrationCou
 router.get("/responses/:eventId/count", registrationController.getRegistrationCount);
 
 // Admin routes
-router.get("/responses/:eventId", requireAuth, requireAdmin, registrationController.getEventResponses);
-router.get("/responses/:eventId/export", requireAuth, requireAdmin, registrationController.exportRegistrations);
-router.get("/responses/:id/stats", requireAuth, requireAdmin, registrationController.getRegistrationStats);
+router.get("/responses/:eventId", requireAuth, requireEventManager, registrationController.getEventResponses);
+router.get("/responses/:eventId/export", requireAuth, requireEventManager, registrationController.exportRegistrations);
+router.get("/responses/:id/stats", requireAuth, requireEventManager, registrationController.getRegistrationStats);
 
 module.exports = router;

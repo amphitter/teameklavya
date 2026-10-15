@@ -103,40 +103,57 @@
   --text-label-sm: 0.6875rem; /* 11/600/+0.03em */
 }
 
-/* ── Dark mode — designed, not inverted ────────────────────
-   Deep navy surfaces, brighter brand for contrast,
-   tinted state surfaces instead of light pastels. */
+/* ── Dark mode — TRUE BLACK (user requested: pehle black tha)
+   Pure black #000000 background, #0a0a0a cards, #121212 popover
+   Borders #262626, inputs #262626, muted #171717
+   Brand stays Vibrant Pulse but brighter for contrast on black */
 .dark {
-  --color-background: #0a111c;
-  --color-foreground: #e6ecf5;
-  --color-card: #101b2b;
-  --color-card-foreground: #e6ecf5;
-  --color-popover: #131f30;
-  --color-popover-foreground: #e6ecf5;
-  --color-primary: #4b95f7;
-  --color-primary-foreground: #08101d;
-  --color-secondary: #182740;
-  --color-secondary-foreground: #e6ecf5;
-  --color-muted: #172438;
-  --color-muted-foreground: #8fa0b5;
-  --color-accent: #182740;
-  --color-accent-foreground: #e6ecf5;
-  --color-destructive: #f05252;
-  --color-destructive-foreground: #08101d;
-  --color-success: #34c977;
-  --color-success-light: #0f2a1d;
-  --color-warning: #f5a623;
-  --color-warning-light: #2f230e;
-  --color-border: #223349;
-  --color-input: #2a3d57;
-  --color-ring: #4b95f7;
-  --color-navy: #e6ecf5;
-  --color-brand: #4b95f7;
-  --color-brand-dark: #2b7be8;
-  --color-brand-light: #142a45;
-  --color-purple: #8f7bff;
-  --color-purple-light: #1e1c3f;
-  --color-cyan: #3ec4f5;
+  --color-background: #000000;
+  --color-foreground: #ededed;
+  --color-card: #0a0a0a;
+  --color-card-foreground: #ededed;
+  --color-popover: #121212;
+  --color-popover-foreground: #ededed;
+  --color-primary: #3b82f6;
+  --color-primary-foreground: #000000;
+  --color-secondary: #1a1a1a;
+  --color-secondary-foreground: #ededed;
+  --color-muted: #171717;
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: #1a1a1a;
+  --color-accent-foreground: #ededed;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #000000;
+  --color-success: #22c55e;
+  --color-success-light: #052e16;
+  --color-warning: #f59e0b;
+  --color-warning-light: #1c1500;
+  --color-border: #262626;
+  --color-input: #262626;
+  --color-ring: #3b82f6;
+  --color-navy: #ededed;
+  --color-brand: #3b82f6;
+  --color-brand-dark: #2563ff;
+  --color-brand-light: #0f172a;
+  --color-purple: #8b5cf6;
+  --color-purple-light: #1e1b2e;
+  --color-cyan: #22d3ee;
+  --color-surface: #000000;
+  --color-surface-container-lowest: #0a0a0a;
+  --color-surface-container-low: #171717;
+  --color-surface-container: #1a1a1a;
+  --color-surface-container-high: #262626;
+  --color-surface-container-highest: #2e2e2e;
+  --color-surface-variant: #262626;
+  --color-inverse-surface: #ededed;
+  --color-inverse-on-surface: #0a0a0a;
+  --color-outline: #404040;
+  --color-outline-variant: #262626;
+  --color-on-surface: #ededed;
+  --color-on-surface-variant: #a1a1aa;
+  --shadow-card: 0px 4px 16px rgba(0, 0, 0, 0.5), 0px 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-float: 0px 10px 40px rgba(0, 0, 0, 0.6), 0px 2px 6px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0px 8px 24px rgba(59, 130, 246, 0.25);
 }
 
 /* ── Base ───────────────────────────────────────────────── */

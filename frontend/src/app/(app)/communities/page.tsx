@@ -7,6 +7,7 @@ import { api } from "@/utils/api";
 import { useSessionUser } from "@/components/shell/use-session-user";
 import { PageLoader, ErrorState, EmptyState } from "@/components/states";
 import { Button } from "@/components/ui/button";
+import { hasPlatformAdminAccess } from "@/lib/superAdmin";
 import {
   Dialog,
   DialogContent,
@@ -49,7 +50,8 @@ export default function CommunitiesPage() {
   const [q, setQ] = useState("");
   const [items, setItems] = useState<CommunityCard[]>([]);
   const [hasMore, setHasMore] = useState(false);
-  const [page, setPage] = useState(1);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Create dialog (admins / org managers)
   const [showCreate, setShowCreate] = useState(false);
@@ -59,25 +61,32 @@ export default function CommunitiesPage() {
   const [formError, setFormError] = useState("");
 
   const load = useCallback(
-    (nextPage: number, query: string) => {
-      setLoading(true);
-      setError(false);
+    (cursor: string | null, query: string, append = false) => {
+      if (append && !cursor) return;
+      if (append) setLoadingMore(true);
+      else {
+        setLoading(true);
+        setError(false);
+      }
       api
-        .get("/communities", { params: { page: nextPage, limit: 12, q: query || undefined } })
+        .get("/communities", { params: { limit: 12, q: query || undefined, cursor: cursor || undefined } })
         .then((res) => {
           const list: CommunityCard[] = res.data?.communities || [];
-          setItems((prev) => (nextPage === 1 ? list : [...prev, ...list]));
+          setItems((previous) => append ? [...previous, ...list] : list);
           setHasMore(Boolean(res.data?.hasMore));
-          setPage(nextPage);
+          setNextCursor(res.data?.nextCursor || null);
         })
         .catch(() => setError(true))
-        .finally(() => setLoading(false));
+        .finally(() => {
+          setLoading(false);
+          setLoadingMore(false);
+        });
     },
     []
   );
 
   useEffect(() => {
-    load(1, "");
+    load(null, "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -90,14 +99,14 @@ export default function CommunitiesPage() {
       .catch(() => {});
   }, [user]);
 
-  const isAdmin = role === "admin";
+  const isAdmin = hasPlatformAdminAccess(role, user);
   // Any signed-in user may try — the backend requires an institutional email
   // (domain = affiliation signal only; verification is always manual review)
   const canCreate = Boolean(user);
 
   const submitSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    load(1, q.trim());
+    load(null, q.trim());
   };
 
   const createCommunity = () => {
@@ -115,7 +124,7 @@ export default function CommunitiesPage() {
         if (r.data?.success) {
           setShowCreate(false);
           setForm({ name: "", description: "", joinPolicy: "open", organizationId: "" });
-          load(1, q.trim());
+          load(null, q.trim());
         } else {
           setFormError(r.data?.message || "Couldn't create community");
         }
@@ -128,7 +137,7 @@ export default function CommunitiesPage() {
   if (error && items.length === 0)
     return (
       <div className="mx-auto max-w-4xl px-4 py-8">
-        <ErrorState title="Couldn't load communities" description="Give it another try." onRetry={() => load(1, q.trim())} />
+        <ErrorState title="Couldn't load communities" description="Give it another try." onRetry={() => load(null, q.trim())} />
       </div>
     );
 
@@ -144,7 +153,7 @@ export default function CommunitiesPage() {
           </p>
         </div>
         {canCreate && (
-          <Button onClick={() => setShowCreate(true)} className="gap-1.5">
+          <Button onClick={() => setShowCreate(true)} className="min-h-11 gap-1.5">
             <Plus className="h-4 w-4" /> New community
           </Button>
         )}
@@ -156,7 +165,7 @@ export default function CommunitiesPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search communities by name…"
-          className="w-full rounded-xl border border-border bg-card py-2.5 pl-9 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
+          className="min-h-11 w-full rounded-xl border border-border bg-card py-2.5 pl-9 pr-3 text-base text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50 sm:text-sm"
         />
       </form>
 
@@ -171,14 +180,14 @@ export default function CommunitiesPage() {
           }
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((c) => {
             const policy = POLICY_META[c.joinPolicy] || POLICY_META.open;
             return (
               <Link
                 key={c._id}
                 href={`/communities/${c.slug}`}
-                className="group flex flex-col rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-[0_10px_40px_rgba(24,39,75,0.08)]"
+                className="group flex min-w-0 flex-col rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-[0_10px_40px_rgba(24,39,75,0.08)]"
               >
                 <div className="flex items-start gap-3">
                   {c.avatarUrl ? (
@@ -233,15 +242,15 @@ export default function CommunitiesPage() {
 
       {hasMore && (
         <div className="flex justify-center">
-          <Button variant="outline" onClick={() => load(page + 1, q.trim())} disabled={loading}>
-            {loading ? "Loading…" : "Load more"}
+          <Button variant="outline" onClick={() => load(nextCursor, q.trim(), true)} disabled={loadingMore || !nextCursor} className="min-h-11">
+            {loadingMore ? "Loading…" : "Load more"}
           </Button>
         </div>
       )}
 
       {/* Create dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Create a community</DialogTitle>
           </DialogHeader>
@@ -253,7 +262,7 @@ export default function CommunitiesPage() {
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 placeholder="e.g. Hackathon Squad"
                 maxLength={60}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               />
             </div>
             <div>
@@ -264,7 +273,7 @@ export default function CommunitiesPage() {
                 placeholder="What is this community about?"
                 maxLength={1000}
                 rows={3}
-                className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                className="min-h-24 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
               />
             </div>
             <div>
@@ -275,7 +284,7 @@ export default function CommunitiesPage() {
                     key={p}
                     type="button"
                     onClick={() => setForm((f) => ({ ...f, joinPolicy: p }))}
-                    className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
+                    className={`min-h-11 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
                       form.joinPolicy === p
                         ? "border-primary bg-primary/10 text-primary"
                         : "border-border text-muted-foreground hover:bg-muted/50"
@@ -302,7 +311,7 @@ export default function CommunitiesPage() {
                 <select
                   value={form.organizationId}
                   onChange={(e) => setForm((f) => ({ ...f, organizationId: e.target.value }))}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                  className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-primary/50 sm:text-sm"
                 >
                   <option value="">No organization{isAdmin ? "" : " — pick your organization"}</option>
                   {myOrgs.map((o) => (
@@ -314,7 +323,7 @@ export default function CommunitiesPage() {
               </div>
             )}
             {formError && <p className="text-xs font-medium text-[#ba1a1a]">{formError}</p>}
-            <Button onClick={createCommunity} disabled={creating} className="w-full">
+            <Button onClick={createCommunity} disabled={creating} className="min-h-11 w-full">
               {creating ? "Creating…" : "Create community"}
             </Button>
           </div>

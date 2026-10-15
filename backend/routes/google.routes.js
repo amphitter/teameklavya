@@ -3,6 +3,7 @@ const passport = require('passport');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
+const { isSuperAdminUser } = require('../services/ownership.service');
 
 // Start Google OAuth flow
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'], session: false }));
@@ -68,6 +69,7 @@ router.post('/google/exchange', async (req, res) => {
         lastName: user.lastName,
         email: user.email,
         role: user.role,
+        isSuperAdmin: isSuperAdminUser(user),
       },
     });
   } catch (error) {

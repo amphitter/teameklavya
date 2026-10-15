@@ -1,33 +1,29 @@
-// components/ui/badge.tsx
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium tracking-tight transition-colors focus:outline-none",
   {
     variants: {
       variant: {
-        default:
-          "border-transparent bg-blue-100 text-blue-800 hover:bg-blue-200",
-        secondary:
-          "border-transparent bg-gray-100 text-gray-900 hover:bg-gray-200",
-        destructive:
-          "border-transparent bg-red-100 text-red-800 hover:bg-red-200",
-        outline: "text-gray-700 border-gray-300 bg-transparent",
-        success:
-          "border-transparent bg-green-100 text-green-800 hover:bg-green-200",
-        warning:
-          "border-transparent bg-yellow-100 text-yellow-800 hover:bg-yellow-200",
-        info:
-          "border-transparent bg-blue-100 text-blue-800 hover:bg-blue-200",
-        premium:
-          "border-transparent bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600",
+        default: "border-border bg-muted text-muted-foreground",
+        secondary: "border-border bg-secondary text-secondary-foreground",
+        destructive: "border-destructive/30 bg-destructive/10 text-destructive",
+        outline: "text-muted-foreground border-border bg-transparent",
+        success: "border-success-border bg-success-soft text-success",
+        warning: "border-warning-border bg-warning-soft text-warning",
+        info: "border-primary/20 bg-brand-soft text-primary",
+        premium: "border-primary/20 bg-primary/10 text-primary",
+        verified: "border-primary/20 bg-primary/10 text-primary",
+        open: "border-success-border bg-success-soft text-success",
+        pending: "border-warning-border bg-warning-soft text-warning",
+        coming: "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-800/30 dark:bg-purple-950/50 dark:text-purple-300",
       },
       size: {
-        sm: "px-2 py-0.5 text-xs",
-        md: "px-2.5 py-0.5 text-sm",
-        lg: "px-3 py-1 text-base",
+        sm: "px-2 py-0.5 text-[10px]",
+        md: "px-2.5 py-0.5 text-[11px]",
+        lg: "px-3 py-1 text-[12px]",
       },
     },
     defaultVariants: {
@@ -37,14 +33,10 @@ const badgeVariants = cva(
   }
 )
 
-export interface BadgeProps
-  extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
+export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof badgeVariants> {}
 
 function Badge({ className, variant, size, ...props }: BadgeProps) {
-  return (
-    <div className={cn(badgeVariants({ variant, size }), className)} {...props} />
-  )
+  return <div className={cn(badgeVariants({ variant, size }), className)} {...props} />
 }
 
 export { Badge, badgeVariants }

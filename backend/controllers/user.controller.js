@@ -81,13 +81,86 @@ function canViewContent(userDoc, viewerId, viewerFollows) {
 exports.getMySocial = async (req, res) => {
   try {
     const user = await User.findById(req.user.id)
-      .select("firstName lastName username verified points profile socialSettings createdAt")
+      .select(
+        "firstName lastName username verified points profile socialSettings hidePersonalProfileFromDiscovery hideFromPeopleDiscoveryUpdatedAt createdAt"
+      )
       .lean();
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
-    res.json({ success: true, user });
+    // Eligibility for discovery-privacy toggle (org owner/manager)
+    let canHidePersonalProfile = false;
+    try {
+      const { hasEligibleOrganizationForDiscoveryPrivacy } = require("../services/event-permissions.service");
+      canHidePersonalProfile = await hasEligibleOrganizationForDiscoveryPrivacy(req.user);
+    } catch {}
+    res.json({ success: true, user: { ...user, canHidePersonalProfile } });
   } catch (error) {
     console.error("Get my social error:", error.message);
     res.status(500).json({ success: false, message: "Failed to load profile" });
+  }
+};
+
+// PUT /api/users/me/discovery-privacy — toggle hide personal profile from people discovery
+exports.updateDiscoveryPrivacy = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { hidePersonalProfileFromDiscovery } = req.body;
+
+    if (typeof hidePersonalProfileFromDiscovery !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "hidePersonalProfileFromDiscovery must be a boolean",
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    // If enabling hide, check eligibility (must be org owner/manager of eligible org)
+    if (hidePersonalProfileFromDiscovery === true) {
+      try {
+        const { hasEligibleOrganizationForDiscoveryPrivacy } = require("../services/event-permissions.service");
+        const eligible = await hasEligibleOrganizationForDiscoveryPrivacy(req.user);
+        if (!eligible) {
+          return res.status(403).json({
+            success: false,
+            message: "Only organization owners/managers of approved organizations can hide their personal profile from discovery",
+          });
+        }
+      } catch (e) {
+        console.error("Eligibility check failed:", e.message);
+        return res.status(500).json({ success: false, message: "Failed to verify eligibility" });
+      }
+    }
+    // Disabling is allowed even if no longer eligible, to let user restore visibility
+
+    user.hidePersonalProfileFromDiscovery = hidePersonalProfileFromDiscovery;
+    user.hideFromPeopleDiscoveryUpdatedAt = new Date();
+    await user.save();
+
+    // Invalidate caches to prevent stale discovery results exposing hidden profile
+    try {
+      const { cache } = require("../services/cache.service");
+      // Search cache is public but contains people results
+      await cache.invalidatePrefix("search:");
+      // Profile cache for this user
+      await cache.invalidate(cache.keys ? cache.keys.profile(userId) : `profile:${userId}`);
+      // Followlist cache may contain user references
+      await cache.invalidatePrefix("followlist:");
+    } catch (e) {
+      console.warn("Cache invalidation failed after discovery privacy update:", e.message);
+      // Do not fail request if cache invalidation fails — safe failure per requirements
+    }
+
+    res.json({
+      success: true,
+      user: {
+        hidePersonalProfileFromDiscovery: user.hidePersonalProfileFromDiscovery,
+        hideFromPeopleDiscoveryUpdatedAt: user.hideFromPeopleDiscoveryUpdatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Update discovery privacy error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to update discovery privacy" });
   }
 };
 
@@ -118,7 +191,23 @@ exports.updateMySocial = async (req, res) => {
       user.username = normalized;
     }
 
-    if (bio !== undefined) user.profile.bio = String(bio || "").trim().slice(0, 280);
+    if (bio !== undefined) {
+      const trimmedBio = String(bio || "").trim().slice(0, 280);
+      // Trust & Safety: moderate bio
+      try {
+        const moderationService = require("../services/moderation.service");
+        const modResult = await moderationService.moderateText({ text: trimmedBio, contentType: "user_bio", authorId: user._id });
+        if (modResult.status === "quarantined" || (modResult.confidence >= 0.85 && modResult.categories.length)) {
+          return res.status(400).json({ success: false, message: "Bio contains prohibited content: " + (modResult.categories.join(", ") || modResult.reason) });
+        }
+      } catch (err) {
+        if (err.message && err.message.includes("prohibited")) {
+          return res.status(400).json({ success: false, message: err.message });
+        }
+        console.warn("Bio moderation failed:", err.message);
+      }
+      user.profile.bio = trimmedBio;
+    }
     if (avatar !== undefined) user.profile.avatar = String(avatar || "").trim();
     if (coverImage !== undefined) user.profile.coverImage = String(coverImage || "").trim();
     if (location !== undefined) user.profile.location = String(location || "").trim().slice(0, 80);
@@ -211,7 +300,13 @@ exports.getSuggestedUsers = async (req, res) => {
     // Same institution (only when the candidate list is thin)
     const institution = meDoc?.profile?.institution?.trim();
     if (institution && score.size < limit * 2) {
-      const mates = await User.find({ "profile.institution": institution, _id: { $ne: me } })
+      const mates = await User.find({
+        "profile.institution": institution,
+        _id: { $ne: me },
+        hidePersonalProfileFromDiscovery: { $ne: true },
+        suspendedAt: null,
+        bannedAt: null,
+      })
         .select("_id")
         .limit(50)
         .lean();
@@ -224,7 +319,12 @@ exports.getSuggestedUsers = async (req, res) => {
       .map(([id]) => id);
     if (!ranked.length) return res.json({ success: true, users: [] });
 
-    const users = await User.find({ _id: { $in: ranked } })
+    const users = await User.find({
+      _id: { $in: ranked },
+      hidePersonalProfileFromDiscovery: { $ne: true },
+      suspendedAt: null,
+      bannedAt: null,
+    })
       .select("firstName lastName username verified profile.avatar profile.institution")
       .lean()
       .then((list) => ranked.map((id) => list.find((u) => String(u._id) === id)).filter(Boolean));
@@ -452,7 +552,7 @@ exports.getUserEvents = async (req, res) => {
 
     const responses = await RegistrationResponse.find({ userId: user._id })
       .select("eventId createdAt")
-      .populate("eventId", "title slug bannerUrl startDate endDate venue eventType category")
+      .populate("eventId", "title slug bannerUrl logoUrl startDate endDate venue eventType category")
       .lean();
 
     const seen = new Set();
@@ -515,7 +615,7 @@ exports.getUserPosts = async (req, res) => {
         .limit(limit)
         .select(POST_FIELDS)
         .populate("author", AUTHOR_FIELDS)
-        .populate("event", "title slug bannerUrl startDate endDate venue eventType category organizer price visibility isLive")
+        .populate("event", "title slug bannerUrl logoUrl startDate endDate venue eventType category organizer price visibility isLive")
         .populate("organization", "name slug logoUrl")
         .populate("community", "name slug avatarUrl")
         .lean(),

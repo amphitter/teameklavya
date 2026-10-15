@@ -1,0 +1,27 @@
+{
+  "name": "EventHub — Discover events, participate, grow",
+  "short_name": "EventHub",
+  "description": "Discover what's happening around you, register in seconds, get your QR ticket, and build your event identity.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F5F2",
+  "theme_color": "#2563FF",
+  "icons": [
+    {
+      "src": "/brand/favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/og-image.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -2,13 +2,19 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { API_ORIGIN } from "@/utils/api";
+import { hasPlatformAdminAccess } from "@/lib/superAdmin";
 
-/**
- * Google OAuth callback.
- * The backend redirects here with a SHORT-LIVED one-time ?code=...
- * We exchange it for the real session token via an authenticated POST —
- * the long-lived token never appears in the URL or browser history.
- */
+function isSafeReturnUrl(url: string): boolean {
+  if (!url) return false;
+  if (!url.startsWith("/")) return false;
+  if (url.startsWith("//")) return false;
+  if (url.includes("://")) return false;
+  if (url.includes("\\")) return false;
+  if (/^\s*javascript:/i.test(url)) return false;
+  if (/[\0-\x1f\x7f]/.test(url)) return false;
+  return true;
+}
+
 export default function OAuthCallback() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -46,10 +52,32 @@ export default function OAuthCallback() {
             email: data.user?.email || "",
             firstName: data.user?.firstName || "",
             lastName: data.user?.lastName || "",
+            role: data.user?.role || "user",
+            isSuperAdmin: data.user?.isSuperAdmin === true,
           })
         );
 
-        router.replace(data.user?.role === "admin" ? "/admin/dashboard" : "/user/profile");
+        // Preserve returnUrl from OAuth flow — stored before redirect to Google
+        let returnUrl: string | null = null;
+        try {
+          const stored = localStorage.getItem("oauth_returnUrl");
+          if (stored && isSafeReturnUrl(stored)) {
+            returnUrl = stored;
+          }
+          // Clear after use
+          localStorage.removeItem("oauth_returnUrl");
+        } catch {}
+
+        // If returnUrl is an event page, keep it; otherwise admin check
+        if (returnUrl && isSafeReturnUrl(returnUrl)) {
+          router.replace(returnUrl);
+        } else {
+          router.replace(
+            hasPlatformAdminAccess(data.user?.role, data.user)
+              ? "/admin/dashboard"
+              : "/user/profile"
+          );
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Login failed");
         setTimeout(() => router.replace("/login?error=oauth_failed"), 1500);
@@ -58,17 +86,17 @@ export default function OAuthCallback() {
   }, [code, router]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50">
+    <div className="flex min-h-screen items-center justify-center bg-black">
       <div className="text-center">
         {error ? (
           <>
-            <p className="text-lg font-medium text-slate-900">Google sign-in failed</p>
-            <p className="mt-1 text-sm text-slate-500">{error} — redirecting to login…</p>
+            <p className="text-lg font-medium text-white">Google sign-in failed</p>
+            <p className="mt-1 text-sm text-[#a1a1aa]">{error} — redirecting to login…</p>
           </>
         ) : (
           <>
-            <p className="text-lg font-medium text-slate-900">Signing you in…</p>
-            <div className="mx-auto mt-4 h-8 w-8 animate-spin rounded-full border-b-2 border-[#0070f0]" />
+            <p className="text-lg font-medium text-white">Signing you in…</p>
+            <div className="mx-auto mt-4 h-8 w-8 animate-spin rounded-full border-b-2 border-[#3b82f6]" />
           </>
         )}
       </div>

@@ -73,22 +73,29 @@ function layout({ title, previewText, body, ctaLabel, ctaUrl, footerNote }) {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${escapeHtml(title)}</title>
+  <style type="text/css">
+    @media only screen and (max-width: 600px) {
+      .eh-wrap { padding:16px 8px !important; }
+      .eh-header, .eh-footer { padding-left:20px !important; padding-right:20px !important; }
+      .eh-body { padding:22px 20px !important; }
+    }
+  </style>
 </head>
 <body style="margin:0;padding:0;background-color:${BRAND.bg};font-family:Inter,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;">
   ${previewText ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(previewText)}</div>` : ""}
-  <div style="width:100%;padding:32px 16px;background-color:${BRAND.bg};">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:${BRAND.card};border:1px solid ${BRAND.border};border-radius:12px;overflow:hidden;">
+  <div class="eh-wrap" style="width:100%;padding:28px 16px;background-color:${BRAND.bg};">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;margin:0 auto;background:${BRAND.card};border:1px solid ${BRAND.border};border-radius:12px;overflow:hidden;">
 
       <!-- Header -->
       <tr>
-        <td style="padding:26px 32px;border-bottom:1px solid ${BRAND.border};" align="left">
+        <td class="eh-header" style="padding:24px 28px;border-bottom:1px solid ${BRAND.border};" align="left">
           ${logoHtml()}
         </td>
       </tr>
 
       <!-- Body -->
       <tr>
-        <td style="padding:32px;color:${BRAND.text};font-size:15px;line-height:1.65;">
+        <td class="eh-body" style="padding:28px;color:${BRAND.text};font-size:15px;line-height:1.65;overflow-wrap:anywhere;word-break:break-word;">
           ${body}
           ${cta}
         </td>
@@ -96,7 +103,7 @@ function layout({ title, previewText, body, ctaLabel, ctaUrl, footerNote }) {
 
       <!-- Footer -->
       <tr>
-        <td style="padding:22px 32px;background:#fafbfd;border-top:1px solid ${BRAND.border};" align="center">
+        <td class="eh-footer" style="padding:20px 28px;background:#fafbfd;border-top:1px solid ${BRAND.border};" align="center">
           <p style="margin:0;color:${BRAND.muted};font-size:13px;">${escapeHtml(footerNote || "You're receiving this because you have an EventHub account.")}</p>
           <p style="margin:8px 0 0;color:${BRAND.navy};font-size:13px;font-weight:600;">EventHub — discover events, participate, grow.</p>
         </td>
@@ -231,6 +238,35 @@ exports.eventAnnouncement = ({ user, event, eventUrl }) => {
       ctaUrl: eventUrl,
     }),
     text: `Hey ${user.firstName},\n\nNew event on EventHub: ${event.title}\n\nDate: ${fmtDate(event.startDate)}\n${eventLocation(event)}\n\nView & register: ${eventUrl}`,
+  };
+};
+
+exports.customCommunication = ({ user, event = null, subject, message, ctaUrl }) => {
+  const safeMessage = String(message ?? "");
+  const paragraphs = safeMessage
+    .split(/\r?\n/)
+    .map((line) => `<p style="margin:0 0 10px;">${line ? escapeHtml(line) : "&nbsp;"}</p>`)
+    .join("");
+  const context = event
+    ? `<p style="margin:0 0 8px;">An update about <strong>${escapeHtml(event.title)}</strong>.</p>${eventDetailsPanel(event)}`
+    : "";
+  const body = `
+    <h2 style="margin:0 0 12px;color:${BRAND.navy};font-size:20px;">Hey ${escapeHtml(user.firstName || "there")},</h2>
+    ${context}
+    <div style="overflow-wrap:anywhere;word-break:break-word;">${paragraphs}</div>`;
+  const preview = safeMessage.replace(/\s+/g, " ").slice(0, 140);
+
+  return {
+    html: layout({
+      title: subject,
+      previewText: preview,
+      body,
+      ...(event && ctaUrl ? { ctaLabel: "View Event", ctaUrl } : {}),
+      footerNote: event
+        ? "You're receiving this because you registered for or are connected to this Event."
+        : "You're receiving this because you have an EventHub account.",
+    }),
+    text: `Hey ${user.firstName || "there"},\n\n${event ? `An update about ${event.title}.\n\n` : ""}${safeMessage}${event && ctaUrl ? `\n\nView Event: ${ctaUrl}` : ""}`,
   };
 };
 

@@ -14,6 +14,10 @@ const Post = require("../models/post.model");
 const Event = require("../models/event.model");
 const Organization = require("../models/organization.model");
 const Notification = require("../models/notification.model");
+const emailService = require("../services/email.service");
+const originalEmailSend = emailService.send;
+// Exercise successful delivery accounting without invoking a real provider.
+emailService.send = async (message) => ({ provider: "test", messageId: `stub:${message.to}` });
 
 let passed = 0, failed = 0;
 const check = (name, ok, extra = "") => {
@@ -191,5 +195,6 @@ const check = (name, ok, extra = "") => {
   console.log(failed === 0 ? `\n✅ ALL PASS (${passed})` : `\n❌ ${failed} FAILED (${passed} passed)`);
   await User.deleteMany({});
   await mongod.stop();
+  emailService.send = originalEmailSend;
   process.exit(failed === 0 ? 0 : 1);
 })().catch((e) => { console.error("FATAL", e); process.exit(1); });

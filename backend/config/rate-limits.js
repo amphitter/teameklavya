@@ -5,11 +5,15 @@
  * limiters from here — no ad-hoc numbers buried in routes.
  *
  * HTTP domains (§24):
- *   AUTH        login/signup/OTP — 25/15m (unchanged, spec-locked)
+ *   AUTH        login/signup/OTP — 25/15m (legacy, kept for compat)
+ *   AUTH_LOGIN  login/signup — 15/15m strict per IP (brute-force protection)
+ *   AUTH_ME     session check — 120/min generous per user (dashboard)
+ *   AUTH_PASSWORD password forgot/reset — 5/15m strict
  *   SOCIAL      follow/like/comment/post/save — 30/min
  *   MESSAGING   message send — 20/min
  *   SEARCH      search queries — 30/min
  *   EVENT       registration/check-in/join — 20/min
+ *   COMMUNICATION email fan-outs — 5/15m per authenticated actor
  *   UPLOAD      15/10m burst + 10/hr session cap (§23)
  *   READ        generous browsing bucket on /api — must never throttle
  *               normal use, including the frontend polling loops (§26)
@@ -30,9 +34,6 @@ const rateLimit = require("express-rate-limit").rateLimit || require("express-ra
 const { ipKeyGenerator } = require("express-rate-limit");
 const { RateLimitError } = require("../utils/app-error");
 const metrics = require("../services/metrics.service");
-// Part 6, Phase 2 (§4): the shared sliding-window backend. When
-// RATE_LIMIT_PROVIDER=upstash every instance counts into the same bucket;
-// when it is unset (the default) behaviour is exactly as it was in Part 5.
 const { rateLimitBackend } = require("../providers/redis/sliding-window.store");
 const { SlidingWindowStore } = require("../providers/redis/rate-limit-store.adapter");
 
@@ -44,37 +45,33 @@ const HOUR = 60 * MINUTE;
 
 const DEFAULTS = {
   /* ── HTTP domains (§24) ── */
-  AUTH:          { limit: 25,  windowMs: 15 * MINUTE },
+  AUTH:          { limit: 25,  windowMs: 15 * MINUTE }, // legacy compat
+  AUTH_LOGIN:    { limit: 15,  windowMs: 15 * MINUTE }, // login/signup strict, per IP
+  AUTH_ME:       { limit: 120, windowMs: MINUTE },       // session check generous, per user ID
+  AUTH_PASSWORD: { limit: 5,   windowMs: 15 * MINUTE },  // password forgot/reset very strict
   SOCIAL:        { limit: 30,  windowMs: MINUTE },
   MESSAGING:     { limit: 20,  windowMs: MINUTE },
   SEARCH:        { limit: 30,  windowMs: MINUTE },
   EVENT:         { limit: 20,  windowMs: MINUTE },
+  COMMUNICATION: { limit: 5,   windowMs: 15 * MINUTE },
   UPLOAD_BURST:  { limit: 15,  windowMs: 10 * MINUTE },
   UPLOAD_HOURLY: { limit: 10,  windowMs: HOUR },
   READ:          { limit: 300, windowMs: MINUTE },
 
-  /* ── Socket-side (§24 REALTIME) — consumed by realtime.service.js.
-   * The per-socket cooldowns already in the engine stay; these add the
-   * cross-socket per-user/IP dimension (reconnect storms, join spam). ── */
+  /* ── Socket-side (§24 REALTIME) ── */
   REALTIME_CONNECT_USER: { limit: 10, windowMs: MINUTE },
   REALTIME_CONNECT_IP:   { limit: 30, windowMs: MINUTE },
   REALTIME_JOIN:         { limit: 15, windowMs: MINUTE },
-  REALTIME_ANSWER:       { limit: 60, windowMs: MINUTE }, // never binds a fast quiz; kills multi-socket spam
-  /* Part 10 §13 — dm:typing is a socket-only signal, so its only cost is
-   * broadcast amplification. A well-debounced client emits ~2 per 5s of
-   * continuous typing (start + stop); a client that emits per keystroke at
-   * 200 wpm would be ~20/min. 40/min therefore absorbs sloppy clients while
-   * still bounding a scripted flood, and because typing is never persisted
-   * exceeding it costs a dropped indicator, not a dropped message. */
+  REALTIME_ANSWER:       { limit: 60, windowMs: MINUTE },
   REALTIME_TYPING:       { limit: 40, windowMs: MINUTE },
 
-  /* ── Action guards (§27) — on top of unique indexes + domain buckets ── */
-  GUARD_FOLLOW_TOGGLE:    { limit: 20, windowMs: MINUTE },   // follow/unfollow loop cap
-  GUARD_INTERACT_TOGGLE:  { limit: 20, windowMs: MINUTE },   // like/unlike + save/unsave loop cap
-  GUARD_COMMENT:          { limit: 10, windowMs: MINUTE },   // comment flood cap
-  GUARD_COMMUNITY_CREATE: { limit: 3,  windowMs: HOUR },     // community-create cooldown
-  GUARD_COMMUNITY_JOIN:   { limit: 15, windowMs: MINUTE },   // join/leave loop cap
-  GUARD_TICKET_SCAN:      { limit: 60, windowMs: MINUTE },   // door scanning is legitimately rapid
+  /* ── Action guards (§27) ── */
+  GUARD_FOLLOW_TOGGLE:    { limit: 20, windowMs: MINUTE },
+  GUARD_INTERACT_TOGGLE:  { limit: 20, windowMs: MINUTE },
+  GUARD_COMMENT:          { limit: 10, windowMs: MINUTE },
+  GUARD_COMMUNITY_CREATE: { limit: 3,  windowMs: HOUR },
+  GUARD_COMMUNITY_JOIN:   { limit: 15, windowMs: MINUTE },
+  GUARD_TICKET_SCAN:      { limit: 60, windowMs: MINUTE },
 };
 
 const isRateLimitingDisabled = () => process.env.RATE_LIMIT_DISABLED === "1";
@@ -88,33 +85,11 @@ function envOverride(domain, cfg) {
   };
 }
 
-/**
- * Realtime CONCURRENCY caps (Part 5, Phase 6 — spec §43).
- * ─────────────────────────────────────────────────────────────────────────
- * The rate windows above bound how OFTEN a client may connect. These bound
- * how many connections may exist AT ONCE. Both are required: a client that
- * reconnects every 8 seconds never trips a per-minute rate window, yet it
- * still accumulates sockets without bound — and every socket costs memory
- * and event-loop time on a single small instance.
- *
- * Deliberately NOT in `DEFAULTS`: that table is iterated into `{limit,
- * windowMs}` limiter configs, and these are plain counts. Kept separate and
- * env-overridable on the same pattern.
- */
 const CAP_DEFAULTS = {
-  /** Tabs/devices one authenticated user may hold open simultaneously. */
   SOCKETS_PER_USER: 5,
-  /**
-   * Sockets from one IP at once. Higher than per-user because a classroom,
-   * office or carrier NAT legitimately shares an address — but bounded, so
-   * one NAT cannot occupy every slot.
-   */
   SOCKETS_PER_IP: 20,
-  /** Participants that may sit in one event room (config per §43). */
   PARTICIPANTS_PER_ROOM: 500,
-  /** A room with zero sockets is reaped once idle this long. */
   IDLE_ROOM_TTL_MS: 30 * MINUTE,
-  /** How often the stale-socket sweep runs. */
   SWEEP_INTERVAL_MS: 5 * MINUTE,
 };
 
@@ -150,9 +125,6 @@ function createLimiter(domain) {
   }
   const { limit, windowMs } = LIMITS[domain];
 
-  // A store per limiter, bound to this domain's numbers. Without it the
-  // limiter keeps its process-local default store and a second instance
-  // would apply the limit independently — the exact bug §4 calls out.
   const store = new SlidingWindowStore({
     backend: rateLimitBackend(),
     domain,
@@ -160,8 +132,6 @@ function createLimiter(domain) {
     windowMs,
   });
 
-  // Track it so tests and the admin dashboard can see which buckets exist
-  // and which backend they share, without reaching into library internals.
   limiterStores.set(domain, store);
 
   return rateLimit({
@@ -182,11 +152,15 @@ function createLimiter(domain) {
 }
 
 const limiters = {
-  auth: createLimiter("AUTH"),
+  auth: createLimiter("AUTH"), // legacy, kept but not mounted globally
+  authLogin: createLimiter("AUTH_LOGIN"),
+  authMe: createLimiter("AUTH_ME"),
+  authPassword: createLimiter("AUTH_PASSWORD"),
   social: createLimiter("SOCIAL"),
   messaging: createLimiter("MESSAGING"),
   search: createLimiter("SEARCH"),
   event: createLimiter("EVENT"),
+  communication: createLimiter("COMMUNICATION"),
   uploadBurst: createLimiter("UPLOAD_BURST"),
   uploadHourly: createLimiter("UPLOAD_HOURLY"),
   read: createLimiter("READ"),
@@ -195,17 +169,20 @@ const limiters = {
 /**
  * Prefix-level wiring (called from server.js BEFORE route mounts):
  *   /api          → READ (generous browsing bucket, §26)
- *   /api/auth     → AUTH (covers both auth.routes and google.routes)
  *   /api/search   → SEARCH
  *   /api/upload   → UPLOAD burst + hourly session cap (§23)
+ *   /api/auth/*   → specific limiters mounted inside auth.routes.js:
+ *     - login/signup -> AUTH_LOGIN (15/15m per IP, brute-force protection)
+ *     - /me        -> AUTH_ME (120/min per user, generous for dashboard)
+ *     - password/* -> AUTH_PASSWORD (5/15m strict)
  * Action-scoped domains (SOCIAL/MESSAGING/EVENT) are mounted inside their
  * route files so list/browse endpoints stay under READ only.
  */
 function applyGlobalRateLimits(app) {
   app.use("/api", limiters.read);
-  app.use("/api/auth", limiters.auth);
   app.use("/api/search", limiters.search);
   app.use("/api/upload", limiters.uploadBurst, limiters.uploadHourly);
+  // Auth limiters are mounted per-route in auth.routes.js for granularity
 }
 
 module.exports = {

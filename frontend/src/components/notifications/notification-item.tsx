@@ -18,12 +18,17 @@ export interface NotificationData {
     | "mention"
     | "event_registration"
     | "org_follow"
+    | "organization_invite"
     | "announcement"
     | "event_update"
     | "event_reminder"
     | "community_invite"
     | "message"
-    | "achievement";
+    | "achievement"
+    | "organization_request_submitted"
+    | "organization_request_approved"
+    | "organization_request_rejected"
+    | "organization_request_needs_info";
   read: boolean;
   createdAt: string;
   actor: { _id: string; firstName: string; lastName: string; username?: string; profile?: any } | null;
@@ -137,6 +142,16 @@ const META: Record<
     ),
     href: (n) => (n.organization?.slug ? `/organizations/${n.organization.slug}` : "#"),
   },
+  organization_invite: {
+    icon: Building2,
+    tint: "bg-purple-light text-purple",
+    text: (n) => (
+      <>
+        invited you to join <span className="font-bold text-foreground">{n.organization?.name || "an organization"}</span>
+      </>
+    ),
+    href: (n) => (n.organization?.slug ? `/organizations/${n.organization.slug}` : "#"),
+  },
   announcement: {
     icon: Megaphone,
     tint: "bg-warning-light text-warning",
@@ -146,6 +161,34 @@ const META: Record<
       </>
     ),
     href: (n) => (n.event?.slug ? `/events/${n.event.slug}` : "#"),
+  },
+  organization_request_submitted: {
+    icon: Building2,
+    tint: "bg-blue-100 text-blue-600",
+    text: (n) => <>submitted organization request {n.organization?.name || ""}</>,
+    href: () => "/user/organizations",
+  },
+  organization_request_approved: {
+    icon: Building2,
+    tint: "bg-emerald-100 text-emerald-700",
+    text: (n) => (
+      <>
+        approved your organization <span className="font-bold text-foreground">{n.organization?.name || ""}</span> — you are OWNER (UNVERIFIED)
+      </>
+    ),
+    href: (n) => (n.organization?.slug ? `/organizations/${n.organization.slug}` : "/user/organizations"),
+  },
+  organization_request_rejected: {
+    icon: Building2,
+    tint: "bg-red-100 text-red-700",
+    text: () => <>your organization request was rejected — check reason</>,
+    href: () => "/user/organizations",
+  },
+  organization_request_needs_info: {
+    icon: Building2,
+    tint: "bg-amber-100 text-amber-700",
+    text: () => <>needs more info for your organization request</>,
+    href: () => "/user/organizations",
   },
 };
 

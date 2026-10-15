@@ -28,9 +28,10 @@
  */
 
 const DB_NAME = "eventhub-messages";
-const DB_VERSION = 1;
+const DB_VERSION = 2; // bumped for outbox store
 const STORE_THREADS = "threads";
 const STORE_META = "meta";
+const STORE_OUTBOX = "outbox";
 
 /** Cap per thread, so the cache cannot grow without bound (§23 controlled). */
 const MAX_CACHED_MESSAGES = 60;
@@ -60,6 +61,9 @@ function openDb(): Promise<IDBDatabase | null> {
         }
         if (!db.objectStoreNames.contains(STORE_META)) {
           db.createObjectStore(STORE_META, { keyPath: "key" });
+        }
+        if (!db.objectStoreNames.contains(STORE_OUTBOX)) {
+          db.createObjectStore(STORE_OUTBOX, { keyPath: "clientMessageId" });
         }
       };
       req.onsuccess = () => done(req.result);
@@ -171,6 +175,36 @@ export async function readCachedInbox(key: "inbox" | "archived"): Promise<Cached
 
 /* ── Account-scoped wipe ────────────────────────────────────────────────── */
 
+/* ── Outbox (durable pending sends) ─────────────────────────────────────── */
+
+export interface CachedOutboxItem {
+  clientMessageId: string;
+  conversationId: string;
+  content: string;
+  replyTo?: string | null;
+  createdAt: string;
+  attempts: number;
+}
+
+export async function saveOutboxItem(item: CachedOutboxItem): Promise<void> {
+  await tx(STORE_OUTBOX, "readwrite", (s) => s.put(item));
+}
+
+export async function removeOutboxItem(clientMessageId: string): Promise<void> {
+  await tx(STORE_OUTBOX, "readwrite", (s) => s.delete(clientMessageId));
+}
+
+export async function listOutboxForConversation(conversationId: string): Promise<CachedOutboxItem[]> {
+  const all = await tx<CachedOutboxItem[]>(STORE_OUTBOX, "readonly", (s) => s.getAll());
+  if (!all) return [];
+  return all.filter((i) => i.conversationId === conversationId);
+}
+
+export async function listAllOutbox(): Promise<CachedOutboxItem[]> {
+  const all = await tx<CachedOutboxItem[]>(STORE_OUTBOX, "readonly", (s) => s.getAll());
+  return all ?? [];
+}
+
 /**
  * Called on logout. Without this, the next account to sign in on the same
  * device would flash the previous user's conversations before its own
@@ -179,4 +213,5 @@ export async function readCachedInbox(key: "inbox" | "archived"): Promise<Cached
 export async function clearMessagesCache(): Promise<void> {
   await tx(STORE_THREADS, "readwrite", (s) => s.clear());
   await tx(STORE_META, "readwrite", (s) => s.clear());
+  await tx(STORE_OUTBOX, "readwrite", (s) => s.clear());
 }

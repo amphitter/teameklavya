@@ -41,12 +41,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { useTheme } from "@/context/ThemeContext";
-import { prefetchInbox, useUnread } from "@/hooks/use-messages";
 import { initialsOf, useSessionUser } from "@/components/shell/use-session-user";
 import { useLogout } from "@/components/shell/use-logout";
 import { AccountMenu, AccountAvatar } from "@/components/shell/account-menu";
 import { cn } from "@/lib/utils";
-import { NotificationBell } from "@/components/notifications/notification-bell";
 import { ComposerProvider, useComposer } from "@/components/post/composer-provider";
 import { MessagesNavLink } from "@/components/shell/messages-link";
 import { UserAvatar } from "@/components/user-avatar";
@@ -95,6 +93,72 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+
+/* ── Create menu content — stable component type (never re-created per render)
+   Previously CreateMenu was defined inside ShellChrome as a new function every
+   render, causing React to see a new component type and unmount/remount the
+   Radix DropdownMenu. That remount can confuse hook ordering in concurrent mode
+   and was a suspect for #310. Now the outer component is stable. */
+function CreateMenuContent({
+  children,
+  placement = "bottom",
+  align = "end",
+  onCreateEvent,
+  onCreatePost,
+  onCreateStory,
+  onCreateCommunity,
+}: {
+  children: React.ReactNode;
+  placement?: "top" | "bottom";
+  align?: "start" | "center" | "end";
+  onCreateEvent: () => void;
+  onCreatePost: () => void;
+  onCreateStory: () => void;
+  onCreateCommunity: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent
+        side={placement}
+        align={align}
+        sideOffset={10}
+        collisionPadding={8}
+        className="w-52"
+      >
+        <DropdownMenuItem onClick={onCreateEvent} className="gap-2.5 py-2.5">
+          <Sparkles className="h-4 w-4 text-primary" />
+          <div>
+            <div className="text-sm font-semibold">Create Event</div>
+            <div className="text-[11px] text-muted-foreground">Set up a new event</div>
+          </div>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onCreatePost} className="gap-2.5 py-2.5">
+          <Newspaper className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <div className="text-sm font-semibold">Create Post</div>
+            <div className="text-[11px] text-muted-foreground">Share something with your followers</div>
+          </div>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onCreateStory} className="gap-2.5 py-2.5">
+          <span className="material-symbols-outlined text-[18px] leading-none text-foreground">add_photo_alternate</span>
+          <div>
+            <div className="text-sm font-semibold">Create Story</div>
+            <div className="text-[11px] text-muted-foreground">Post a 9:16 photo or video for 24 hours</div>
+          </div>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onCreateCommunity} className="gap-2.5 py-2.5">
+          <UsersRound className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <div className="text-sm font-semibold">Create Community</div>
+            <div className="text-[11px] text-muted-foreground">Start a space for your people</div>
+          </div>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function ShellChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   /* Part 10 — /messages needs the shell to step aside (see the <main> and
@@ -106,11 +170,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { user, role } = useSessionUser();
   const { open: openComposer, openStory } = useComposer();
-  /* The bottom nav carries the messages badge on mobile, the account menu
-     carries the theme switch — both used to live in the top bar, which is gone
-     below lg. Read here (not inside `AccountMenu`, which is re-created on every
-     render) so the values stay stable. */
-  const { inbox: unreadMessages } = useUnread();
   const { theme, toggleTheme } = useTheme();
 
   /* Wake the API as soon as the app boots.
@@ -124,10 +183,15 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
    *
    * Deliberately once per page load, silent, and non-blocking. If it fails,
    * nothing is reported — the real request will surface any genuine problem. */
+  const [communities, setCommunities] = useState<{ _id: string; name: string; slug: string; logoUrl?: string }[]>([]);
+
+  /* Sign-out lives in one hook — the account menu and Settings must not be two
+     different sign-outs (§13). The cache-clearing order is explained there. */
+  const handleLogout = useLogout();
+
   useEffect(() => {
     api.get("/health").catch(() => {});
   }, []);
-    const [communities, setCommunities] = useState<{ _id: string; name: string; slug: string; logoUrl?: string }[]>([]);
 
   // Communities = organizations the user follows (real follows only)
   useEffect(() => {
@@ -156,29 +220,9 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
     }
   };
 
-  /* Sign-out lives in one hook — the account menu and Settings must not be two
-     different sign-outs (§13). The cache-clearing order is explained there. */
-  const handleLogout = useLogout();
-
   const isActive = (item: NavItem) =>
     item.exact ? pathname === "/" : Boolean(item.href && pathname.startsWith(item.href));
 
-  /* ── Create menu (shared by top bar + mobile nav) ─────── */
-  /* §1–§3, §31 — the "+" menu, anchored deterministically.
-   *
-   * What was wrong: the menu left its side to Radix's default (`side="bottom"`)
-   * and `align="end"`. In the bottom nav that meant it first tried to open
-   * BELOW a button that sits on the bottom edge of the screen, then flipped —
-   * the "appears to move/disappear" the report describes is that flip, happening
-   * after the user has already seen the menu. `align="end"` also pinned the
-   * menu's right edge to a button that is centred in a five-column grid, so on a
-   * narrow phone it ran off to the side.
-   *
-   * Now the placement is explicit per host: above the button in the bottom nav
-   * (aligned to its centre), below it in the desktop top bar, with a collision
-   * padding so it can never touch the viewport edge on a 320px screen.
-   * One click opens, the same click closes, outside closes, Escape closes —
-   * all Radix behaviour, and none of it re-implemented by hand. */
   const CreateMenu = ({
     children,
     placement = "bottom",
@@ -188,56 +232,16 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
     placement?: "top" | "bottom";
     align?: "start" | "center" | "end";
   }) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent
-        side={placement}
-        align={align}
-        sideOffset={10}
-        collisionPadding={8}
-        className="w-52"
-      >
-        <DropdownMenuItem onClick={handleCreateEvent} className="gap-2.5 py-2.5">
-          <Sparkles className="h-4 w-4 text-primary" />
-          <div>
-            <div className="text-sm font-semibold">Create Event</div>
-            <div className="text-[11px] text-muted-foreground">Set up a new event</div>
-          </div>
-        </DropdownMenuItem>
-        {/* §4/§7 — opens the composer as an overlay in the current page. It used
-            to `router.push("/?compose=1")`, which navigated you to the feed and
-            discarded your context: from Messages you lost the conversation, from
-            a profile you lost the profile. */}
-        <DropdownMenuItem onClick={openComposer} className="gap-2.5 py-2.5">
-          <Newspaper className="h-4 w-4 text-muted-foreground" />
-          <div>
-            <div className="text-sm font-semibold">Create Post</div>
-            <div className="text-[11px] text-muted-foreground">Share something with your followers</div>
-          </div>
-        </DropdownMenuItem>
-
-        {/* §41 + Part 9 §14 — the story creator opens IN PLACE. It used to route
-            to /?story=1, which navigated the user to the feed and lost their
-            context; the creator is hosted by the shell now, so it opens over
-            whatever page they were on. The device decides what they get: the
-            editor on a phone, an honest explanation on a desktop. */}
-        <DropdownMenuItem onClick={openStory} className="gap-2.5 py-2.5">
-          <span className="material-symbols-outlined text-[18px] leading-none text-foreground">add_photo_alternate</span>
-          <div>
-            <div className="text-sm font-semibold">Create Story</div>
-            <div className="text-[11px] text-muted-foreground">Post a 9:16 photo or video for 24 hours</div>
-          </div>
-        </DropdownMenuItem>
-
-        <DropdownMenuItem onClick={() => router.push("/communities")} className="gap-2.5 py-2.5">
-          <UsersRound className="h-4 w-4 text-muted-foreground" />
-          <div>
-            <div className="text-sm font-semibold">Create Community</div>
-            <div className="text-[11px] text-muted-foreground">Start a space for your people</div>
-          </div>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <CreateMenuContent
+      placement={placement}
+      align={align}
+      onCreateEvent={handleCreateEvent}
+      onCreatePost={openComposer}
+      onCreateStory={openStory}
+      onCreateCommunity={() => router.push("/communities")}
+    >
+      {children}
+    </CreateMenuContent>
   );
 
   return (
@@ -257,7 +261,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-border bg-card lg:flex">
         <div className="flex h-14 items-center border-b border-border px-5">
           <Link href="/" aria-label="EventHub home">
-            <Logo size={40} onDark />
+            <Logo size={40} />
           </Link>
         </div>
 
@@ -389,17 +393,13 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
          * is safe to do. */}
         <header className="sticky top-0 z-30 hidden border-b border-border bg-background/85 backdrop-blur-md lg:block">
           <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
-            {/* Mobile: logo */}
-            <Link href="/" aria-label="EventHub home" className="lg:hidden">
-              <Logo size={32} onDark />
-            </Link>
-
             {/* Global search (Phase 11) — live dropdown + full page */}
             <SearchBar />
 
             <div className="ml-auto flex items-center gap-1 sm:ml-0">
-              <MessagesNavLink />
-              <NotificationBell />
+              {/* Inbox at topmost right corner — replaces the alert/bell.
+                  Bell now lives only in sidebar nav (Notifications) and inside
+                  the account menu, not as a duplicate header icon. */}
               <ThemeToggle />
 
               <CreateMenu>
@@ -407,6 +407,8 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
                   <Plus className="h-4 w-4" /> Create
                 </Button>
               </CreateMenu>
+
+              <MessagesNavLink />
 
               {/* Mobile search link */}
               <Link
@@ -465,9 +467,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
             leaving the bottom row to navigation only. */}
         <div className="grid grid-cols-5">
           <MobileNavItem icon={Home} label="Home" href="/" active={pathname === "/"} />
-          {/* §4/§28 — the second slot is SEARCH (trending + search), not
-              Explore. Explore is EVENT discovery and now lives in the phone's
-              top bar, so the two concepts never share a button. */}
+          {/* Mobile: Search replaces Discover — Explore already in desktop sidebar, no need twice */}
           <MobileNavItem
             icon={Search}
             label="Search"
@@ -488,43 +488,47 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
             </CreateMenu>
           </div>
 
-          {/* Messages moved into the nav: it was a top-bar icon, and the top
-              bar no longer exists on a phone. Prefetching the inbox on tap is
-              the same warm-start path the old icon used. */}
-          <Link
-            href="/messages"
-            aria-label={unreadMessages ? `Messages (${unreadMessages} unread)` : "Messages"}
-            onClick={() => prefetchInbox()}
-            className={cn(
-              "relative flex min-w-0 flex-col items-center justify-center gap-0.5 pb-1.5 pt-2 transition-colors",
-              pathname.startsWith("/messages") ? "text-primary" : "text-muted-foreground"
-            )}
-          >
-            <MessageCircle className="h-5 w-5" />
-            <span className="max-w-full truncate px-0.5 text-[10px] font-semibold">Messages</span>
-            {unreadMessages > 0 ? (
-              <span className="absolute right-2 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold leading-none text-white">
-                {unreadMessages > 9 ? "9+" : unreadMessages}
-              </span>
-            ) : null}
-          </Link>
+          {/* Tickets — one tap from anywhere on mobile (Claude #3) */}
+          {user ? (
+            <MobileNavItem
+              icon={Ticket}
+              label="Tickets"
+              href="/user/registrations"
+              active={pathname.startsWith("/user/registrations")}
+            />
+          ) : (
+            <MobileNavItem icon={UserRound} label="Sign in" href="/login" active={false} />
+          )}
 
+          {/* Profile — avatar with dropdown (replaces Inbox in bottom nav).
+              Inbox now lives at topmost right corner (header), per latest ask.
+              Tapping avatar opens the account menu: Your Profile, My Organizations,
+              Organizer Dashboard, Saved, Liked, Notifications, etc. */}
           {user ? (
             <AccountMenu>
               <button
                 type="button"
-                aria-label="Profile"
+                aria-label="Profile menu"
                 className={cn(
-                  "flex flex-col items-center justify-center gap-0.5 pb-1.5 pt-2",
-                  pathname.startsWith("/user") ? "text-primary" : "text-muted-foreground"
+                  "relative flex min-w-0 flex-col items-center justify-center gap-0.5 pb-1.5 pt-2 transition-colors",
+                  pathname.startsWith("/user/profile") ||
+                    pathname.startsWith("/user/organizations") ||
+                    pathname.startsWith("/admin") ||
+                    pathname.startsWith("/saved") ||
+                    pathname.startsWith("/liked") ||
+                    pathname.startsWith("/archived")
+                    ? "text-primary"
+                    : "text-muted-foreground"
                 )}
               >
-                <AccountAvatar size={22} />
-                <span className="text-[10px] font-semibold">Profile</span>
+                <span className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full ring-1 ring-border">
+                  <AccountAvatar size={20} />
+                </span>
+                <span className="max-w-full truncate px-0.5 text-[10px] font-semibold">Profile</span>
               </button>
             </AccountMenu>
           ) : (
-            <MobileNavItem icon={UserRound} label="Sign in" href="/login" active={false} />
+            <MobileNavItem icon={UserRound} label="Profile" href="/login" active={false} />
           )}
         </div>
       </nav>

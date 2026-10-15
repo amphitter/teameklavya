@@ -16,6 +16,7 @@ const { optionalUser, requireAuth } = require("../middleware/auth.middleware");
 
 router.get("/me/social", requireAuth, userController.getMySocial);
 router.put("/me/social", requireAuth, userController.updateMySocial);
+router.put("/me/discovery-privacy", requireAuth, userController.updateDiscoveryPrivacy);
 
 router.get("/suggested", requireAuth, userController.getSuggestedUsers);
 

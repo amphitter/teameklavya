@@ -1,17 +1,11 @@
 /**
- * Socket.IO authentication middleware (Part 4, Phase 2 — spec §80).
- * Identity is ALWAYS derived from the JWT in the handshake — a client-sent
- * userId is never trusted. Suspended accounts are blocked here too,
- * consistent with the HTTP requireAuth middleware (Part 3, Phase 10).
+ * Socket.IO authentication middleware — Trust & Safety hardened.
+ * Identity is ALWAYS derived from the JWT in the handshake.
+ * Suspended/banned accounts blocked, tokenVersion revocation enforced.
  */
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
 
-/**
- * Wire with: io.use(socketAuth).
- * Expects handshake auth: { token: "<jwt>" }.
- * On success: socket.data.user = { id }. On failure: structured error + disconnect.
- */
 async function socketAuth(socket, next) {
   try {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
@@ -28,15 +22,27 @@ async function socketAuth(socket, next) {
       return next(new Error(JSON.stringify({ code: "AUTH_FAILED", message: "Invalid token type" })));
     }
 
-    const user = await User.findById(decoded.id).select("suspendedAt").lean();
+    const user = await User.findById(decoded.id).select("suspendedAt suspensionExpiresAt bannedAt banReason tokenVersion").lean();
     if (!user) {
       return next(new Error(JSON.stringify({ code: "AUTH_FAILED", message: "Account no longer exists" })));
     }
+    if (user.bannedAt) {
+      return next(new Error(JSON.stringify({ code: "NOT_AUTHORIZED", message: user.banReason ? `Banned: ${user.banReason}` : "Account banned" })));
+    }
     if (user.suspendedAt) {
-      return next(new Error(JSON.stringify({ code: "NOT_AUTHORIZED", message: "Your account has been suspended" })));
+      if (user.suspensionExpiresAt && new Date(user.suspensionExpiresAt).getTime() < Date.now()) {
+        // expired suspension - allow, cleanup job will clear
+      } else {
+        return next(new Error(JSON.stringify({ code: "NOT_AUTHORIZED", message: "Your account has been suspended" })));
+      }
+    }
+    if (decoded.tokenVersion !== undefined && user.tokenVersion !== undefined) {
+      if (decoded.tokenVersion !== user.tokenVersion) {
+        return next(new Error(JSON.stringify({ code: "AUTH_FAILED", message: "Session revoked" })));
+      }
     }
 
-    socket.data.user = { id: String(decoded.id) };
+    socket.data.user = { id: String(decoded.id), tokenVersion: decoded.tokenVersion };
     next();
   } catch (error) {
     next(new Error(JSON.stringify({ code: "INTERNAL", message: "Authentication check failed" })));

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { Compass } from "lucide-react";
-import { NotificationBell } from "@/components/notifications/notification-bell";
+import { MessagesNavLink } from "@/components/shell/messages-link";
 import { useSessionUser } from "@/components/shell/use-session-user";
+import { Logo } from "@/components/logo";
 
 /**
  * Feed top bar — phones only, on the news feed.
@@ -73,25 +74,18 @@ export function FeedTopBar() {
           aria-label="EventHub home"
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/brand/eventhub-logo-plain.png"
-            alt="EventHub"
-            width={488}
-            height={128}
-            className="h-7 w-auto max-w-full select-none"
-            draggable={false}
-          />
+          <Logo size={28} />
         </Link>
 
-        {/* RIGHT — notifications only.
-            The account avatar was removed from this bar at the product owner's
-            request (it duplicated the Profile item in the bottom nav, which is
-            already wrapped in the account menu, so nothing became unreachable:
-            theme, settings and log out are still one tap away, one row lower). */}
+        {/* RIGHT — Inbox at topmost right corner, replacing the alert/bell.
+            The bell used to live here, but per latest product ask the Inbox
+            (Messages) is the primary top-right action, with its unread badge.
+            Profile avatar lives in the bottom nav (where Inbox used to be) and
+            opens the full account menu (Profile, My Organizations, Organizer
+            Dashboard, etc.). */}
         {ready && user ? (
           <div className="flex shrink-0 items-center">
-            <NotificationBell />
+            <MessagesNavLink />
           </div>
         ) : (
           <Link

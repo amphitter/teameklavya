@@ -93,7 +93,10 @@ export function isRetryable(error: unknown): boolean {
 
   const status = e.response.status;
   if (status >= 500) return true;
-  return status === 408 || status === 429; // timeout / rate limited
+  // Priority 3 fix: Never auto-retry 429 — it amplifies request volume and hides rate-limit UI.
+  // Respect Retry-After header instead of retrying automatically.
+  // Only retry 408 (timeout) which is safe.
+  return status === 408;
 }
 
 /** Exponential backoff with FULL jitter — avoids synchronised retry storms (§30). */

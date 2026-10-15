@@ -1,22 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { useEffect, useState, useRef } from "react";
 import { api } from "@/utils/api";
+import { queryCache, dedupedFetch, keyToString } from "@/lib/query";
 
 export interface SessionUser {
   _id?: string;
+  id?: string;
   firstName?: string;
   lastName?: string;
   email?: string;
   username?: string;
   verified?: boolean;
+  emailVerified?: boolean;
   role?: string;
+  isSuperAdmin?: boolean;
   profile?: {
     avatar?: string;
     coverImage?: string;
-    /* The canonical crop + asset version (§6, §27). The shell needs the
-       version: without it a replaced photo would stay cached in the header. */
     avatarVersion?: number;
     coverVersion?: number;
     coverPosition?: number;
@@ -31,20 +32,6 @@ export interface SessionUser {
   };
 }
 
-/**
- * The stored session user arrives from /auth/login, which returns the id as
- * `id` — while /auth/me returns `_id`. Consumers throughout the app read
- * `_id`, so before this normalisation the session id was `undefined` for the
- * whole session.
- *
- * That broke every ownership comparison in the app. The visible symptom was
- * messaging: `mine` was always false, so no message ever rendered as sent and
- * the sent/received styling collapsed into one alignment.
- *
- * Normalising here — at the single boundary where the session is read — fixes
- * it once for every consumer, rather than patching each of the ~36 sites that
- * read `user._id` and leaving the next one to be written wrong again.
- */
 function normalizeUser(raw: unknown): SessionUser | null {
   if (!raw || typeof raw !== "object") return null;
   const u = raw as Record<string, unknown>;
@@ -54,33 +41,8 @@ function normalizeUser(raw: unknown): SessionUser | null {
   } as SessionUser;
 }
 
-/**
- * Reads the session (token + role + user) from localStorage.
- * Re-syncs when the tab regains focus or the route changes,
- * so login/logout in another tab is reflected.
- */
-/**
- * Session-changed event.
- *
- * WHY A CUSTOM EVENT AND NOT JUST localStorage
- *   The hook used to re-read the session only on `focus` and on a route
- *   change. So after editing your profile the header avatar, the nav avatar,
- *   your post author labels and your own profile header all kept the OLD
- *   identity until you navigated or switched tabs — and on a single-page
- *   visit, effectively until a reload. §2-7 requires the update to propagate
- *   "everywhere without logout", so the write and the notification have to
- *   happen together, at the one place that owns the session.
- */
 export const SESSION_EVENT = "eventhub:session-changed";
 
-/**
- * Persist a saved user and tell every `useSessionUser` consumer at once.
- *
- * `patch` is merged rather than replacing the stored object: the login
- * response and `/auth/me/profile` do not return byte-identical shapes, and
- * overwriting would drop whichever fields the caller's response happened to
- * omit.
- */
 export function updateSessionUser(patch: Partial<SessionUser> | null | undefined) {
   if (typeof window === "undefined" || !patch) return;
   try {
@@ -88,63 +50,86 @@ export function updateSessionUser(patch: Partial<SessionUser> | null | undefined
     const current = raw ? JSON.parse(raw) : {};
     const merged = { ...current, ...patch };
     localStorage.setItem("user", JSON.stringify(merged));
+    // Also update query cache so deduped session query stays fresh
+    const cacheKey = keyToString(["session"]);
+    const existing = queryCache.get(cacheKey)?.data as any;
+    if (existing?.user) {
+      queryCache.setData(cacheKey, { ...existing, user: { ...existing.user, ...patch } });
+    }
     window.dispatchEvent(new Event(SESSION_EVENT));
   } catch {
-    /* storage unavailable — the next focus sync will pick it up */
+    /* storage unavailable */
   }
 }
 
 /**
- * One identity refresh per page load, for sessions stored without a profile.
- *
- * The session is the ONLY identity the shell reads, and it is written from
- * whichever endpoint signed the user in. A payload without `profile` therefore
- * means initials in the header for someone who has a photo — and since nothing
- * ever refetched it, that lasted the entire session (and every new session
- * signed in through the same path).
- *
- * Two guards keep this cheap: it runs at most once per page load, and only
- * when the stored copy has no profile at all (a healed session stops asking).
- * It is fired after the first paint, so it adds no wait before the page's own
- * requests (Part 11 §2) — the stored identity renders immediately, and this
- * only corrects it.
+ * One canonical identity refresh per session token when the cached profile or
+ * backend-derived Super Admin UI hint is missing. Uses dedupedFetch so
+ * concurrent callers share one network round trip (Priority 2 fix).
  */
+let profileSyncToken: string | null = null;
 let profileSync: Promise<void> | null = null;
+let lastSyncTime = 0;
+const SYNC_THROTTLE_MS = 5 * 60 * 1000; // 5 min throttle for focus sync
 
-function syncMissingProfile() {
-  if (profileSync) return profileSync;
+function syncCanonicalUser(force = false) {
+  const token = localStorage.getItem("token");
+  if (!token) return Promise.resolve();
+  // Throttle unless forced (e.g., profile missing)
+  if (!force && Date.now() - lastSyncTime < SYNC_THROTTLE_MS) {
+    return Promise.resolve();
+  }
+  if (profileSync && profileSyncToken === token) return profileSync;
+
+  profileSyncToken = token;
+  const cacheKey = keyToString(["session"]);
+
   profileSync = (async () => {
     try {
-      const token = localStorage.getItem("token");
-      if (!token) return;
-      const res = await api.get("/auth/me");
-      const fresh = res?.data?.user || res?.data;
-      if (fresh?.profile) updateSessionUser({ profile: fresh.profile, verified: fresh.verified });
+      // Use dedupedFetch so multiple components mounting at once share one request
+      const data = await dedupedFetch<{ user?: any }>(cacheKey, "/auth/me", { method: "GET" } as any);
+      const fresh = (data as any)?.user || data;
+      if (!fresh || localStorage.getItem("token") !== token) return;
+      lastSyncTime = Date.now();
+      // Update cache
+      queryCache.setData(cacheKey, data);
+      updateSessionUser({
+        _id: fresh._id || fresh.id,
+        id: fresh.id || fresh._id,
+        firstName: fresh.firstName,
+        lastName: fresh.lastName,
+        email: fresh.email,
+        username: fresh.username,
+        role: fresh.role,
+        profile: fresh.profile,
+        verified: fresh.verified,
+        emailVerified: fresh.emailVerified,
+        isSuperAdmin: fresh.isSuperAdmin === true,
+      });
     } catch {
-      /* offline, expired token, or an old backend — the stored copy still
-         renders, and the next real login carries the profile itself */
+      /* offline, expired token, or rate-limited — cached identity still renders */
     }
   })();
   return profileSync;
 }
 
 export function useSessionUser() {
-  const pathname = usePathname();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const lastFocusSyncRef = useRef(0);
 
   useEffect(() => {
-    const sync = () => {
+    const syncFromStorage = () => {
       try {
         const token = localStorage.getItem("token");
         const storedRole = localStorage.getItem("role");
         const raw = localStorage.getItem("user");
         const stored = token && raw ? normalizeUser(JSON.parse(raw)) : null;
         setUser(stored);
-        /* Stored identity is incomplete → ask the server once, in the
-           background. Never awaited: the shell renders from storage first. */
-        if (stored && !stored.profile) void syncMissingProfile();
+        if (stored && (!stored.profile || typeof stored.isSuperAdmin !== "boolean")) {
+          void syncCanonicalUser(true); // force when profile missing
+        }
         setRole(token ? storedRole : null);
       } catch {
         setUser(null);
@@ -153,18 +138,29 @@ export function useSessionUser() {
         setReady(true);
       }
     };
-    sync();
-    window.addEventListener("focus", sync);
-    // Identity changed in this tab (e.g. a profile save) — re-read immediately
-    // so the header, nav and avatars update on the same frame as the save.
-    window.addEventListener(SESSION_EVENT, sync);
-    return () => {
-      window.removeEventListener("focus", sync);
-      window.removeEventListener(SESSION_EVENT, sync);
-    };
-  }, [pathname]);
 
-  return { user, role, ready };
+    const onFocus = () => {
+      // Throttle focus sync to avoid hammering /auth/me on tab switches
+      if (Date.now() - lastFocusSyncRef.current < SYNC_THROTTLE_MS) {
+        syncFromStorage();
+        return;
+      }
+      lastFocusSyncRef.current = Date.now();
+      syncFromStorage();
+      // Only revalidate from server if throttle window passed
+      void syncCanonicalUser(false);
+    };
+
+    syncFromStorage();
+    window.addEventListener("focus", onFocus);
+    window.addEventListener(SESSION_EVENT, syncFromStorage);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener(SESSION_EVENT, syncFromStorage);
+    };
+  }, []); // No pathname dependency — prevents refetch on every route change (Priority 2)
+
+  return { user, role, ready, refresh: () => syncCanonicalUser(true) };
 }
 
 export function initialsOf(user: SessionUser | null): string {

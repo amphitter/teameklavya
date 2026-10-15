@@ -15,14 +15,14 @@
  * thread implementation, not two.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ThreadPanel } from "@/components/messages/thread-panel";
 import { ConversationList } from "@/components/messages/conversation-list";
 import { useDmSocket, setActiveConversation } from "@/hooks/use-dm-socket";
 import { useInbox, useUnread } from "@/hooks/use-messages";
 import { TeamCreateSheet } from "@/components/messages/team-create-sheet";
-import { useEffect } from "react";
+import { useChatViewport } from "@/hooks/use-chat-viewport";
 
 export default function ConversationPage() {
   const params = useParams<{ id: string }>();
@@ -33,6 +33,7 @@ export default function ConversationPage() {
   const { connection } = useDmSocket();
   const { rows, loading, error, hasMore, loadMore, refresh } = useInbox("all");
   const { archived: unreadArchived } = useUnread();
+  const viewportRef = useChatViewport<HTMLDivElement>();
 
   /* Tell the socket router which conversation is on screen. This is the ONE
      piece of state that decides whether an incoming `dm:message` updates the
@@ -43,29 +44,21 @@ export default function ConversationPage() {
   }, [conversationId]);
 
   const onBack = useCallback(() => {
-    // `back()` preserves the inbox's scroll position and filter; pushing
-    // "/messages" would reset both.
-    router.back();
+    // If history is empty (e.g. opened from notification / external link),
+    // back() would leave the app. Push to inbox instead.
+    if (typeof window !== "undefined" && window.history.length <= 1) {
+      router.push("/messages");
+    } else {
+      router.back();
+    }
   }, [router]);
 
   const fallback = rows.find((r) => r._id === conversationId) ?? null;
 
   return (
     <div
-      /* The nav is hidden on this route (see app-shell), so only the 3.5rem
-       * header is subtracted — at every width, not just lg.
-       *
-       * The safe-area inset is NOT applied here: the composer reserves it
-       * itself with `max(keyboard, safe-area)`. Adding it here as well would
-       * double-count and float the composer a home-bar above the bottom
-       * whenever the keyboard is closed (§2, §18). */
-      /* A phone chat has NO shell chrome at all: the top bar is desktop-only
-       * and this route hides the bottom nav, so the thread owns the whole
-       * viewport. From lg the header returns and is subtracted again. */
-      /* `overscroll-none` stops iOS rubber-banding the whole document sideways
-         or vertically behind the chat: the only thing that should ever move is
-         the message history, which carries its own `overscroll-contain`. */
-      className="mx-auto flex h-[100vh] h-[100dvh] w-full max-w-[1200px] flex-col overflow-hidden overscroll-none 2xl:max-w-[1440px] lg:h-[calc(100dvh-3.5rem)]"
+      ref={viewportRef}
+      className="chat-viewport mx-auto flex w-full flex-col overflow-hidden overscroll-none bg-surface-container-lowest lg:h-[calc(100dvh-3.5rem)]"
     >
       <div className="flex min-h-0 flex-1 overflow-hidden bg-surface-container-lowest lg:my-3 lg:rounded-2xl lg:border lg:border-outline-variant lg:elevation-card">
         {/* Desktop only: the inbox stays visible beside the open thread. */}

@@ -1,5 +1,7 @@
 const Notification = require("../models/notification.model");
 const User = require("../models/user.model");
+const { NotificationRepository } = require("../repositories/notification.repository");
+const { isCursorRequest, parseLimit } = require("../repositories/cursor");
 
 const POPULATE = [
   { path: "actor", select: "firstName lastName username profile" },
@@ -10,24 +12,44 @@ const POPULATE = [
   { path: "conversation", select: "_id" },
 ];
 
-// GET /api/notifications?page=1
+// GET /api/notifications?limit=20&cursor=… (legacy `page` remains supported)
 exports.getNotifications = async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const filter = { user: req.user.id };
+    const unreadQuery = Notification.countDocuments({ ...filter, read: false });
 
+    if (isCursorRequest(req.query)) {
+      const [page, unread] = await Promise.all([
+        NotificationRepository.listForUser({
+          userId: req.user.id,
+          limit: req.query.limit,
+          cursor: req.query.cursor,
+        }),
+        unreadQuery,
+      ]);
+      return res.json({
+        success: true,
+        notifications: page.items,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+        unreadCount: unread,
+      });
+    }
+
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = parseLimit(req.query.limit, { def: 20, max: 50 });
     const [items, total, unread] = await Promise.all([
-      Notification.find({ user: req.user.id })
-        .sort({ createdAt: -1 })
+      Notification.find(filter)
+        .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .populate(POPULATE)
         .lean(),
-      Notification.countDocuments({ user: req.user.id }),
-      Notification.countDocuments({ user: req.user.id, read: false }),
+      Notification.countDocuments(filter),
+      unreadQuery,
     ]);
 
-    res.json({ success: true, notifications: items, page, hasMore: page * limit < total, unreadCount: unread });
+    return res.json({ success: true, notifications: items, page, hasMore: page * limit < total, unreadCount: unread });
   } catch (error) {
     console.error("Get notifications error:", error.message);
     res.status(500).json({ success: false, message: "Failed to load notifications" });

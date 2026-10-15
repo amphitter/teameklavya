@@ -81,6 +81,7 @@ const EVENTS = {
   S_DM_READ: "dm:read", // Part 10 { conversationId, readerId, at }
   S_DM_DELETED: "dm:deleted", // Part 10 { conversationId, messageId }
   S_DM_PRESENCE: "dm:presence", // Part 11 { userId, online, lastSeenAt }
+  S_DM_DELIVERED: "dm:delivered", // Low-latency upgrade { conversationId, messageIds[], at, recipientId }
 
   S_ERROR: "error", // { code, message } — structured, never stack traces (§81)
 };

@@ -21,7 +21,7 @@ interface ShareKitProps {
 export function ShareKit({ event, open, onOpenChange }: ShareKitProps) {
   const [copied, setCopied] = useState<string | null>(null);
   const url = typeof window !== "undefined" ? `${window.location.origin}/events/${event.slug}` : `https://eventhub.app/events/${event.slug}`;
-  const icsUrl = `${process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com"}/api/events/${event._id}/ics`;
+  const icsUrl = `${process.env.NEXT_PUBLIC_API_URL || "https://api.teameklavya.xyz"}/api/events/${event._id}/ics`;
 
   const copy = async (text: string, key: string) => {
     try {

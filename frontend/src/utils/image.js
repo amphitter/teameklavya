@@ -11,7 +11,7 @@ export const getImageUrl = (imagePath) => {
     const baseURL =
       process.env.NEXT_PUBLIC_API_URL === "same-origin"
         ? ""
-        : process.env.NEXT_PUBLIC_API_URL || "https://teameklavya.onrender.com";
+        : process.env.NEXT_PUBLIC_API_URL || "https://api.teameklavya.xyz";
     return `${baseURL}${imagePath}`;
   }
   return imagePath;

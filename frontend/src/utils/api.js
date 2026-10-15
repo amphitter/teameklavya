@@ -14,7 +14,7 @@ import axios from "axios";
 export const SAME_ORIGIN = process.env.NEXT_PUBLIC_API_URL === "same-origin";
 
 const RAW = process.env.NEXT_PUBLIC_API_URL;
-const FALLBACK = "https://teameklavya.onrender.com";
+const FALLBACK = "https://api.teameklavya.xyz";
 
 const API_BASE = SAME_ORIGIN ? "/api" : RAW ? `${RAW}/api` : `${FALLBACK}/api`;
 

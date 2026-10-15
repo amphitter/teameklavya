@@ -244,7 +244,7 @@
 ## Manual Deployment Steps
 
 - **CRON_SECRET:** Set in Render env `CRON_SECRET=random-32-chars` for external cron endpoints.
-- **External cron:** Setup Upstash QStash or Render cron or GitHub Actions hitting `POST https://teameklavya.onrender.com/api/cron/reminders` and `POST /api/cron/weekly-digest` with header `x-cron-secret: $CRON_SECRET` every 15min and weekly Monday 9am.
+- **External cron:** Setup Upstash QStash or Render cron or GitHub Actions hitting `POST https://api.teameklavya.xyz/api/cron/reminders` and `POST /api/cron/weekly-digest` with header `x-cron-secret: $CRON_SECRET` every 15min and weekly Monday 9am.
 - **Weekly digest:** Scheduler runs hourly check Monday 9am UTC, but external cron more reliable. Can also manually trigger via POST /api/cron/weekly-digest.
 - **PWA:** Manifest and sw.js served from /public, no extra setup. Test offline via Chrome DevTools Application > Service Workers.
 - **Funnel:** POST /api/analytics/funnel accepts batch, GET /api/analytics/funnel admin only shows last24h byStep.

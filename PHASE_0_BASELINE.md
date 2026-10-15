@@ -17,7 +17,7 @@
 
 ## 1. Architecture Map (Verified)
 
-**Frontend:** Next.js 15.5.9, React 19.2.0, Tailwind 4.1.14, Radix UI, Framer Motion, Sonner, Zustand? Actually no zustand, uses Context + hooks. App Router with (app) authenticated shell and admin layout. ThemeContext toggles html.dark class, persisted localStorage, system preference, inline pre-paint script in layout.tsx prevents FOUC. API via axios utils/api.js with same-origin proxy support (BACKEND_PROXY_URL) to avoid CORS, fallback https://teameklavya.onrender.com. Socket.IO client for realtime.
+**Frontend:** Next.js 15.5.9, React 19.2.0, Tailwind 4.1.14, Radix UI, Framer Motion, Sonner, Zustand? Actually no zustand, uses Context + hooks. App Router with (app) authenticated shell and admin layout. ThemeContext toggles html.dark class, persisted localStorage, system preference, inline pre-paint script in layout.tsx prevents FOUC. API via axios utils/api.js with same-origin proxy support (BACKEND_PROXY_URL) to avoid CORS, fallback https://api.teameklavya.xyz. Socket.IO client for realtime.
 
 **Backend:** Express 5.1.0, Mongoose 8.19.0, Node >=20 <21, JWT 9.0.2, bcryptjs, passport-google-oauth20, helmet, cors, compression, express-rate-limit, express-validator, multer, cloudinary, qrcode, nodemailer+resend, socket.io 4.8.1. Entry server.js: dotenv fail-fast JWT_SECRET+MONGO_URI, trust proxy 1, helmet, request-context (requestId), compression except /uploads, global rate limits, CORS from FRONTEND_URL, cache policy (public GET 30s SWR 120 if anonymous else private no-store), body parsers 1mb/2mb, static /uploads, cookie-session for OAuth, passport, route mounting /api/*, health checks, error normalizer, 404, uploads dir ensure, httpServer + Socket.IO CORS allowedOrigins, realtime.service.init(io), listen 0.0.0.0 PORT 5000, schedulers reminder 15min + enforcement-expiry 5min.
 
@@ -274,7 +274,7 @@
 ## 10. Verified Facts, Assumptions and Unresolved Questions
 
 **Verified Facts:**
-- Repository is Next.js 15 + React 19 + Tailwind 4 frontend, Express 5 + Mongoose 8 + Socket.IO backend, MongoDB primary, Render backend https://teameklavya.onrender.com, Vercel frontend
+- Repository is Next.js 15 + React 19 + Tailwind 4 frontend, Express 5 + Mongoose 8 + Socket.IO backend, MongoDB primary, Render backend https://api.teameklavya.xyz, Vercel frontend
 - ThemeContext toggles html.dark, persisted localStorage, system preference, inline pre-paint script prevents FOUC
 - 42 models, 24 controllers, 15+ route groups, 100+ endpoints, 62 frontend routes
 - Organization model has logo/logoUrl, cover/coverUrl duplicate fields mapped logo||logoUrl

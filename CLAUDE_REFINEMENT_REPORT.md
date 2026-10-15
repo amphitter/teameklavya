@@ -258,7 +258,7 @@
 
 - **No destructive migrations:** None required. No schema changes.
 - **Env vars:** Optional `CRON_SECRET` for external cron endpoint. If not set, endpoint open in dev, warns in prod. Set in Render: `CRON_SECRET=random-32-chars`.
-- **External cron setup:** Create Upstash QStash or Render cron job or GitHub Actions cron hitting `POST https://teameklavya.onrender.com/api/cron/reminders` with header `x-cron-secret: $CRON_SECRET` every 15min. Idempotent safe.
+- **External cron setup:** Create Upstash QStash or Render cron job or GitHub Actions cron hitting `POST https://api.teameklavya.xyz/api/cron/reminders` with header `x-cron-secret: $CRON_SECRET` every 15min. Idempotent safe.
 - **.ics:** No setup, works immediately via GET /api/events/:id/ics.
 - **Offline QR:** No setup, caches automatically when user visits /user/registrations.
 - **Build:** `cd frontend && npm install && npm run build` — Pass 42 routes 102kB.

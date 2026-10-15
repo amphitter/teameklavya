@@ -62,7 +62,7 @@
 - **Search:** Global search bar live dropdown (`GET /api/search?type=all` debounced 350ms) + full `/search` page with tabs All/Events/People/Organizations, trending-first when q<2, cursor pagination for organizations (`nextCursor`, `hasMore`), post viewer sheet preserves scroll.
 - **Trust & Safety:** Reports (`contentReport.model.js`, `report.model.js`), moderation cases (`moderationCase.model.js`), audit logs (`moderationAuditLog.model.js`, `auditLog.model.js`), enforcement actions (`enforcementAction.model.js` with expiry, appeal), IP restrictions (`ipRestriction.model.js`), blocks (`block.model.js`), onboarding trust safety (`onboarding.controller.js`, `trust-safety.controller.js`), rate limiting, idempotency, distributed locks via Redis/Upstash.
 
-**Hosting:** Backend Render `https://teameklavya.onrender.com` (verified via `frontend/src/utils/api.js` FALLBACK), Frontend Vercel. Health check `GET /api/health` returns status, uptime, db state.
+**Hosting:** Backend Render `https://api.teameklavya.xyz` (verified via `frontend/src/utils/api.js` FALLBACK), Frontend Vercel. Health check `GET /api/health` returns status, uptime, db state.
 
 ---
 
@@ -146,7 +146,7 @@ Browser (Next.js 15, React 19, Tailwind 4)
    │
    ├── /api/*  ──►  (if NEXT_PUBLIC_API_URL=same-origin) Next.js rewrites ──► Backend Proxy (BACKEND_PROXY_URL)
    │                                          │
-   │                                          └─► Direct: https://teameklavya.onrender.com/api/* (FALLBACK in api.js)
+   │                                          └─► Direct: https://api.teameklavya.xyz/api/* (FALLBACK in api.js)
    │
    └── Socket.IO client ──► Backend Socket.IO server (same origin via rewrites)
 
@@ -1247,8 +1247,8 @@ sequenceDiagram
 
 | Var | Purpose | Required | Consumer | Example |
 |---|---|---|---|---|
-| `NEXT_PUBLIC_API_URL` | API base, or same-origin | No (fallback https://teameklavya.onrender.com) | `utils/api.js` | `https://teameklavya.onrender.com` or `same-origin` |
-| `BACKEND_PROXY_URL` | Same-origin proxy target (server-side) | No (only if same-origin) | `next.config.ts` rewrites | `https://teameklavya.onrender.com` |
+| `NEXT_PUBLIC_API_URL` | API base, or same-origin | No (fallback https://api.teameklavya.xyz) | `utils/api.js` | `https://api.teameklavya.xyz` or `same-origin` |
+| `BACKEND_PROXY_URL` | Same-origin proxy target (server-side) | No (only if same-origin) | `next.config.ts` rewrites | `https://api.teameklavya.xyz` |
 | `NEXT_PUBLIC_SITE_URL` | Site URL for metadata | No (fallback http://localhost:3000) | `layout.tsx` metadata | `http://localhost:3000` |
 
 *Sensitive values redacted, only names and purposes documented.*
